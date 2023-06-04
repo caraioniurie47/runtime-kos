@@ -40,7 +40,7 @@ void* SystemNative_LoadLibrary(const char* filename)
 
 void* SystemNative_GetLoadLibraryError(void)
 {
-    return dlerror();
+    return (void*)dlerror();
 }
 
 void* SystemNative_GetProcAddress(void* handle, const char* symbol)

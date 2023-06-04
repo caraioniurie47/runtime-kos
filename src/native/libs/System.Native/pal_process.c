@@ -142,6 +142,7 @@ static int compare_groups(const void * a, const void * b)
 
 static int SetGroups(uint32_t* userGroups, int32_t userGroupsLength, uint32_t* processGroups)
 {
+#if HAVE_SETGROUPS_GRPH
 #if defined(__linux__) || defined(TARGET_WASM)
     size_t platformGroupsLength = Int32ToSizeT(userGroupsLength);
 #else // BSD
@@ -189,6 +190,10 @@ static int SetGroups(uint32_t* userGroups, int32_t userGroupsLength, uint32_t* p
     }
 
     return rv;
+#else // !HAVE_SETGROUPS_GRPH
+    errno = ENOTSUP;
+    return -1;
+#endif
 }
 
 typedef void (*VoidIntFn)(int);
@@ -677,6 +682,7 @@ void SystemNative_SysLog(SysLogPriority priority, const char* message, const cha
 
 int32_t SystemNative_WaitIdAnyExitedNoHangNoWait(void)
 {
+#if HAVE_WAITID_SYSWAITH
     siginfo_t siginfo;
     memset(&siginfo, 0, sizeof(siginfo));
     int32_t result;
@@ -696,6 +702,10 @@ int32_t SystemNative_WaitIdAnyExitedNoHangNoWait(void)
         result = 0;
     }
     return result;
+#else // !HAVE_WAITID_SYSWAITH
+    errno = ECHILD;
+    return 0;
+#endif
 }
 
 int32_t SystemNative_WaitPidExitedNoHang(int32_t pid, int32_t* exitCode)

@@ -7,10 +7,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#if defined(AF_PACKET)
+#if defined(AF_PACKET) && !defined(__KOS__) // force AF_LINK on KOS
 #if HAVE_NETPACKET_PACKET_H
 #include <netpacket/packet.h>
-#else
+#elif HAVE_LINUX_IF_PACKET_H
 #include <linux/if_packet.h>
 #endif
 #if HAVE_NET_IF_ARP_H
@@ -28,7 +28,7 @@
 
 uint16_t MapHardwareType(uint16_t nativeType)
 {
-#if defined(AF_PACKET)
+#if defined(AF_PACKET) && !defined(__KOS__) // force AF_LINK on KOS
     switch (nativeType)
     {
         case ARPHRD_ETHER:

@@ -12,28 +12,55 @@
 // Check if we should use getmntinfo or /proc/mounts
 #if HAVE_MNTINFO
 #include <sys/mount.h>
+#if !HAVE_STATFS_STRUCT && !HAVE_STATVFS_STRUCT
+#error Platform not supported
+#endif
 #else
-#include <sys/statfs.h>
 #if HAVE_SYS_MNTENT_H
 #include <sys/mntent.h>
 #include <sys/mnttab.h>
-#include <sys/statvfs.h>
-#else
+#elif HAVE_MNTENT_H
 #include <mntent.h>
+#elif !defined(__KOS__) // TODO-KOS: MountPoints enum
+#error Platform not supported
 #endif
+
+#if !HAVE_NON_LEGACY_STATFS && !HAVE_STATVFS_STRUCT
+#error Platform not supported
+#endif
+
+#if HAVE_STATFS_STRUCT
+#if HAVE_STATFS_STRUCT_MOUNT_H // BSD, Apple
+#include <sys/param.h>
+#include <sys/mount.h>
+#elif HAVE_STATFS_STRUCT_VFS_H // Linux
+#include <sys/vfs.h>
+#elif HAVE_STATFS_STRUCT_STATFS_H
+#include <sys/statfs.h>
+#endif
+#endif
+
+#if HAVE_STATVFS_STRUCT
+#if HAVE_STATVFS_STRUCT_MOUNT_H
+#include <sys/mount.h>
+#elif HAVE_STATVFS_STRUCT_STATVFS_H
+#include <sys/statvfs.h>
+#endif
+#endif
+
 #define STRING_BUFFER_SIZE 8192
 
 // Android does not define MNTOPT_RO
 #ifndef MNTOPT_RO
 #define MNTOPT_RO "r"
-#endif
+#endif // MNTOPT_RO
 #endif
 
 int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
 {
 #if HAVE_MNTINFO
     // getmntinfo returns pointers to OS-internal structs, so we don't need to worry about free'ing the object
-#if HAVE_STATFS
+#if HAVE_STATFS_STRUCT
     struct statfs* mounts = NULL;
 #else
     struct statvfs* mounts = NULL;
@@ -68,7 +95,7 @@ int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
     return result;
 }
 
-#else
+#elif HAVE_MNTENT_H
     int result = -1;
     FILE* fp = setmntent("/proc/mounts", MNTOPT_RO);
     if (fp != NULL)
@@ -91,6 +118,10 @@ int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
     return result;
 }
 
+#else
+    // TODO-KOS: MountPoints enum
+    return 0;
+}
 #endif
 
 int32_t SystemNative_GetSpaceInfoForMountPoint(const char* name, MountPointInformation* mpi)
@@ -148,8 +179,10 @@ SystemNative_GetFormatInfoForMountPoint(const char* name, char* formatNameBuffer
     {
 
 #if HAVE_STATFS_FSTYPENAME || HAVE_STATVFS_FSTYPENAME
-#ifdef VFS_NAMELEN
+#if defined(VFS_NAMELEN)
         if (bufferLength < VFS_NAMELEN)
+#elif defined(_VFS_NAMELEN)
+        if (bufferLength < _VFS_NAMELEN)
 #else
         if (bufferLength < MFSNAMELEN)
 #endif

@@ -98,7 +98,7 @@ uint64_t SystemNative_GetTimestamp(void)
 
 int64_t SystemNative_GetBootTimeTicks(void)
 {
-#if defined(TARGET_LINUX) || defined(TARGET_ANDROID)
+#if (defined(TARGET_LINUX) || defined(TARGET_ANDROID)) && !defined(__KOS__) // TODO-KOS: CLOCK_BOOTTIME is not supported
     struct timespec ts;
 
     int result = clock_gettime(CLOCK_BOOTTIME, &ts);

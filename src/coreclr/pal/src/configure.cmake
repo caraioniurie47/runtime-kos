@@ -20,6 +20,14 @@ elseif(NOT CLR_CMAKE_TARGET_FREEBSD AND NOT CLR_CMAKE_TARGET_NETBSD)
   set(CMAKE_REQUIRED_DEFINITIONS "-D_BSD_SOURCE -D_SVID_SOURCE -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L")
 endif()
 
+if(CLR_CMAKE_TARGET_KOS)
+  set(CMAKE_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS} -D_GNU_SOURCE -D_NETBSD_SOURCE")
+  if(CLR_CMAKE_TARGET_ARCH_ARM64)
+    set(CMAKE_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS} -D__aarch64__")
+  endif(CLR_CMAKE_TARGET_ARCH_ARM64)
+  list(INSERT CMAKE_REQUIRED_INCLUDES 0 ${CLR_SRC_NATIVE_DIR}/external/kos)
+endif(CLR_CMAKE_TARGET_KOS)
+
 if(CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_ANDROID)
   set(CMAKE_RT_LIBS rt)
 elseif(CLR_CMAKE_TARGET_FREEBSD OR CLR_CMAKE_TARGET_NETBSD)
@@ -27,6 +35,10 @@ elseif(CLR_CMAKE_TARGET_FREEBSD OR CLR_CMAKE_TARGET_NETBSD)
 else()
   set(CMAKE_RT_LIBS "")
 endif()
+
+if(CLR_CMAKE_TARGET_KOS)
+  set(CMAKE_RT_LIBS "")
+endif(CLR_CMAKE_TARGET_KOS)
 
 list(APPEND CMAKE_REQUIRED_DEFINITIONS -D_FILE_OFFSET_BITS=64)
 
@@ -48,6 +60,8 @@ check_include_files(semaphore.h HAVE_SEMAPHORE_H)
 check_include_files(sys/prctl.h HAVE_PRCTL_H)
 check_include_files("sys/auxv.h;asm/hwcap.h" HAVE_AUXV_HWCAP_H)
 check_include_files("sys/ptrace.h" HAVE_SYS_PTRACE_H)
+check_include_files(sys/syscall.h HAVE_SYS_SYSCALL_H)
+check_include_files(strings.h HAVE_STRINGS_H)
 check_symbol_exists(getauxval sys/auxv.h HAVE_GETAUXVAL)
 
 set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_DL_LIBS})
@@ -92,16 +106,18 @@ elseif (HAVE_PTHREAD_IN_LIBC)
   set(PTHREAD_LIBRARY c)
 endif()
 
-check_library_exists(${PTHREAD_LIBRARY} pthread_suspend "" HAVE_PTHREAD_SUSPEND)
-check_library_exists(${PTHREAD_LIBRARY} pthread_suspend_np "" HAVE_PTHREAD_SUSPEND_NP)
-check_library_exists(${PTHREAD_LIBRARY} pthread_continue "" HAVE_PTHREAD_CONTINUE)
-check_library_exists(${PTHREAD_LIBRARY} pthread_continue_np "" HAVE_PTHREAD_CONTINUE_NP)
-check_library_exists(${PTHREAD_LIBRARY} pthread_resume_np "" HAVE_PTHREAD_RESUME_NP)
-check_library_exists(${PTHREAD_LIBRARY} pthread_attr_get_np "" HAVE_PTHREAD_ATTR_GET_NP)
-check_library_exists(${PTHREAD_LIBRARY} pthread_getattr_np "" HAVE_PTHREAD_GETATTR_NP)
-check_library_exists(${PTHREAD_LIBRARY} pthread_getcpuclockid "" HAVE_PTHREAD_GETCPUCLOCKID)
-check_library_exists(${PTHREAD_LIBRARY} pthread_sigqueue "" HAVE_PTHREAD_SIGQUEUE)
-check_library_exists(${PTHREAD_LIBRARY} pthread_getaffinity_np "" HAVE_PTHREAD_GETAFFINITY_NP)
+if (HAVE_LIBPTHREAD OR HAVE_PTHREAD_IN_LIBC)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_suspend "" HAVE_PTHREAD_SUSPEND)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_suspend_np "" HAVE_PTHREAD_SUSPEND_NP)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_continue "" HAVE_PTHREAD_CONTINUE)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_continue_np "" HAVE_PTHREAD_CONTINUE_NP)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_resume_np "" HAVE_PTHREAD_RESUME_NP)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_attr_get_np "" HAVE_PTHREAD_ATTR_GET_NP)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_getattr_np "" HAVE_PTHREAD_GETATTR_NP)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_getcpuclockid "" HAVE_PTHREAD_GETCPUCLOCKID)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_sigqueue "" HAVE_PTHREAD_SIGQUEUE)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_getaffinity_np "" HAVE_PTHREAD_GETAFFINITY_NP)
+endif()
 
 check_function_exists(sigreturn HAVE_SIGRETURN)
 check_function_exists(_thread_sys_sigreturn HAVE__THREAD_SYS_SIGRETURN)
@@ -122,7 +138,6 @@ check_function_exists(sysconf HAVE_SYSCONF)
 check_function_exists(gmtime_r HAVE_GMTIME_R)
 check_function_exists(timegm HAVE_TIMEGM)
 check_function_exists(poll HAVE_POLL)
-check_function_exists(statvfs HAVE_STATVFS)
 check_function_exists(thread_self HAVE_THREAD_SELF)
 check_function_exists(_lwp_self HAVE__LWP_SELF)
 check_function_exists(pthread_mach_thread_np HAVE_MACH_THREADS)
@@ -402,7 +417,9 @@ int main()
 }" HAVE_CLOCK_MONOTONIC)
 set(CMAKE_REQUIRED_LIBRARIES)
 
-check_library_exists(${PTHREAD_LIBRARY} pthread_condattr_setclock "" HAVE_PTHREAD_CONDATTR_SETCLOCK)
+if (HAVE_LIBPTHREAD OR HAVE_PTHREAD_IN_LIBC)
+  check_library_exists(${PTHREAD_LIBRARY} pthread_condattr_setclock "" HAVE_PTHREAD_CONDATTR_SETCLOCK)
+endif()
 
 set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_RT_LIBS})
 check_cxx_source_runs("
@@ -1286,30 +1303,77 @@ else() # Anything else is Linux
   set(HAVE_SCHED_OTHER_ASSIGNABLE 1)
 endif(CLR_CMAKE_TARGET_OSX)
 
-check_struct_has_member(
-    "struct statfs"
-    f_fstypename
-    "sys/mount.h"
-    HAVE_STATFS_FSTYPENAME)
-
-check_struct_has_member(
-    "struct statvfs"
-    f_fstypename
-    "sys/mount.h"
-    HAVE_STATVFS_FSTYPENAME)
-
 # statfs: Find whether this struct exists
-if (HAVE_STATFS_FSTYPENAME OR HAVE_STATVFS_FSTYPENAME)
-    set (STATFS_INCLUDES sys/mount.h)
+unset(STATFS_INCLUDES)
+
+check_c_source_compiles(
+    "
+    #include <sys/param.h>
+    #include <sys/mount.h>
+    int main(void)
+    {
+        struct statfs s;
+        return 0;
+    }
+    "
+    HAVE_STATFS_STRUCT_MOUNT_H)
+
+if (HAVE_STATFS_STRUCT_MOUNT_H)
+    set (STATFS_INCLUDES sys/param.h;sys/mount.h)
 else ()
-    set (STATFS_INCLUDES sys/statfs.h)
+    check_c_source_compiles(
+        "
+        #include <sys/vfs.h>
+        int main(void)
+        {
+            struct statfs s;
+            return 0;
+        }
+        "
+        HAVE_STATFS_STRUCT_VFS_H)
+
+    if (HAVE_STATFS_STRUCT_VFS_H)
+        set (STATFS_INCLUDES sys/vfs.h)
+    else ()
+        check_c_source_compiles(
+            "
+            #include <sys/statfs.h>
+            int main(void)
+            {
+                struct statfs s;
+                return 0;
+            }
+            "
+            HAVE_STATFS_STRUCT_STATFS_H)
+        
+        if (HAVE_STATFS_STRUCT_STATFS_H)
+            set (STATFS_INCLUDES sys/statfs.h)
+        endif ()
+    endif ()
 endif ()
 
-check_prototype_definition(
-    statfs
-    "int statfs(const char *path, struct statfs *buf)"
-    0
-    ${STATFS_INCLUDES}
-    HAVE_NON_LEGACY_STATFS)
+if (DEFINED STATFS_INCLUDES)
+    set (HAVE_STATFS_STRUCT 1)
+    
+    set (CMAKE_EXTRA_INCLUDE_FILES ${STATFS_INCLUDES})
+    check_type_size(
+        "struct statfs"
+        STATFS_SIZE
+        BUILTIN_TYPES_ONLY)
+    set(CMAKE_EXTRA_INCLUDE_FILES) # reset CMAKE_EXTRA_INCLUDE_FILES
+
+    check_struct_has_member(
+        "struct statfs"
+        f_fstypename
+        ${STATFS_INCLUDES}
+        HAVE_STATFS_FSTYPENAME)
+
+    check_prototype_definition(
+        statfs
+        "int statfs(const char *path, struct statfs *buf)"
+        0
+        ${STATFS_INCLUDES}
+        HAVE_NON_LEGACY_STATFS)
+endif ()
 
 configure_file(${CMAKE_CURRENT_LIST_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)

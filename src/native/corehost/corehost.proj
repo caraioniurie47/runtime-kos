@@ -76,6 +76,7 @@
       <BuildArgs Condition="'$(ConfigureOnly)' == 'true'">$(BuildArgs) -configureonly</BuildArgs>
       <BuildArgs Condition="'$(PortableBuild)' != 'true'">$(BuildArgs) -portablebuild=false</BuildArgs>
       <BuildArgs Condition="'$(KeepNativeSymbols)' != 'false'">$(BuildArgs) -keepnativesymbols</BuildArgs>
+      <BuildArgs Condition="'$(TargetsKOS)' == 'true'">$(BuildArgs) -kos</BuildArgs>
       <BuildArgs Condition="'$(CrossBuild)' == 'true'">$(BuildArgs) -cross</BuildArgs>
       <BuildArgs Condition="'$(Compiler)' != ''">$(BuildArgs) $(Compiler)</BuildArgs>
       <BuildArgs Condition="'$(CMakeArgs)' != ''">$(BuildArgs) -cmakeargs "$(CMakeArgs)"</BuildArgs>

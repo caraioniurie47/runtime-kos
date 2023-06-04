@@ -45,6 +45,9 @@ elseif(EXISTS ${CROSS_ROOTFS}/etc/tizen-release)
 elseif(EXISTS ${CROSS_ROOTFS}/boot/system/develop/headers/config/HaikuConfig.h)
   set(HAIKU 1)
   set(CLR_CMAKE_TARGET_OS haiku)
+elseif(EXISTS ${CROSS_ROOTFS}/sysroot-${CMAKE_SYSTEM_PROCESSOR}-kos)
+  set(KOS 1)
+  set(CLR_CMAKE_TARGET_OS KOS)
 endif()
 
 if(DARWIN)
@@ -88,6 +91,52 @@ if(DARWIN)
     set_cache_value(HAVE_SHM_OPEN_THAT_WORKS_WELL_ENOUGH_WITH_MMAP_EXITCODE 1)
   else()
     message(FATAL_ERROR "Arch is ${TARGET_ARCH_NAME}. Only arm64 or x64 is supported for OSX cross build!")
+  endif()
+elseif(KOS)
+  if(TARGET_ARCH_NAME MATCHES "^(arm64)$")
+    set_cache_value(FILE_OPS_CHECK_FERROR_OF_PREVIOUS_CALL 0) #TODO-KOS check on kos
+    set_cache_value(GETPWUID_R_SETS_ERRNO 0) #TODO-KOS not used in code?
+    set_cache_value(HAS_POSIX_SEMAPHORES 1) #TODO-KOS sem_init() can be used with pshared zero?
+    set_cache_value(HAVE_BROKEN_FIFO_KEVENT 1) #TODO-KOS check on kos
+    set_cache_value(HAVE_BROKEN_FIFO_SELECT 1) #TODO-KOS check on kos
+    set_cache_value(HAVE_CLOCK_MONOTONIC_COARSE 0) #TODO-KOS not POSIX?
+    set_cache_value(HAVE_CLOCK_MONOTONIC 1) #TODO-KOS check on kos
+    set_cache_value(HAVE_CLOCK_REALTIME 1) #TODO-KOS check on kos
+    set_cache_value(HAVE_CLOCK_THREAD_CPUTIME 0) #TODO-KOS not supported on KOS? unistd.h
+    set_cache_value(HAVE_CLOCK_GETTIME_NSEC_NP 0) #TODO-KOS not found in headers
+    set_cache_value(HAVE_COMPATIBLE_ACOS 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_ASIN 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_ATAN2 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_EXP 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_ILOGB0 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_ILOGBNAN 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_LOG10 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_LOG 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_COMPATIBLE_POW 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_FUNCTIONAL_PTHREAD_ROBUST_MUTEXES 0) #TODO-KOS robust mutexes not fully supported?
+    set_cache_value(HAVE_LARGE_SNPRINTF_SUPPORT 0) #TODO-KOS not used in code?
+    set_cache_value(HAVE_MMAP_DEV_ZERO 0) #TODO-KOS not used in code?
+    set_cache_value(HAVE_PROCFS_CTL 0) #TODO-KOS not used in code?
+    set_cache_value(HAVE_PROCFS_MAPS 0) #TODO-KOS not used in code?
+    set_cache_value(HAVE_PROCFS_STATUS 0) #TODO-KOS not used in code?
+    set_cache_value(HAVE_PROCFS_STAT 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_SCHED_GETCPU 0) #TODO-KOS not found in headers
+    set_cache_value(HAVE_SCHED_GET_PRIORITY 1) #TODO-KOS check on kos
+    set_cache_value(HAVE_VALID_NEGATIVE_INF_POW 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_VALID_POSITIVE_INF_POW 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_WORKING_CLOCK_GETTIME 1) #TODO-KOS check on kos
+    set_cache_value(HAVE_WORKING_GETTIMEOFDAY 1) #TODO-KOS check on kos
+    set_cache_value(MMAP_ANON_IGNORES_PROTECTION 0) #TODO-KOS check on kos
+    set_cache_value(ONE_SHARED_MAPPING_PER_FILEREGION_PER_PROCESS 1) #TODO-KOS check on kos
+    set_cache_value(PTHREAD_CREATE_MODIFIES_ERRNO 1) #TODO-KOS check on kos
+    set_cache_value(REALPATH_SUPPORTS_NONEXISTENT_FILES 0) #TODO-KOS review, realpath stub in KOS?
+    set_cache_value(SEM_INIT_MODIFIES_ERRNO 1) #TODO-KOS check on kos
+    set_cache_value(SSCANF_CANNOT_HANDLE_MISSING_EXPONENT 0) #TODO-KOS: check on KOS!
+    set_cache_value(SSCANF_SUPPORT_ll 0) #TODO-KOS use 'q' specifier 4.4BSD notation, is it right for KOS?
+    set_cache_value(UNGETC_NOT_RETURN_EOF 0) #TODO-KOS check on kos
+    set_cache_value(HAVE_SHM_OPEN_THAT_WORKS_WELL_ENOUGH_WITH_MMAP 0) #TODO-KOS check on kos
+  else()
+    message(FATAL_ERROR "Arch is ${TARGET_ARCH_NAME}. Only arm64 is supported for KOS cross build!")
   endif()
 elseif(TARGET_ARCH_NAME MATCHES "^(armel|arm|armv6|arm64|loongarch64|riscv64|s390x|ppc64le|x86|x64)$" OR FREEBSD OR ILLUMOS OR TIZEN OR HAIKU)
   set_cache_value(FILE_OPS_CHECK_FERROR_OF_PREVIOUS_CALL_EXITCODE 1)

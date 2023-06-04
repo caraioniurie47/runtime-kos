@@ -10,6 +10,9 @@
 
 #include <stdlib.h>
 #include <sys/types.h>
+#if defined(__KOS__)
+#include <sys/netbsd-types.h> // caddr_t is declared here
+#endif
 #include <assert.h>
 #if HAVE_GETIFADDRS || defined(ANDROID_GETIFADDRS_WORKAROUND)
 #include <ifaddrs.h>
@@ -46,11 +49,11 @@
 #include "ios/net/if_media.h"
 #endif
 
-#if defined(AF_PACKET)
+#if defined(AF_PACKET) && !defined(__KOS__) // force AF_LINK on KOS
 #include <sys/ioctl.h>
 #if HAVE_NETPACKET_PACKET_H
 #include <netpacket/packet.h>
-#else
+#elif HAVE_LINUX_IF_PACKET_H
 #include <linux/if_packet.h>
 #endif
 #elif defined(AF_LINK)
@@ -224,7 +227,7 @@ int32_t SystemNative_EnumerateInterfaceAddresses(void* context,
                 onIpv6Found(context, actualName, &iai, &scopeId);
             }
         }
-#if defined(AF_PACKET)
+#if defined(AF_PACKET) && !defined(__KOS__) // force AF_LINK on KOS
         else if (family == AF_PACKET)
         {
             if (onLinkLayerFound != NULL)
@@ -398,11 +401,13 @@ int32_t SystemNative_GetNetworkInterfaces(int32_t * interfaceCount, NetworkInter
             nii->Speed = -1;
             nii->HardwareType = ((ifaddrsEntry->ifa_flags & IFF_LOOPBACK) == IFF_LOOPBACK) ? NetworkInterfaceType_Loopback : NetworkInterfaceType_Unknown;
 
+#if defined(IFF_LOOPBACK) && defined(IFF_ALLMULTI)
             // Get operational state and multicast support.
             if ((ifaddrsEntry->ifa_flags & (IFF_MULTICAST|IFF_ALLMULTI)) != 0)
             {
                 nii->SupportsMulticast = 1;
             }
+#endif
 
             // OperationalState returns whether the interface can transmit data packets.
             // The administrator must have enabled the interface (IFF_UP), and the cable must be plugged in (IFF_RUNNING).
@@ -441,7 +446,7 @@ int32_t SystemNative_GetNetworkInterfaces(int32_t * interfaceCount, NetworkInter
             memcpy_s(&nii->AddressBytes, sizeof_member(NetworkInterfaceInfo, AddressBytes), (uint8_t*)LLADDR(sadl), sadl->sdl_alen);
         }
 #endif
-#if defined(AF_PACKET)
+#if defined(AF_PACKET) && !defined(__KOS__) // force AF_LINK on KOS
         else if (ifaddrsEntry->ifa_addr->sa_family == AF_PACKET)
         {
             struct sockaddr_ll* sall = (struct sockaddr_ll*)ifaddrsEntry->ifa_addr;

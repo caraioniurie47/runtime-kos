@@ -14,11 +14,11 @@
 #include <assert.h>
 #include <limits.h>
 #include <errno.h>
-#if defined(TARGET_LINUX) && !defined(MFD_CLOEXEC)
+#if defined(TARGET_LINUX) && !defined(MFD_CLOEXEC) && HAVE_SYS_SYSCALL_H
 #include <linux/memfd.h>
 #include <sys/syscall.h> // __NR_memfd_create
 #define memfd_create(...) syscall(__NR_memfd_create, __VA_ARGS__)
-#endif // TARGET_LINUX && !MFD_CLOEXEC
+#endif // TARGET_LINUX && !MFD_CLOEXEC && HAVE_SYS_SYSCALL_H
 #include "minipal.h"
 
 #if defined(TARGET_OSX) && defined(TARGET_AMD64)

@@ -51,7 +51,7 @@
     <Error Condition="'@(ResolvedILCompilerPack)' == ''" Text="The ResolvedILCompilerPack ItemGroup is required for target ImportRuntimeIlcPackageTarget" />
 
     <PropertyGroup>
-      <IlcHostPackagePath Condition="'@(ResolvedILCompilerPack)' == '$(_hostPackageName)'">@(ResolvedILCompilerPack->'%(PackageDirectory)')</IlcHostPackagePath>
+      <IlcHostPackagePath Condition="'$(IlcHostPackagePath)' == '' and '@(ResolvedILCompilerPack)' == '$(_hostPackageName)'">@(ResolvedILCompilerPack->'%(PackageDirectory)')</IlcHostPackagePath>
       <RuntimePackagePath Condition="'@(ResolvedTargetILCompilerPack)' == '$(_targetPackageName)'">@(ResolvedTargetILCompilerPack->'%(PackageDirectory)')</RuntimePackagePath>
       <RuntimePackagePath Condition="'@(ResolvedTargetILCompilerPack)' == ''">@(ResolvedILCompilerPack->'%(PackageDirectory)')</RuntimePackagePath>
     </PropertyGroup>

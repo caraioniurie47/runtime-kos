@@ -33,6 +33,9 @@
 #include <net/if.h>
 #include <stdlib.h>
 #include <string.h>
+#if HAVE_STRINGS_H && defined(__KOS__)
+#include <strings.h> // strcasecmp is declared here
+#endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #if HAVE_SYS_SOCKIO_H
@@ -50,8 +53,9 @@
 #include <pwd.h>
 #if HAVE_SENDFILE_4
 #include <sys/sendfile.h>
-#elif HAVE_SENDFILE_6
-#include <sys/uio.h>
+#endif
+#if HAVE_SYS_UIO_H
+#include <sys/uio.h> // iovec is declared here
 #endif
 #if HAVE_GETIFADDRS
 #include <ifaddrs.h>
@@ -121,6 +125,17 @@ struct in_pktinfo
     struct in_addr ipi_addr;
 };
 #define IP_PKTINFO IP_RECVDSTADDR
+#endif
+
+#if !HAVE_IN6_PKTINFO
+// TODO-KOS: CHECK
+// On platforms, such as KOS, where in6_pktinfo
+// is not available, fallback to custom definition
+// with required members.
+struct in6_pktinfo
+{
+    struct in6_addr ipi6_addr;
+};
 #endif
 
 #if !defined(IPV6_ADD_MEMBERSHIP) && defined(IPV6_JOIN_GROUP)
@@ -973,6 +988,7 @@ static int32_t GetIPv4PacketInformation(struct cmsghdr* controlMessage, IPPacket
     return 1;
 }
 
+#if HAVE_IN6_PKTINFO
 static int32_t GetIPv6PacketInformation(struct cmsghdr* controlMessage, IPPacketInformation* packetInfo)
 {
     assert(controlMessage != NULL);
@@ -991,6 +1007,7 @@ static int32_t GetIPv6PacketInformation(struct cmsghdr* controlMessage, IPPacket
 
     return 1;
 }
+#endif
 
 static struct cmsghdr* GET_CMSG_NXTHDR(struct msghdr* mhdr, struct cmsghdr* cmsg)
 {
@@ -1039,10 +1056,12 @@ SystemNative_TryGetIPPacketInformation(MessageHeader* messageHeader, int32_t isI
         for (; controlMessage != NULL && controlMessage->cmsg_len > 0;
              controlMessage = GET_CMSG_NXTHDR(&header, controlMessage))
         {
+#if HAVE_IN6_PKTINFO // TODO-KOS: IPV6_PKTINFO is not declared
             if (controlMessage->cmsg_level == IPPROTO_IPV6 && controlMessage->cmsg_type == IPV6_PKTINFO)
             {
                 return GetIPv6PacketInformation(controlMessage, packetInfo);
             }
+#endif
         }
     }
 
@@ -1830,20 +1849,21 @@ static bool TryGetPlatformSocketOption(int32_t socketOptionLevel, int32_t socket
 
             switch (socketOptionName)
             {
+#ifdef IPV6_HOPLIMIT
                 case SocketOptionName_SO_IPV6_HOPLIMIT:
                     *optName = IPV6_HOPLIMIT;
                     return true;
-
+#endif
                 // case SocketOptionName_SO_IPV6_PROTECTION_LEVEL:
 
                 case SocketOptionName_SO_IPV6_V6ONLY:
                     *optName = IPV6_V6ONLY;
                     return true;
-
+#ifdef IPV6_RECVPKTINFO
                 case SocketOptionName_SO_IP_PKTINFO:
                     *optName = IPV6_RECVPKTINFO;
                     return true;
-
+#endif
                 case SocketOptionName_SO_IP_MULTICAST_IF:
                     *optName = IPV6_MULTICAST_IF;
                     return true;
@@ -2588,6 +2608,19 @@ int32_t SystemNative_GetSocketType(intptr_t socket, int32_t* addressFamily, int3
     return Error_SUCCESS;
 }
 
+int sockatmark_helper(int s)
+{
+#ifdef SIOCATMARK
+    int val;
+    if (ioctl(s, SIOCATMARK, &val) < 0)
+        return -1;
+
+    return val;
+#else
+    return sockatmark(s);
+#endif
+}
+ 
 int32_t SystemNative_GetAtOutOfBandMark(intptr_t socket, int32_t* atMark)
 {
     if (atMark == NULL)
@@ -2598,9 +2631,8 @@ int32_t SystemNative_GetAtOutOfBandMark(intptr_t socket, int32_t* atMark)
     int fd = ToFileDescriptor(socket);
 
     int result;
-    int err;
-    while ((err = ioctl(fd, SIOCATMARK, &result)) < 0 && errno == EINTR);
-    if (err == -1)
+    while ((result = sockatmark_helper(fd)) < 0 && errno == EINTR);
+    if (result == -1)
     {
         *atMark = 0;
         return SystemNative_ConvertErrorPlatformToPal(errno);

@@ -31,6 +31,13 @@
 #cmakedefine01 HAVE_SYSINFO_WITH_MEM_UNIT
 #cmakedefine01 HAVE_XSW_USAGE
 #cmakedefine01 HAVE_XSWDEV
+#cmakedefine01 HAVE_STATFS_STRUCT_MOUNT_H
+#cmakedefine01 HAVE_STATFS_STRUCT_VFS_H
+#cmakedefine01 HAVE_STATFS_STRUCT_STATFS_H
+#cmakedefine01 HAVE_STATFS_STRUCT
+#cmakedefine01 HAVE_STATFS_FSTYPENAME
 #cmakedefine01 HAVE_NON_LEGACY_STATFS
+#cmakedefine01 HAVE_SYS_SYSCALL_H
+#cmakedefine01 HAVE_STRINGS_H
 
 #endif // __CONFIG_H__

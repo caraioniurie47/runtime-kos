@@ -22,6 +22,9 @@ Abstract:
 #include "pal/cruntime.h"
 
 #include <string.h>
+#if HAVE_STRINGS_H && defined(__KOS__)
+#include <strings.h> // strcasecmp is declared here
+#endif
 #include <ctype.h>
 #include <pthread.h>
 #include <errno.h>

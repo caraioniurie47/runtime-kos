@@ -47,7 +47,7 @@ SET_DEFAULT_DEBUG_CHANNEL(PROCESS); // some headers have code with asserts, so d
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <signal.h>
-#if HAVE_PRCTL_H
+#if defined(HAVE_PRCTL_H) && HAVE_SYS_SYSCALL_H
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #endif
@@ -61,7 +61,7 @@ SET_DEFAULT_DEBUG_CHANNEL(PROCESS); // some headers have code with asserts, so d
 #include <limits.h>
 #include <vector>
 
-#ifdef __linux__
+#if defined(__linux__) && HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h> // __NR_membarrier
 // Ensure __NR_membarrier is defined for portable builds.
 # if !defined(__NR_membarrier)

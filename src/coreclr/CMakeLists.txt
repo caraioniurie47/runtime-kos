@@ -46,6 +46,10 @@ endif()
 
 OPTION(CLR_CMAKE_ENABLE_CODE_COVERAGE "Enable code coverage" OFF)
 
+if(CLR_CMAKE_TARGET_KOS)
+  set(STATIC_LIBS_ONLY 1)
+endif(CLR_CMAKE_TARGET_KOS)
+
 #----------------------------------------------------
 # Cross target Component build specific configuration
 #----------------------------------------------------

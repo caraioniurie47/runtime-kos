@@ -115,7 +115,7 @@ extern bool g_arm64_atomics_present;
 #endif // !_MSC_VER
 #endif // !THROW_DECL
 
-#ifdef __sun
+#if defined(__sun) || !defined(__GLIBC__)
 #define MATH_THROW_DECL
 #else
 #define MATH_THROW_DECL THROW_DECL

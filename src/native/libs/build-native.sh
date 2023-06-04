@@ -40,6 +40,7 @@ __TargetOS=linux
 __BuildType=Debug
 __CMakeArgs=""
 __Compiler=clang
+__TargetsKOS=0
 __CrossBuild=0
 __PortableBuild=1
 __RootBinDir="$__RepoRootDir/artifacts"

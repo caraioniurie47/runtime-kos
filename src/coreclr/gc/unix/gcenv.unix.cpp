@@ -91,7 +91,7 @@ extern "C"
 
 #endif // __APPLE__
 
-#ifdef __linux__
+#if defined(__linux__) && HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h> // __NR_membarrier
 // Ensure __NR_membarrier is defined for portable builds.
 # if !defined(__NR_membarrier)
@@ -135,6 +135,10 @@ typedef cpuset_t cpu_set_t;
 #error Dont know how to get page-size on this architecture!
 #endif
 #endif // __APPLE__
+
+#if defined(__KOS__)
+#include <coresrv/stat/stat_api.h>
+#endif
 
 #if defined(HOST_ARM) || defined(HOST_ARM64) || defined(HOST_LOONGARCH64)
 #define SYSCONF_GET_NUMPROCS _SC_NPROCESSORS_CONF
@@ -235,7 +239,7 @@ bool GCToOSInterface::Initialize()
     {
         s_flushUsingMemBarrier = TRUE;
     }
-#ifndef TARGET_APPLE
+#if !defined(TARGET_APPLE) && !defined(__KOS__)
     else
     {
         assert(g_helperPage == 0);
@@ -326,7 +330,9 @@ void GCToOSInterface::Shutdown()
 //  Numeric id of the current thread, as best we can retrieve it.
 uint64_t GCToOSInterface::GetCurrentThreadIdForLogging()
 {
-#if defined(__linux__)
+#if defined(__KOS__)
+    return (uint64_t)gettid();
+#elif defined(__linux__)
     return (uint64_t)syscall(SYS_gettid);
 #elif HAVE_PTHREAD_GETTHREADID_NP
     return (uint64_t)pthread_getthreadid_np();
@@ -1126,7 +1132,18 @@ uint64_t GCToOSInterface::GetPhysicalMemoryLimit(bool* is_restricted)
 
     // Get the physical memory size
 #if HAVE_SYSCONF && HAVE__SC_PHYS_PAGES
-    long pages = sysconf(_SC_PHYS_PAGES);
+    long pages = -1;
+    
+    #if defined(__KOS__)
+    int kos_ret = KnGroupStatGetParam(GROUP_PARAM_MEM_TOTAL, &pages);
+    if (kos_ret != 0)
+    {
+        pages = -1;
+    }
+    #else
+    pages = sysconf(_SC_PHYS_PAGES);
+    #endif
+
     if (pages == -1)
     {
         return 0;

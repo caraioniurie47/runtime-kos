@@ -19,7 +19,9 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#if HAVE_SYS_FILE_H
 #include <sys/file.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #if !HAVE_MAKEDEV_FILEH && HAVE_MAKEDEV_SYSMACROSH
@@ -42,14 +44,22 @@
 #if HAVE_INOTIFY
 #include <sys/inotify.h>
 #endif
-#if HAVE_STATFS_VFS // Linux
-#include <sys/vfs.h>
-#elif HAVE_STATFS_MOUNT // BSD
+
+#if HAVE_STATFS_STRUCT
+#if HAVE_STATFS_STRUCT_MOUNT_H // BSD, Apple
+#include <sys/param.h>
 #include <sys/mount.h>
-#elif HAVE_SYS_STATVFS_H && !HAVE_NON_LEGACY_STATFS // SunOS
-#include <sys/types.h>
-#include <sys/statvfs.h>
+#elif HAVE_STATFS_STRUCT_VFS_H // Linux
 #include <sys/vfs.h>
+#elif HAVE_STATFS_STRUCT_STATFS_H
+#include <sys/statfs.h>
+#endif
+#elif HAVE_STATVFS_STRUCT
+#if HAVE_STATVFS_STRUCT_MOUNT_H
+#include <sys/mount.h>
+#elif HAVE_STATVFS_STRUCT_STATVFS_H
+#include <sys/statvfs.h>
+#endif
 #endif
 
 #ifdef _AIX
@@ -76,6 +86,7 @@ extern int     getpeereid(int, uid_t *__restrict__, gid_t *__restrict__);
 #define FICLONE _IOW(0x94, 9, int)
 #endif /* __linux__ */
 
+#if HAVE_SYS_SYSCALL_H
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wreserved-id-macro"
 // Ensure __NR_copy_file_range is defined for portable builds.
@@ -94,6 +105,7 @@ extern int     getpeereid(int, uid_t *__restrict__, gid_t *__restrict__);
 #  endif
 # endif
 #pragma clang diagnostic pop
+#endif // HAVE_SYS_SYSCALL_H
 
 #endif
 
@@ -157,11 +169,13 @@ c_static_assert((int)PAL_DT_SOCK == (int)DT_SOCK);
 c_static_assert((int)PAL_DT_WHT == (int)DT_WHT);
 #endif
 
+#if HAVE_SYS_FILE_H
 // Validate that our Lock enum value are correct for the platform
 c_static_assert(PAL_LOCK_SH == LOCK_SH);
 c_static_assert(PAL_LOCK_EX == LOCK_EX);
 c_static_assert(PAL_LOCK_NB == LOCK_NB);
 c_static_assert(PAL_LOCK_UN == LOCK_UN);
+#endif
 
 // Validate our AccessMode enum values are correct for the platform
 c_static_assert(PAL_F_OK == F_OK);
@@ -748,6 +762,7 @@ int32_t SystemNative_FSync(intptr_t fd)
 
 int32_t SystemNative_FLock(intptr_t fd, int32_t operation)
 {
+#if HAVE_SYS_FILE_H
     int32_t result;
 #if !defined(TARGET_WASI)
     while ((result = flock(ToFileDescriptor(fd), operation)) < 0 && errno == EINTR);
@@ -755,6 +770,10 @@ int32_t SystemNative_FLock(intptr_t fd, int32_t operation)
     result = EINTR;
 #endif /* TARGET_WASI */
     return result;
+#else // !HAVE_SYS_FILE_H
+    errno = ENOTSUP;
+    return -1;
+#endif // HAVE_SYS_FILE_H
 }
 
 int32_t SystemNative_ChDir(const char* path)
@@ -1548,7 +1567,7 @@ static int16_t ConvertLockType(int16_t managedLockType)
     }
 }
 
-#if !HAVE_NON_LEGACY_STATFS || defined(__APPLE__)
+#if HAVE_STATVFS_STRUCT || defined(__APPLE__)
 static uint32_t MapFileSystemNameToEnum(const char* fileSystemName)
 {
     uint32_t result = 0;
@@ -1687,7 +1706,7 @@ static uint32_t MapFileSystemNameToEnum(const char* fileSystemName)
 
 uint32_t SystemNative_GetFileSystemType(intptr_t fd)
 {
-#if HAVE_STATFS_VFS || HAVE_STATFS_MOUNT
+#if HAVE_STATFS_STRUCT
     int statfsRes;
     struct statfs statfsArgs;
     // for our needs (get file system type) statfs is always enough and there is no need to use statfs64
@@ -1706,13 +1725,16 @@ uint32_t SystemNative_GetFileSystemType(intptr_t fd)
 #endif
 #elif defined(TARGET_WASI)
     return EINTR;
-#elif !HAVE_NON_LEGACY_STATFS
+#elif HAVE_STATVFS_STRUCT
     int statfsRes;
     struct statvfs statfsArgs;
     while ((statfsRes = fstatvfs(ToFileDescriptor(fd), &statfsArgs)) == -1 && errno == EINTR) ;
     if (statfsRes == -1) return 0;
-
+#if HAVE_STATVFS_FSTYPENAME
+    return MapFileSystemNameToEnum(statfsArgs.f_fstypename);
+#else
     return MapFileSystemNameToEnum(statfsArgs.f_basetype);
+#endif
 #else
     #error "Platform doesn't support fstatfs or fstatvfs"
 #endif

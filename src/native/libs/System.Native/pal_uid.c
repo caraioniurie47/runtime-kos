@@ -45,10 +45,14 @@ static int32_t ConvertNativePasswdToPalPasswd(int error, struct passwd* nativePw
     // 0 returned with non-null result (guaranteed to be set to pwd arg) -> success
     assert(result == nativePwd);
     pwd->Name = nativePwd->pw_name;
+#if HAVE_PASSWD_PASSWD
     pwd->Password = nativePwd->pw_passwd;
+#endif
     pwd->UserId = nativePwd->pw_uid;
     pwd->GroupId = nativePwd->pw_gid;
+#if HAVE_PASSWD_GECOS
     pwd->UserInfo = nativePwd->pw_gecos;
+#endif
     pwd->HomeDirectory = nativePwd->pw_dir;
     pwd->Shell = nativePwd->pw_shell;
     return 0;

@@ -497,19 +497,34 @@ int32_t SystemIoPortsNative_TermiosReset(intptr_t handle, int32_t speed, int32_t
         term.c_cflag &= ~((tcflag_t)(PARENB | PARODD));
     }
 
+    if (HandshakeHard == handshake)
+    {
+#ifndef CRTSCTS
+        // TODO-KOS: hardware flow is not supported
+        errno = EINVAL;
+        return -1;
+#endif
+    }
+
     // Flow control - clear first.
     term.c_iflag &= ~((tcflag_t)(IXOFF | IXON));
+#ifdef CRTSCTS
     term.c_cflag &= ~((tcflag_t)(CRTSCTS));
+#endif
     switch (handshake)
     {
         case HandshakeNone: /* None */
             /* do nothing. We did the reset above */
             break;
         case HandshakeHard: /* hardware flow control */
+#ifdef CRTSCTS
             term.c_cflag |= CRTSCTS;
+#endif
             break;
         case HandshakeBoth: /* software & hardware flow control */
+#ifdef CRTSCTS
             term.c_cflag |= CRTSCTS;
+#endif
             FALLTHROUGH;
         case HandshakeSoft: /* XOn/XOff */
             term.c_iflag |= IXOFF | IXON;

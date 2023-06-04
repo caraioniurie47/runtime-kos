@@ -108,6 +108,10 @@ SET_DEFAULT_DEBUG_CHANNEL(MISC);
 #endif
 #endif // __APPLE__
 
+#if defined(__KOS__)
+#include <coresrv/stat/stat_api.h>
+#endif
+
 DWORD
 PALAPI
 PAL_GetTotalCpuCount()
@@ -338,12 +342,29 @@ GlobalMemoryStatusEx(
 
     // Get the physical memory size
 #if HAVE_SYSCONF && HAVE__SC_PHYS_PAGES
-    uint64_t physical_memory;
+    long pages = -1;
+    
+    #if defined(__KOS__)
+    int kos_ret = KnGroupStatGetParam(GROUP_PARAM_MEM_TOTAL, &pages);
+    if (kos_ret != 0)
+    {
+        pages = -1;
+    }
+    #else
+    pages = sysconf(_SC_PHYS_PAGES);
+    #endif
 
-    // Get the Physical memory size
-    physical_memory = ((uint64_t)sysconf( _SC_PHYS_PAGES )) * ((uint64_t) sysconf( _SC_PAGE_SIZE ));
-    lpBuffer->ullTotalPhys = (DWORDLONG)physical_memory;
-    fRetVal = TRUE;
+    if (pages != -1)
+    {
+        long pageSize = sysconf(_SC_PAGE_SIZE);
+        if (pageSize != -1)
+        {
+            uint64_t physical_memory;
+            physical_memory = (uint64_t)pages * (uint64_t)pageSize;
+            lpBuffer->ullTotalPhys = (DWORDLONG)physical_memory;
+            fRetVal = TRUE;
+        }
+    }
 #elif HAVE_SYSCTL
     int64_t physical_memory;
     size_t length;

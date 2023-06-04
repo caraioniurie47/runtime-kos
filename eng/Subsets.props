@@ -136,6 +136,7 @@
     <SubsetName Include="Clr.CoreLib" Description="The managed System.Private.CoreLib library for CoreCLR." />
     <SubsetName Include="Clr.NativeCoreLib" Description="Run crossgen on System.Private.CoreLib library for CoreCLR." />
     <SubsetName Include="Clr.Tools" Description="Managed tools that support CoreCLR development and testing." />
+    <SubsetName Include="Clr.AotTools" Description="Managed Native AOT tools that support CoreCLR development and testing." />
     <SubsetName Include="Clr.ToolsTests" OnDemand="true" Description="Unit tests for the clr.tools subset." />
     <SubsetName Include="Clr.Packages" Description="The projects that produce NuGet packages for the CoreCLR runtime, crossgen, and IL tools." />
     <SubsetName Include="LinuxDac" Condition="$([MSBuild]::IsOsPlatform(Windows))" Description="The cross-OS Windows->libc-based Linux DAC. Skipped on x86." />
@@ -183,6 +184,7 @@
     <SubsetName Include="Packs.Product" Description="Builds the shared framework packs, archives, bundles, and installers." />
     <SubsetName Include="Packs.Installers" Description="Builds the shared framework bundles and installers." />
     <SubsetName Include="Packs.Tests" Description="The framework pack tests." />
+    <SubsetName Include="Packs.Aot" Description="Builds the Native AOT framework packs." />
 
     <!-- Utility -->
     <SubsetName Include="publish" OnDemand="true" Description="Generate asset manifests and prepare to publish to BAR." />
@@ -254,7 +256,7 @@
   </ItemGroup>
 
   <!-- Build the CoreCLR cross tools when we're doing a cross build and either we're building any CoreCLR native tools for platforms CoreCLR fully supports or when someone explicitly requests them -->
-  <ItemGroup Condition="(('$(ClrRuntimeBuildSubsets)' != '' and '$(PrimaryRuntimeFlavor)' == 'CoreCLR' and '$(TargetsMobile)' != 'true') or $(_subset.Contains('+clr.crossarchtools+'))) and ('$(CrossBuild)' == 'true' or '$(BuildArchitecture)' != '$(TargetArchitecture)')">
+  <ItemGroup Condition="(('$(ClrRuntimeBuildSubsets)' != '' and '$(PrimaryRuntimeFlavor)' == 'CoreCLR' and '$(TargetsMobile)' != 'true') or $(_subset.Contains('+clr.crossarchtools+'))) and ('$(CrossBuild)' == 'true' or '$(BuildArchitecture)' != '$(TargetArchitecture)') and '$(TargetsKOS)' != 'true'">
     <ProjectToBuild
       Include="$(CoreClrProjectRoot)runtime.proj"
       AdditionalProperties="%(AdditionalProperties);
@@ -302,6 +304,11 @@
 
   <ItemGroup Condition="$(_subset.Contains('+crossdacpack+'))">
     <ProjectToBuild Include="$(CoreClrProjectRoot).nuget\Microsoft.CrossOsDiag.Private.CoreCLR\Microsoft.CrossOsDiag.Private.CoreCLR.proj" Category="clr" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(_subset.Contains('+clr.aottools+'))">
+    <ProjectToBuild Include="$(CoreClrProjectRoot)tools\aot\ILCompiler.Build.Tasks\ILCompiler.Build.Tasks.csproj" Category="clr" Condition="'$(NativeAotSupported)' == 'true'" />
+    <ProjectToBuild Include="$(CoreClrProjectRoot)nativeaot\BuildIntegration\BuildIntegration.proj" Category="clr" Condition="'$(NativeAotSupported)' == 'true'" />
   </ItemGroup>
 
   <ItemGroup Condition="$(_subset.Contains('+clr.tools+'))">
@@ -466,6 +473,10 @@
   </ItemGroup>
 
   <!-- Packs sets -->
+
+  <ItemGroup Condition="$(_subset.Contains('+packs.aot+')) AND '$(PgoInstrument)' != 'true'">
+    <ProjectToBuild Condition="'$(NativeAotSupported)' == 'true' and '$(RuntimeFlavor)' != 'Mono'" Include="$(InstallerProjectRoot)\pkg\projects\nativeaot-packages.proj" Category="packs" />
+  </ItemGroup>
 
   <Choose>
     <When Condition="$(_subset.Contains('+packs.product+'))">

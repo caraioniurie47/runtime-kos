@@ -28,6 +28,7 @@
       <_CoreClrBuildArg Include="$(Compiler)" />
       <_CoreClrBuildArg Condition="'$(ConfigureOnly)' == 'true'" Include="-configureonly" />
       <_CoreClrBuildArg Condition="'$(ContinuousIntegrationBuild)' == 'true'" Include="-ci" />
+      <_CoreClrBuildArg Condition="'$(TargetsKOS)' == 'true'" Include="-kos" />
       <_CoreClrBuildArg Condition="'$(CrossBuild)' == 'true'" Include="-cross" />
       <_CoreClrBuildArg Condition="'$(PortableBuild)' != 'true'" Include="-portablebuild=false" />
       <_CoreClrBuildArg Condition="'$(KeepNativeSymbols)' != 'false'" Include="-keepnativesymbols" />
@@ -60,7 +61,7 @@
       <_CoreClrBuildArg Condition="'$(ClrCrossComponentsSubset)' == 'true'" Include="-component crosscomponents" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(TargetsAppleMobile)' == 'true'">
+    <ItemGroup Condition="'$(TargetsAppleMobile)' == 'true' or '$(TargetsKOS)' == 'true'">
       <_CoreClrBuildArg Include="-cmakeargs -DCMAKE_ICU_DIR=&quot;$(_IcuDir)&quot;" />
     </ItemGroup>
 

@@ -22,6 +22,8 @@
 #cmakedefine01 HAVE_PTHREAD_NP_H
 #cmakedefine01 HAVE_AUXV_HWCAP_H
 #cmakedefine01 HAVE_SYS_PTRACE_H
+#cmakedefine01 HAVE_SYS_SYSCALL_H
+#cmakedefine01 HAVE_STRINGS_H
 #cmakedefine01 HAVE_GETAUXVAL
 
 #cmakedefine01 HAVE_KQUEUE
@@ -49,7 +51,11 @@
 #cmakedefine01 HAVE_GMTIME_R
 #cmakedefine01 HAVE_TIMEGM
 #cmakedefine01 HAVE_POLL
-#cmakedefine01 HAVE_STATVFS
+#cmakedefine01 HAVE_STATFS_STRUCT_MOUNT_H
+#cmakedefine01 HAVE_STATFS_STRUCT_VFS_H
+#cmakedefine01 HAVE_STATFS_STRUCT_STATFS_H
+#cmakedefine01 HAVE_STATFS_STRUCT
+#cmakedefine01 HAVE_STATFS_FSTYPENAME
 #cmakedefine01 HAVE_NON_LEGACY_STATFS
 #cmakedefine01 HAVE_THREAD_SELF
 #cmakedefine01 HAVE__LWP_SELF

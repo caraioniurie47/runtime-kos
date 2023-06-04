@@ -219,6 +219,14 @@ elseif(CLR_CMAKE_HOST_HAIKU)
   add_linker_flag("-Wl,--no-undefined")
 endif()
 
+if(CLR_CMAKE_TARGET_KOS)
+  add_definitions(-D_GNU_SOURCE)
+  add_definitions(-D_NETBSD_SOURCE)
+  if(CLR_CMAKE_TARGET_ARCH_ARM64)
+    add_definitions(-D__aarch64__)
+  endif(CLR_CMAKE_TARGET_ARCH_ARM64)
+endif(CLR_CMAKE_TARGET_KOS)
+
 #------------------------------------
 # Definitions (for platform)
 #-----------------------------------
@@ -446,7 +454,9 @@ if (CLR_CMAKE_HOST_UNIX)
 
   # Suppress warnings-as-errors in release branches to reduce servicing churn
   if (PRERELEASE)
-    add_compile_options(-Werror)
+    if (NOT CLR_CMAKE_TARGET_KOS) # TODO-KOS: __security_cookie generates GCC warning
+      add_compile_options(-Werror)
+    endif (NOT CLR_CMAKE_TARGET_KOS)
   endif(PRERELEASE)
 
   # Disabled common warnings

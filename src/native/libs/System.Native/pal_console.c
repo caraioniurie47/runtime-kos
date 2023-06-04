@@ -472,6 +472,9 @@ static void InitializeTerminalCore(void)
 
 int32_t SystemNative_InitializeTerminalAndSignalHandling(void)
 {
+    #if defined(__KOS__) // no signal support
+    return true;
+    #else
     static int32_t initialized = 0;
 
     // The Process, Console and PosixSignalRegistration classes call this method for initialization.
@@ -486,4 +489,5 @@ int32_t SystemNative_InitializeTerminalAndSignalHandling(void)
     }
 
     return initialized;
+    #endif
 }

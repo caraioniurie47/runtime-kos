@@ -21,7 +21,9 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#if HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h>
+#endif
 #include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
@@ -115,7 +117,11 @@ namespace
     {
         JitCodeLoadRecord() :
             pid(getpid()),
+#if defined(__KOS__)
+            tid(gettid())
+#else
             tid(syscall(SYS_gettid))
+#endif
         {
             header.id = JIT_CODE_LOAD;
             header.timestamp = GetTimeStampNS();

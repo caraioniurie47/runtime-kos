@@ -7,6 +7,7 @@ unset(ILLUMOS)
 unset(ANDROID)
 unset(TIZEN)
 unset(HAIKU)
+unset(KOS)
 
 set(TARGET_ARCH_NAME $ENV{TARGET_BUILD_ARCH})
 if(EXISTS ${CROSS_ROOTFS}/bin/freebsd-version)
@@ -19,6 +20,7 @@ elseif(EXISTS ${CROSS_ROOTFS}/boot/system/develop/headers/config/HaikuConfig.h)
   set(CMAKE_SYSTEM_NAME Haiku)
   set(HAIKU 1)
 else()
+  # TODO-KOS
   set(CMAKE_SYSTEM_NAME Linux)
   set(LINUX 1)
 endif()
@@ -46,6 +48,9 @@ elseif(TARGET_ARCH_NAME STREQUAL "arm64")
   set(CMAKE_SYSTEM_PROCESSOR aarch64)
   if(EXISTS ${CROSS_ROOTFS}/usr/lib/gcc/aarch64-alpine-linux-musl)
     set(TOOLCHAIN "aarch64-alpine-linux-musl")
+  elseif(EXISTS ${CROSS_ROOTFS}/sysroot-${CMAKE_SYSTEM_PROCESSOR}-kos)
+    set(TOOLCHAIN "aarch64-kos")
+    set(KOS 1)
   elseif(LINUX)
     set(TOOLCHAIN "aarch64-linux-gnu")
     if(TIZEN)
@@ -146,6 +151,24 @@ if(TIZEN)
   endif()
 endif()
 
+function(locate_toolchain_exec_common exec var)
+    string(TOUPPER ${exec} EXEC_UPPERCASE)
+    if(NOT "$ENV{CLR_${EXEC_UPPERCASE}}" STREQUAL "")
+        set(${var} "$ENV{CLR_${EXEC_UPPERCASE}}" PARENT_SCOPE)
+        return()
+    endif()
+
+    find_program(EXEC_LOCATION_${exec}
+        NAMES
+        "${TOOLSET_PREFIX}${exec}${CLR_CMAKE_COMPILER_FILE_NAME_VERSION}"
+        "${TOOLSET_PREFIX}${exec}")
+
+    if (EXEC_LOCATION_${exec} STREQUAL "EXEC_LOCATION_${exec}-NOTFOUND")
+        message(FATAL_ERROR "Unable to find toolchain executable. Name: ${exec}, Prefix: ${TOOLSET_PREFIX}.")
+    endif()
+    set(${var} ${EXEC_LOCATION_${exec}} PARENT_SCOPE)
+endfunction()
+
 if(ANDROID)
     if(TARGET_ARCH_NAME STREQUAL "arm")
         set(ANDROID_ABI armeabi-v7a)
@@ -180,28 +203,10 @@ elseif(ILLUMOS)
     include_directories(SYSTEM ${CROSS_ROOTFS}/include)
 
     set(TOOLSET_PREFIX ${TOOLCHAIN}-)
-    function(locate_toolchain_exec exec var)
-        string(TOUPPER ${exec} EXEC_UPPERCASE)
-        if(NOT "$ENV{CLR_${EXEC_UPPERCASE}}" STREQUAL "")
-            set(${var} "$ENV{CLR_${EXEC_UPPERCASE}}" PARENT_SCOPE)
-            return()
-        endif()
-
-        find_program(EXEC_LOCATION_${exec}
-            NAMES
-            "${TOOLSET_PREFIX}${exec}${CLR_CMAKE_COMPILER_FILE_NAME_VERSION}"
-            "${TOOLSET_PREFIX}${exec}")
-
-        if (EXEC_LOCATION_${exec} STREQUAL "EXEC_LOCATION_${exec}-NOTFOUND")
-            message(FATAL_ERROR "Unable to find toolchain executable. Name: ${exec}, Prefix: ${TOOLSET_PREFIX}.")
-        endif()
-        set(${var} ${EXEC_LOCATION_${exec}} PARENT_SCOPE)
-    endfunction()
-
     set(CMAKE_SYSTEM_PREFIX_PATH "${CROSS_ROOTFS}")
 
-    locate_toolchain_exec(gcc CMAKE_C_COMPILER)
-    locate_toolchain_exec(g++ CMAKE_CXX_COMPILER)
+    locate_toolchain_exec_common(gcc CMAKE_C_COMPILER)
+    locate_toolchain_exec_common(g++ CMAKE_CXX_COMPILER)
 
     set(CMAKE_C_STANDARD_LIBRARIES "${CMAKE_C_STANDARD_LIBRARIES} -lssp")
     set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} -lssp")
@@ -209,7 +214,7 @@ elseif(HAIKU)
     set(CMAKE_SYSROOT "${CROSS_ROOTFS}")
 
     set(TOOLSET_PREFIX ${TOOLCHAIN}-)
-    function(locate_toolchain_exec exec var)
+    function(locate_toolchain_exec_haiku exec var)
         string(TOUPPER ${exec} EXEC_UPPERCASE)
         if(NOT "$ENV{CLR_${EXEC_UPPERCASE}}" STREQUAL "")
             set(${var} "$ENV{CLR_${EXEC_UPPERCASE}}" PARENT_SCOPE)
@@ -230,14 +235,21 @@ elseif(HAIKU)
 
     set(CMAKE_SYSTEM_PREFIX_PATH "${CROSS_ROOTFS}")
 
-    locate_toolchain_exec(gcc CMAKE_C_COMPILER)
-    locate_toolchain_exec(g++ CMAKE_CXX_COMPILER)
+    locate_toolchain_exec_haiku(gcc CMAKE_C_COMPILER)
+    locate_toolchain_exec_haiku(g++ CMAKE_CXX_COMPILER)
 
     set(CMAKE_C_STANDARD_LIBRARIES "${CMAKE_C_STANDARD_LIBRARIES} -lssp")
     set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} -lssp")
 
     # let CMake set up the correct search paths
     include(Platform/Haiku)
+elseif(KOS)
+    set(CMAKE_SYSROOT "${CROSS_ROOTFS}/sysroot-${CMAKE_SYSTEM_PROCESSOR}-kos")
+    set(TOOLSET_PREFIX ${TOOLCHAIN}-)
+    set(CMAKE_SYSTEM_PREFIX_PATH "${CROSS_ROOTFS}/toolchain")
+
+    locate_toolchain_exec_common(gcc CMAKE_C_COMPILER)
+    locate_toolchain_exec_common(g++ CMAKE_CXX_COMPILER)
 else()
     set(CMAKE_SYSROOT "${CROSS_ROOTFS}")
 
@@ -245,6 +257,10 @@ else()
     set(CMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN "${CROSS_ROOTFS}/usr")
     set(CMAKE_ASM_COMPILER_EXTERNAL_TOOLCHAIN "${CROSS_ROOTFS}/usr")
 endif()
+
+if(KOS)
+  set(FEATURE_EVENT_TRACE 0) # disable event trace
+endif(KOS)
 
 # Specify link flags
 

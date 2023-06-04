@@ -78,6 +78,11 @@ build_native()
         cmakeArgs="-DCMAKE_SYSTEM_VARIANT=maccatalyst $cmakeArgs"
     fi
 
+    if [[ "$__TargetsKOS" == 1 && "$__CrossBuild" == 1 ]]; then
+        # Don't try to set CC/CXX in init-compiler.sh - it's handled in toolchain.cmake already
+        __Compiler="default"
+    fi
+
     if [[ ( "$targetOS" == android || "$targetOS" == linux-bionic ) && -z "$ROOTFS_DIR" ]]; then
         if [[ -z "$ANDROID_NDK_ROOT" ]]; then
             echo "Error: You need to set the ANDROID_NDK_ROOT environment variable pointing to the Android NDK root."
@@ -260,6 +265,7 @@ usage()
     echo "-clangx.y: optional argument to build using clang version x.y."
     echo "-cmakeargs: user-settable additional arguments passed to CMake."
     echo "-configureonly: do not perform any builds; just configure the build."
+    echo "-kos: TODO-KOS - replace with platform RID."
     echo "-cross: optional argument to signify cross compilation,"
     echo "        will use ROOTFS_DIR environment variable if set."
     echo "-gcc: optional argument to build using gcc in PATH."
@@ -375,6 +381,10 @@ while :; do
             __ConfigureOnly=1
             __SkipMSCorLib=1
             __SkipNuget=1
+            ;;
+
+        kos|-kos)
+            __TargetsKOS=1
             ;;
 
         cross|-cross)

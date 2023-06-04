@@ -52,6 +52,17 @@ else()
     )
 endif()
 
+if(CLR_CMAKE_TARGET_KOS)
+  include_directories(${CLR_SRC_NATIVE_DIR}/external/kos)
+  list(APPEND SOURCES
+    ${CLR_SRC_NATIVE_DIR}/external/kos/__rand48_step.c
+    ${CLR_SRC_NATIVE_DIR}/external/kos/__seed48.c
+    ${CLR_SRC_NATIVE_DIR}/external/kos/lrand48.c
+    ${CLR_SRC_NATIVE_DIR}/external/kos/seed48.c
+    ${CLR_SRC_NATIVE_DIR}/external/kos/srand48.c
+  )
+endif(CLR_CMAKE_TARGET_KOS)
+
 if (CLR_CMAKE_TARGET_APPLE)
     list (APPEND NATIVE_SOURCES pal_autoreleasepool.m)
     set_source_files_properties(pal_autoreleasepool.m PROPERTIES COMPILE_FLAGS -fno-objc-arc)
@@ -102,6 +113,18 @@ endif ()
 if (NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI)
     list (APPEND NATIVE_SOURCES pal_networkchange.c)
 endif ()
+
+if (CLR_CMAKE_TARGET_KOS)
+    add_definitions(-D_GNU_SOURCE)
+    add_definitions(-D_NETBSD_SOURCE)
+    if(CLR_CMAKE_TARGET_ARCH_ARM64)
+        add_definitions(-D__aarch64__)
+    endif(CLR_CMAKE_TARGET_ARCH_ARM64)
+    include_directories (${CLR_SRC_NATIVE_DIR}/external/kos)
+    list (APPEND NATIVE_SOURCES
+        ${CLR_SRC_NATIVE_DIR}/external/kos/malloc.c
+    )
+endif (CLR_CMAKE_TARGET_KOS)
 
 include(${CMAKE_CURRENT_LIST_DIR}/extra_libs.cmake)
 

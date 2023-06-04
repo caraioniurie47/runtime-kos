@@ -27,6 +27,14 @@ elseif (CLR_CMAKE_TARGET_SUNOS)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fstack-protector")
 endif ()
 
+if (CLR_CMAKE_TARGET_KOS)
+    set(CMAKE_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS} -D_GNU_SOURCE -D_NETBSD_SOURCE")
+    if (CLR_CMAKE_TARGET_ARCH_ARM64)
+        set(CMAKE_REQUIRED_DEFINITIONS "${CMAKE_REQUIRED_DEFINITIONS} -D__aarch64__")
+    endif (CLR_CMAKE_TARGET_ARCH_ARM64)
+    list(INSERT CMAKE_REQUIRED_INCLUDES 0 ${CLR_SRC_NATIVE_DIR}/external/kos)
+endif (CLR_CMAKE_TARGET_KOS)
+
 if(CLR_CMAKE_USE_SYSTEM_LIBUNWIND)
     # This variable can be set and used by the coreclr and installer builds.
     # Libraries doesn't need it, but not using it makes the build fail.  So
@@ -88,27 +96,30 @@ check_c_source_compiles(
 
 # /in_pktinfo
 
-check_c_source_compiles(
-    "
-    #include <sys/vfs.h>
-    int main(void)
-    {
-        struct statfs s;
-        return 0;
-    }
-    "
-    HAVE_STATFS_VFS)
+# in6_pktinfo: Find whether this struct exists
+check_include_files(
+    "sys/socket.h;linux/ipv6.h"
+    HAVE_LINUX_IPV6_H)
+
+if (HAVE_LINUX_IPV6_H)
+    set (SOCKET_INCLUDES linux/ipv6.h)
+else ()
+    set (SOCKET_INCLUDES netinet/in.h)
+endif ()
 
 check_c_source_compiles(
     "
-    #include <sys/mount.h>
+    #include <sys/socket.h>
+    #include <${SOCKET_INCLUDES}>
     int main(void)
     {
-        struct statfs s;
+        struct in6_pktinfo pktinfo;
         return 0;
     }
     "
-    HAVE_STATFS_MOUNT)
+    HAVE_IN6_PKTINFO)
+
+# /in6_pktinfo
 
 check_c_source_compiles(
     "
@@ -215,6 +226,10 @@ check_symbol_exists(
     fcntl.h
     HAVE_FALLOCATE)
 
+check_include_files(
+    "sys/uio.h"
+    HAVE_SYS_UIO_H)
+
 check_symbol_exists(
     preadv
     sys/uio.h
@@ -224,7 +239,7 @@ check_symbol_exists(
     pwritev
     sys/uio.h
     HAVE_PWRITEV)
-
+    
 check_symbol_exists(
     ioctl
     sys/ioctl.h
@@ -305,6 +320,18 @@ check_symbol_exists(
     HAVE_CFMAKERAW)
 
 check_struct_has_member(
+    "struct passwd"
+    pw_passwd
+    "pwd.h"
+    HAVE_PASSWD_PASSWD)
+
+check_struct_has_member(
+    "struct passwd"
+    pw_gecos
+    "pwd.h"
+    HAVE_PASSWD_GECOS)
+    
+check_struct_has_member(
     "struct utsname"
     domainname
     "sys/utsname.h"
@@ -351,31 +378,123 @@ check_struct_has_member(
     "dirent.h"
     HAVE_DIRENT_NAME_LEN)
 
-check_struct_has_member(
-    "struct statfs"
-    f_fstypename
-    "sys/mount.h"
-    HAVE_STATFS_FSTYPENAME)
-
-check_struct_has_member(
-    "struct statvfs"
-    f_fstypename
-    "sys/mount.h"
-    HAVE_STATVFS_FSTYPENAME)
-
 # statfs: Find whether this struct exists
-if (HAVE_STATFS_FSTYPENAME OR HAVE_STATVFS_FSTYPENAME)
-    set (STATFS_INCLUDES sys/mount.h)
+unset(STATFS_INCLUDES)
+
+check_c_source_compiles(
+    "
+    #include <sys/param.h>
+    #include <sys/mount.h>
+    int main(void)
+    {
+        struct statfs s;
+        return 0;
+    }
+    "
+    HAVE_STATFS_STRUCT_MOUNT_H)
+
+if (HAVE_STATFS_STRUCT_MOUNT_H)
+    set (STATFS_INCLUDES sys/param.h;sys/mount.h)
 else ()
-    set (STATFS_INCLUDES sys/statfs.h)
+    check_c_source_compiles(
+        "
+        #include <sys/vfs.h>
+        int main(void)
+        {
+            struct statfs s;
+            return 0;
+        }
+        "
+        HAVE_STATFS_STRUCT_VFS_H)
+
+    if (HAVE_STATFS_STRUCT_VFS_H)
+        set (STATFS_INCLUDES sys/vfs.h)
+    else ()
+        check_c_source_compiles(
+            "
+            #include <sys/statfs.h>
+            int main(void)
+            {
+                struct statfs s;
+                return 0;
+            }
+            "
+            HAVE_STATFS_STRUCT_STATFS_H)
+        
+        if (HAVE_STATFS_STRUCT_STATFS_H)
+            set (STATFS_INCLUDES sys/statfs.h)
+        endif ()
+    endif ()
 endif ()
 
-set(CMAKE_EXTRA_INCLUDE_FILES ${STATFS_INCLUDES})
+if (DEFINED STATFS_INCLUDES)
+    set (HAVE_STATFS_STRUCT 1)
+    
+    set (CMAKE_EXTRA_INCLUDE_FILES ${STATFS_INCLUDES})
+    check_type_size(
+        "struct statfs"
+        STATFS_SIZE
+        BUILTIN_TYPES_ONLY)
+    set(CMAKE_EXTRA_INCLUDE_FILES) # reset CMAKE_EXTRA_INCLUDE_FILES
 
-check_symbol_exists(
-    "statfs"
-    ${STATFS_INCLUDES}
-    HAVE_STATFS)
+    check_struct_has_member(
+        "struct statfs"
+        f_fstypename
+        ${STATFS_INCLUDES}
+        HAVE_STATFS_FSTYPENAME)
+
+    check_prototype_definition(
+        statfs
+        "int statfs(const char *path, struct statfs *buf)"
+        0
+        ${STATFS_INCLUDES}
+        HAVE_NON_LEGACY_STATFS)
+endif ()
+
+if (NOT HAVE_NON_LEGACY_STATFS)
+    # statvfs: Find whether this struct exists
+    unset(STATVFS_INCLUDES)
+
+    check_c_source_compiles(
+        "
+        #include <sys/mount.h>
+        int main(void)
+        {
+            struct statvfs s;
+            return 0;
+        }
+        "
+        HAVE_STATVFS_STRUCT_MOUNT_H)
+
+    if (HAVE_STATVFS_STRUCT_MOUNT_H)
+        set (STATVFS_INCLUDES sys/mount.h)
+    else ()
+        check_c_source_compiles(
+            "
+            #include <sys/statvfs.h>
+            int main(void)
+            {
+                struct statvfs s;
+                return 0;
+            }
+            "
+            HAVE_STATVFS_STRUCT_STATVFS_H)
+
+        if (HAVE_STATVFS_STRUCT_STATVFS_H)
+            set (STATVFS_INCLUDES sys/statvfs.h)
+        endif ()
+    endif ()
+
+    if (DEFINED STATVFS_INCLUDES)
+        set (HAVE_STATVFS_STRUCT 1)
+        
+        check_struct_has_member(
+            "struct statvfs"
+            f_fstypename
+            ${STATVFS_INCLUDES}
+            HAVE_STATVFS_FSTYPENAME)
+    endif ()
+endif ()
 
 check_symbol_exists(
     "getrlimit"
@@ -386,13 +505,6 @@ check_symbol_exists(
     "setrlimit"
     "sys/resource.h"
     HAVE_SETRLIMIT)
-
-check_type_size(
-    "struct statfs"
-    STATFS_SIZE
-    BUILTIN_TYPES_ONLY)
-set(CMAKE_EXTRA_INCLUDE_FILES) # reset CMAKE_EXTRA_INCLUDE_FILES
-# /statfs
 
 check_c_source_compiles(
     "
@@ -545,29 +657,36 @@ set(CMAKE_REQUIRED_FLAGS ${PREVIOUS_CMAKE_REQUIRED_FLAGS})
 set(HAVE_SUPPORT_FOR_DUAL_MODE_IPV4_PACKET_INFO 0)
 
 if (CLR_CMAKE_TARGET_LINUX)
-    if (NOT CLR_CMAKE_TARGET_ANDROID)
+    if (NOT CLR_CMAKE_TARGET_ANDROID AND NOT CLR_CMAKE_TARGET_KOS)
         set(CMAKE_REQUIRED_LIBRARIES rt)
     endif ()
 
     set(HAVE_SUPPORT_FOR_DUAL_MODE_IPV4_PACKET_INFO 1)
 endif ()
 
-check_symbol_exists(
-    malloc_size
-    malloc/malloc.h
-    HAVE_MALLOC_SIZE)
-check_symbol_exists(
-    malloc_usable_size
-    malloc.h
-    HAVE_MALLOC_USABLE_SIZE)
-check_symbol_exists(
-    malloc_usable_size
-    malloc_np.h
-    HAVE_MALLOC_USABLE_SIZE_NP)
-check_symbol_exists(
-    posix_memalign
-    stdlib.h
-    HAVE_POSIX_MEMALIGN)
+if(CLR_CMAKE_TARGET_KOS)
+    unset(HAVE_MALLOC_SIZE) # unsupported
+    set(HAVE_MALLOC_USABLE_SIZE 1) # added to malloc.h/malloc.c (external)
+    unset(HAVE_MALLOC_USABLE_SIZE_NP) # unsupported
+    unset(HAVE_POSIX_MEMALIGN) # supported, but disabled to use aligned_alloc instead
+else()
+    check_symbol_exists(
+        malloc_size
+        malloc/malloc.h
+        HAVE_MALLOC_SIZE)
+    check_symbol_exists(
+        malloc_usable_size
+        malloc.h
+        HAVE_MALLOC_USABLE_SIZE)
+    check_symbol_exists(
+        malloc_usable_size
+        malloc_np.h
+        HAVE_MALLOC_USABLE_SIZE_NP)
+    check_symbol_exists(
+        posix_memalign
+        stdlib.h
+        HAVE_POSIX_MEMALIGN)
+endif()
 
 if(CLR_CMAKE_TARGET_IOS)
     # Manually set results from check_c_source_runs() since it's not possible to actually run it during CMake configure checking
@@ -602,6 +721,8 @@ elseif(CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
 else()
     if(CLR_CMAKE_TARGET_OSX)
         unset(HAVE_ALIGNED_ALLOC) # only exists on OSX 10.15+
+    elseif(CLR_CMAKE_TARGET_KOS)
+        set(HAVE_ALIGNED_ALLOC 1) # added to malloc.h/malloc.c (external)
     else()
         check_symbol_exists(
             aligned_alloc
@@ -682,7 +803,9 @@ elseif (HAVE_PTHREAD_IN_LIBC)
 endif()
 
 if (NOT CLR_CMAKE_TARGET_WASI)
-    check_library_exists(${PTHREAD_LIBRARY} pthread_condattr_setclock "" HAVE_PTHREAD_CONDATTR_SETCLOCK)
+    if (HAVE_LIBPTHREAD OR HAVE_PTHREAD_IN_LIBC)
+        check_library_exists(${PTHREAD_LIBRARY} pthread_condattr_setclock "" HAVE_PTHREAD_CONDATTR_SETCLOCK)
+    endif()
 endif()
 
 check_symbol_exists(
@@ -784,13 +907,6 @@ check_prototype_definition(
     KEVENT_REQUIRES_INT_PARAMS)
 
 check_prototype_definition(
-    statfs
-    "int statfs(const char *path, struct statfs *buf)"
-    0
-    ${STATFS_INCLUDES}
-    HAVE_NON_LEGACY_STATFS)
-
-check_prototype_definition(
     ioctl
     "int ioctl(int fd, int request, ...)"
     0
@@ -824,7 +940,9 @@ check_c_source_compiles(
     HAVE_MKSTEMP)
 
 if (NOT HAVE_MKSTEMPS AND NOT HAVE_MKSTEMP AND NOT CLR_CMAKE_TARGET_WASI)
-    message(FATAL_ERROR "Cannot find mkstemps nor mkstemp on this platform.")
+    if (NOT CLR_CMAKE_TARGET_KOS) # TODO-KOS
+        message(FATAL_ERROR "Cannot find mkstemps nor mkstemp on this platform.")
+    endif()
 endif()
 
 check_c_source_compiles(
@@ -924,8 +1042,16 @@ check_include_files(
     HAVE_DLFCN_H)
 
 check_include_files(
-    "sys/statvfs.h"
-    HAVE_SYS_STATVFS_H)
+    "sys/syscall.h"
+    HAVE_SYS_SYSCALL_H)
+
+check_include_files(
+    "sys/file.h"
+    HAVE_SYS_FILE_H)
+
+check_include_files(
+    "strings.h"
+    HAVE_STRINGS_H)
 
 check_include_files(
     "net/if.h"
@@ -989,12 +1115,20 @@ check_include_files(
     HAVE_NETPACKET_PACKET_H)
 
 check_include_files(
+    "linux/if_packet.h"
+    HAVE_LINUX_IF_PACKET_H)
+
+check_include_files(
     "net/if_arp.h"
     HAVE_NET_IF_ARP_H)
 
 check_include_files(
     "sys/mntent.h"
     HAVE_SYS_MNTENT_H)
+
+check_include_files(
+    "mntent.h"
+    HAVE_MNTENT_H)
 
 check_include_files(
     "stdint.h;net/if_media.h"
@@ -1071,7 +1205,9 @@ set (HAVE_INOTIFY 0)
 if (HAVE_INOTIFY_INIT AND HAVE_INOTIFY_ADD_WATCH AND HAVE_INOTIFY_RM_WATCH)
     set (HAVE_INOTIFY 1)
 elseif (CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI)
-    message(FATAL_ERROR "Cannot find inotify functions on a Linux platform.")
+    if (NOT CLR_CMAKE_TARGET_KOS) # TODO-KOS
+        message(FATAL_ERROR "Cannot find inotify functions on a Linux platform.")
+    endif()
 endif()
 
 option(HeimdalGssApi "use heimdal implementation of GssApi" OFF)
@@ -1155,7 +1291,12 @@ check_symbol_exists(
     sys/sysmacros.h
     HAVE_MAKEDEV_SYSMACROSH)
 
-if (NOT HAVE_MAKEDEV_FILEH AND NOT HAVE_MAKEDEV_SYSMACROSH AND NOT CLR_CMAKE_TARGET_WASI)
+check_symbol_exists(
+    makedev
+    sys/types.h
+    HAVE_MAKEDEV_SYSTYPESH)
+
+if (NOT HAVE_MAKEDEV_FILEH AND NOT HAVE_MAKEDEV_SYSMACROSH AND NOT CLR_CMAKE_TARGET_WASI AND NOT HAVE_MAKEDEV_SYSTYPESH)
   message(FATAL_ERROR "Cannot find the makedev function on this platform.")
 endif()
 
@@ -1164,6 +1305,16 @@ check_symbol_exists(
     grp.h
     HAVE_GETGRGID_R)
 
+check_symbol_exists(
+    setgroups
+    grp.h
+    HAVE_SETGROUPS_GRPH)
+
+check_symbol_exists(
+    waitid
+    sys/wait.h
+    HAVE_WAITID_SYSWAITH)
+    
 check_c_source_compiles(
     "
     #include <asm/termbits.h>

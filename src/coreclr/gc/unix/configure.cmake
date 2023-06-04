@@ -11,6 +11,8 @@ include(CheckLibraryExists)
 check_include_files(sys/time.h HAVE_SYS_TIME_H)
 check_include_files(sys/mman.h HAVE_SYS_MMAN_H)
 check_include_files(pthread_np.h HAVE_PTHREAD_NP_H)
+check_include_files(sys/syscall.h HAVE_SYS_SYSCALL_H)
+check_include_files(strings.h HAVE_STRINGS_H)
 
 check_function_exists(vm_allocate HAVE_VM_ALLOCATE)
 check_function_exists(sysctlbyname HAVE_SYSCTLBYNAME)
@@ -118,9 +120,10 @@ elseif (HAVE_PTHREAD_IN_LIBC)
   set(PTHREAD_LIBRARY c)
 endif()
 
-check_library_exists(${PTHREAD_LIBRARY} pthread_condattr_setclock "" HAVE_PTHREAD_CONDATTR_SETCLOCK)
-
-check_library_exists(${PTHREAD_LIBRARY} pthread_setaffinity_np "" HAVE_PTHREAD_SETAFFINITY_NP)
+if (HAVE_LIBPTHREAD OR HAVE_PTHREAD_IN_LIBC)
+    check_library_exists(${PTHREAD_LIBRARY} pthread_condattr_setclock "" HAVE_PTHREAD_CONDATTR_SETCLOCK)
+    check_library_exists(${PTHREAD_LIBRARY} pthread_setaffinity_np "" HAVE_PTHREAD_SETAFFINITY_NP)
+endif()
 
 check_cxx_symbol_exists(_SC_PHYS_PAGES unistd.h HAVE__SC_PHYS_PAGES)
 check_cxx_symbol_exists(_SC_AVPHYS_PAGES unistd.h HAVE__SC_AVPHYS_PAGES)
@@ -158,30 +161,77 @@ int main(int argc, char **argv)
     return 0;
 }" HAVE_XSW_USAGE)
 
-check_struct_has_member(
-    "struct statfs"
-    f_fstypename
-    "sys/mount.h"
-    HAVE_STATFS_FSTYPENAME)
-
-check_struct_has_member(
-    "struct statvfs"
-    f_fstypename
-    "sys/mount.h"
-    HAVE_STATVFS_FSTYPENAME)
-
 # statfs: Find whether this struct exists
-if (HAVE_STATFS_FSTYPENAME OR HAVE_STATVFS_FSTYPENAME)
-    set (STATFS_INCLUDES sys/mount.h)
+unset(STATFS_INCLUDES)
+
+check_c_source_compiles(
+    "
+    #include <sys/param.h>
+    #include <sys/mount.h>
+    int main(void)
+    {
+        struct statfs s;
+        return 0;
+    }
+    "
+    HAVE_STATFS_STRUCT_MOUNT_H)
+
+if (HAVE_STATFS_STRUCT_MOUNT_H)
+    set (STATFS_INCLUDES sys/param.h;sys/mount.h)
 else ()
-    set (STATFS_INCLUDES sys/statfs.h)
+    check_c_source_compiles(
+        "
+        #include <sys/vfs.h>
+        int main(void)
+        {
+            struct statfs s;
+            return 0;
+        }
+        "
+        HAVE_STATFS_STRUCT_VFS_H)
+
+    if (HAVE_STATFS_STRUCT_VFS_H)
+        set (STATFS_INCLUDES sys/vfs.h)
+    else ()
+        check_c_source_compiles(
+            "
+            #include <sys/statfs.h>
+            int main(void)
+            {
+                struct statfs s;
+                return 0;
+            }
+            "
+            HAVE_STATFS_STRUCT_STATFS_H)
+        
+        if (HAVE_STATFS_STRUCT_STATFS_H)
+            set (STATFS_INCLUDES sys/statfs.h)
+        endif ()
+    endif ()
 endif ()
 
-check_prototype_definition(
-    statfs
-    "int statfs(const char *path, struct statfs *buf)"
-    0
-    ${STATFS_INCLUDES}
-    HAVE_NON_LEGACY_STATFS)
+if (DEFINED STATFS_INCLUDES)
+    set (HAVE_STATFS_STRUCT 1)
+    
+    set (CMAKE_EXTRA_INCLUDE_FILES ${STATFS_INCLUDES})
+    check_type_size(
+        "struct statfs"
+        STATFS_SIZE
+        BUILTIN_TYPES_ONLY)
+    set(CMAKE_EXTRA_INCLUDE_FILES) # reset CMAKE_EXTRA_INCLUDE_FILES
+
+    check_struct_has_member(
+        "struct statfs"
+        f_fstypename
+        ${STATFS_INCLUDES}
+        HAVE_STATFS_FSTYPENAME)
+
+    check_prototype_definition(
+        statfs
+        "int statfs(const char *path, struct statfs *buf)"
+        0
+        ${STATFS_INCLUDES}
+        HAVE_NON_LEGACY_STATFS)
+endif ()
 
 configure_file(${CMAKE_CURRENT_LIST_DIR}/config.gc.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.gc.h)

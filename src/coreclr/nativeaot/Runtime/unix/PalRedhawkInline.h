@@ -54,10 +54,25 @@ FORCEINLINE int64_t PalInterlockedCompareExchange64(_Inout_ int64_t volatile *pD
 }
 
 #if defined(HOST_AMD64) || defined(HOST_ARM64)
+#if defined(__KOS__)
+extern volatile int PalInterlockedCompareExchange128_Lock;
+#endif
 FORCEINLINE uint8_t PalInterlockedCompareExchange128(_Inout_ int64_t volatile *pDst, int64_t iValueHigh, int64_t iValueLow, int64_t *pComparandAndResult)
 {
     __int128_t iComparand = ((__int128_t)pComparandAndResult[1] << 64) + (uint64_t)pComparandAndResult[0];
-    __int128_t iResult = __sync_val_compare_and_swap((__int128_t volatile*)pDst, iComparand, ((__int128_t)iValueHigh << 64) + (uint64_t)iValueLow);
+    __int128_t iResult;
+    #if defined(__KOS__) // TODO-KOS: native __sync_val_compare_and_swap?
+    while (__sync_lock_test_and_set(&PalInterlockedCompareExchange128_Lock, 1)) while (PalInterlockedCompareExchange128_Lock);
+    // critical section
+    iResult = *(__int128_t volatile*)pDst;
+    if (iResult == iComparand)
+    {
+        *(__int128_t volatile*)pDst = ((__int128_t)iValueHigh << 64) + (uint64_t)iValueLow;
+    }
+    __sync_lock_release(&PalInterlockedCompareExchange128_Lock);
+    #else
+    iResult = __sync_val_compare_and_swap((__int128_t volatile*)pDst, iComparand, ((__int128_t)iValueHigh << 64) + (uint64_t)iValueLow);
+    #endif
     pComparandAndResult[0] = (int64_t)iResult; pComparandAndResult[1] = (int64_t)(iResult >> 64);
     return iComparand == iResult;
 }

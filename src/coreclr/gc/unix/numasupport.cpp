@@ -9,7 +9,9 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <string.h>
+#if !defined(__KOS__)
 #include <sys/syscall.h>
+#endif
 #include <minipal/utils.h>
 
 // The highest NUMA node available
@@ -17,7 +19,7 @@ int g_highestNumaNode = 0;
 // Is numa available
 bool g_numaAvailable = false;
 
-#ifdef TARGET_LINUX
+#if defined(TARGET_LINUX) && !defined(__KOS__)
 static int GetNodeNum(const char* path, bool firstOnly)
 {
     DIR *dir;
@@ -49,7 +51,7 @@ static int GetNodeNum(const char* path, bool firstOnly)
 
 void NUMASupportInitialize()
 {
-#ifdef TARGET_LINUX
+#if defined(TARGET_LINUX) && !defined(__KOS__)
     if (syscall(__NR_get_mempolicy, NULL, NULL, 0, 0, 0) < 0 && errno == ENOSYS)
         return;
 
@@ -65,7 +67,7 @@ void NUMASupportInitialize()
 
 int GetNumaNodeNumByCpu(int cpu)
 {
-#ifdef TARGET_LINUX
+#if defined(TARGET_LINUX) && !defined(__KOS__)
     char path[64];
     if (snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d", cpu) < 0)
         return -1;
@@ -78,7 +80,7 @@ int GetNumaNodeNumByCpu(int cpu)
 
 long BindMemoryPolicy(void* start, unsigned long len, const unsigned long* nodemask, unsigned long maxnode)
 {
-#ifdef TARGET_LINUX
+#if defined(TARGET_LINUX) && !defined(__KOS__)
     return syscall(__NR_mbind, (long)start, len, 1, (long)nodemask, maxnode, 0);
 #else
     return -1;

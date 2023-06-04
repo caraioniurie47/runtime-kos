@@ -20,6 +20,8 @@ usage()
   echo "  --arch (-a)                     Target platform: x86, x64, arm, armv6, armel, arm64, loongarch64, riscv64, s390x, ppc64le or wasm."
   echo "                                  [Default: Your machine's architecture.]"
   echo "  --binaryLog (-bl)               Output binary log."
+  echo "  --kos                           TODO-KOS: replace with platform RID."
+  echo "  --icudir                        Optional argument that overrides the ICU dir."
   echo "  --cross                         Optional argument to signify cross compilation."
   echo "  --configuration (-c)            Build configuration: Debug, Release or Checked."
   echo "                                  Checked is exclusive to the CLR subset. It is the same as Debug, except code is"
@@ -414,6 +416,20 @@ while [[ $# > 0 ]]; do
           ;;
       esac
       arguments="$arguments /p:HostConfiguration=$val"
+      shift 2
+      ;;
+
+     -kos)
+      arguments="$arguments /p:TargetsKOS=True"
+      shift 1
+      ;;
+
+     -icudir)
+      if [ -z ${2+x} ]; then
+        echo "No value for icudir is supplied." 1>&2
+        exit 1
+      fi
+      arguments="$arguments /p:_IcuDir=$(echo "$2")"
       shift 2
       ;;
 

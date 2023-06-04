@@ -85,7 +85,7 @@ typedef size_t GSCookie;
 
 extern "C" volatile READONLY_ATTR const GSCookie __security_cookie = 0;
 #else
-extern "C" volatile GSCookie __security_cookie = 0;
+extern "C" volatile GSCookie __security_cookie = 0; // TODO-KOS: there is a GCC warning, "add_compile_options(-Werror)"" is not used
 #endif // FEATURE_READONLY_GS_COOKIE
 
 #endif // TARGET_UNIX

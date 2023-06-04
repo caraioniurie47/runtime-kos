@@ -61,7 +61,7 @@ public:
 
     bool Initialize()
     {
-        pthread_condattr_t attrs;
+        pthread_condattr_t attrs = {}; // TODO-KOS: empty init required on KOS!
         int st = pthread_condattr_init(&attrs);
         if (st != 0)
         {

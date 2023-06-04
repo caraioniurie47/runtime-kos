@@ -31,10 +31,15 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#if HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h>
+#endif
 #include <dlfcn.h>
 #include <dirent.h>
 #include <string.h>
+#if HAVE_STRINGS_H && defined(__KOS__)
+#include <strings.h> // strcasecmp is declared here
+#endif
 #include <ctype.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -57,6 +62,10 @@
 #ifdef TARGET_APPLE
 #include <minipal/getexepath.h>
 #include <mach-o/getsect.h>
+#endif
+
+#if defined(__KOS__)
+volatile int PalInterlockedCompareExchange128_Lock = 0;
 #endif
 
 using std::nullptr_t;
@@ -712,7 +721,7 @@ REDHAWK_PALEXPORT HANDLE REDHAWK_PALAPI PalGetModuleHandleFromPointer(_In_ void*
     int st = dladdr(pointer, &info);
     if (st != 0)
     {
-        moduleHandle = info.dli_fbase;
+        moduleHandle = (HANDLE)info.dli_fbase;
     }
 #endif //!defined(HOST_WASM)
 
@@ -1265,7 +1274,9 @@ extern "C" uint64_t PalQueryPerformanceFrequency()
 
 extern "C" uint64_t PalGetCurrentOSThreadId()
 {
-#if defined(__linux__)
+#if defined(__KOS__)
+    return (uint64_t)gettid();
+#elif defined(__linux__)
     return (uint64_t)syscall(SYS_gettid);
 #elif defined(__APPLE__)
     uint64_t tid;

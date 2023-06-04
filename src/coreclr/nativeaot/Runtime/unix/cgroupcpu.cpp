@@ -22,16 +22,21 @@ Abstract:
 #include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
-#if defined(__APPLE__) || defined(__FreeBSD__)
-#include <sys/param.h>
-#include <sys/mount.h>
-#else
-#include <sys/vfs.h>
-#endif
 #include <errno.h>
 #include <limits>
 
 #include "config.gc.h"
+
+#if HAVE_NON_LEGACY_STATFS // after including config.gc.h
+#if HAVE_STATFS_STRUCT_MOUNT_H // BSD, Apple
+#include <sys/param.h>
+#include <sys/mount.h>
+#elif HAVE_STATFS_STRUCT_VFS_H // Linux
+#include <sys/vfs.h>
+#elif HAVE_STATFS_STRUCT_STATFS_H
+#include <sys/statfs.h>
+#endif
+#endif
 
 #include "cgroupcpu.h"
 

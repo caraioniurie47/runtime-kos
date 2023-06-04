@@ -80,6 +80,7 @@ __CodeCoverage=0
 __Compiler=clang
 __CommonMSBuildArgs=
 __ConfigureOnly=0
+__TargetsKOS=0 # TODO-KOS
 __CrossBuild=0
 __PgoInstrument=0
 __PgoOptDataPath=""

@@ -20,11 +20,16 @@ SET_DEFAULT_DEBUG_CHANNEL(MISC);
 #include "pal/virtual.h"
 #include "pal/cgroup.h"
 #include <algorithm>
-#if defined(__APPLE__) || defined(__FreeBSD__)
+
+#if HAVE_NON_LEGACY_STATFS
+#if HAVE_STATFS_STRUCT_MOUNT_H // BSD, Apple
 #include <sys/param.h>
 #include <sys/mount.h>
-#else
+#elif HAVE_STATFS_STRUCT_VFS_H // Linux
 #include <sys/vfs.h>
+#elif HAVE_STATFS_STRUCT_STATFS_H
+#include <sys/statfs.h>
+#endif
 #endif
 
 #define CGROUP2_SUPER_MAGIC 0x63677270

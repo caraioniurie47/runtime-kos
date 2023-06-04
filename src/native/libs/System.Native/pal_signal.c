@@ -453,7 +453,11 @@ static bool InstallSignalHandler(int sig, int flags)
     {
         // Maintain flags and mask of original handler.
         newAction = *orig;
+#ifdef SA_RESETHAND // TODO-KOS: SA_RESETHAND is not declared
         newAction.sa_flags = orig->sa_flags & ~(SA_RESTART | SA_RESETHAND);
+#else
+        newAction.sa_flags = orig->sa_flags & ~(SA_RESTART);
+#endif
     }
     else
     {
@@ -674,7 +678,11 @@ void InstallTTOUHandlerForConsole(ConsoleSigTtouHandler handler)
         // on EINTR when the process is running in background and the terminal
         // configured with TOSTOP.
         RestoreSignalHandler(SIGTTOU);
+#ifdef SA_RESETHAND // TODO-KOS: SA_RESETHAND is not declared
         installed = InstallSignalHandler(SIGTTOU, (int)SA_RESETHAND);
+#else
+        installed = InstallSignalHandler(SIGTTOU, 0);
+#endif
         assert(installed);
     }
     pthread_mutex_unlock(&lock);

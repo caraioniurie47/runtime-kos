@@ -24,6 +24,10 @@ include_directories(${CLR_SRC_NATIVE_DIR})
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
+if (CLR_CMAKE_TARGET_KOS)
+  set(STATIC_LIBS_ONLY 1)
+endif (CLR_CMAKE_TARGET_KOS)
+
 if (STATIC_LIBS_ONLY)
     # Suppress exporting of the PAL APIs
     add_definitions(-DPALEXPORT=EXTERN_C)
@@ -50,6 +54,10 @@ if (CLR_CMAKE_TARGET_UNIX OR CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
 
     if (CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
         set(GEN_SHARED_LIB 0)
+        set(STATIC_LIB_DESTINATION .)
+    endif ()
+
+    if (CLR_CMAKE_TARGET_KOS)
         set(STATIC_LIB_DESTINATION .)
     endif ()
 
@@ -165,7 +173,10 @@ if (CLR_CMAKE_TARGET_UNIX OR CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
     add_subdirectory(System.Native)
     add_subdirectory(System.Globalization.Native)
 
-    if (CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
+    if (CLR_CMAKE_TARGET_KOS)
+        # System.Net.Security.Native is intentionally disabled
+        # System.Security.Cryptography.Native is intentionally disabled
+    elseif (CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
         # skip for now
     elseif (CLR_CMAKE_TARGET_MACCATALYST)
         add_subdirectory(System.Net.Security.Native)

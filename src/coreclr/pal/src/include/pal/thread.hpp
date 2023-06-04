@@ -24,7 +24,9 @@ Abstract:
 #include "cs.hpp"
 
 #include <pthread.h>
+#if HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h>
+#endif
 #if HAVE_MACH_EXCEPTIONS
 #include <mach/mach.h>
 #endif // HAVE_MACH_EXCEPTIONS
@@ -758,7 +760,9 @@ Abstract:
   linux we need to use gettid().
 
 --*/
-#if defined(__linux__)
+#if defined(__KOS__)
+#define PlatformGetCurrentThreadId() (SIZE_T)gettid()
+#elif defined(__linux__)
 #define PlatformGetCurrentThreadId() (SIZE_T)syscall(SYS_gettid)
 #elif defined(__APPLE__)
 inline SIZE_T PlatformGetCurrentThreadId() {

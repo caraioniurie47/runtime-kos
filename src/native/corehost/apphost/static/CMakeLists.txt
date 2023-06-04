@@ -141,9 +141,7 @@ else()
 
         System.Globalization.Native-Static
         System.IO.Compression.Native-Static
-        System.Net.Security.Native-Static
         System.Native-Static
-        System.Security.Cryptography.Native.OpenSsl-Static
 
         palrt
         coreclrpal_dac
@@ -156,22 +154,34 @@ else()
     # additional requirements for System.IO.Compression.Native
     include(${CLR_SRC_NATIVE_DIR}/libs/System.IO.Compression.Native/extra_libs.cmake)
     append_extra_compression_libs(NATIVE_LIBS)
+    
+    if(NOT CLR_CMAKE_TARGET_KOS)
+        LIST(APPEND NATIVE_LIBS
+            System.Net.Security.Native-Static
+        )
 
-    if (NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_HOST_ANDROID) # no gssapi on tvOS, see https://developer.apple.com/documentation/gss
-        # Additional requirements for System.Net.Security.Native
-        include(${CLR_SRC_NATIVE_DIR}/libs/System.Net.Security.Native/extra_libs.cmake)
-        append_extra_security_libs(NATIVE_LIBS)
-    endif()
+        if (NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_HOST_ANDROID) # no gssapi on tvOS, see https://developer.apple.com/documentation/gss
+            # Additional requirements for System.Net.Security.Native
+            include(${CLR_SRC_NATIVE_DIR}/libs/System.Net.Security.Native/extra_libs.cmake)
+            append_extra_security_libs(NATIVE_LIBS)
+        endif()
+    endif(NOT CLR_CMAKE_TARGET_KOS)
 
     # Additional requirements for System.Native
     include(${CLR_SRC_NATIVE_DIR}/libs/System.Native/extra_libs.cmake)
     append_extra_system_libs(NATIVE_LIBS)
 
-    if(NOT CLR_CMAKE_TARGET_MACCATALYST AND NOT CLR_CMAKE_TARGET_IOS AND NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_HOST_ANDROID)
-        # Additional requirements for System.Security.Cryptography.Native.OpenSsl
-        include(${CLR_SRC_NATIVE_DIR}/libs/System.Security.Cryptography.Native/extra_libs.cmake)
-        append_extra_cryptography_libs(NATIVE_LIBS)
-    endif()
+    if(NOT CLR_CMAKE_TARGET_KOS)
+        LIST(APPEND NATIVE_LIBS
+            System.Security.Cryptography.Native.OpenSsl-Static
+        )
+
+        if(NOT CLR_CMAKE_TARGET_MACCATALYST AND NOT CLR_CMAKE_TARGET_IOS AND NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_HOST_ANDROID)
+            # Additional requirements for System.Security.Cryptography.Native.OpenSsl
+            include(${CLR_SRC_NATIVE_DIR}/libs/System.Security.Cryptography.Native/extra_libs.cmake)
+            append_extra_cryptography_libs(NATIVE_LIBS)
+        endif()
+    endif(NOT CLR_CMAKE_TARGET_KOS)
 
     set(RUNTIMEINFO_LIB runtimeinfo)
 

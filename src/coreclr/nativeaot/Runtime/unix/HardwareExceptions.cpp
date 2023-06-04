@@ -321,6 +321,10 @@ uint32_t GetExceptionCodeForSignal(const siginfo_t *siginfo, const void *context
 {
     // IMPORTANT NOTE: This function must not call any signal unsafe functions
     // since it is called from signal handlers.
+
+#if defined(__KOS__) // TODO-KOS
+    return 0;
+#else
 #ifdef ILL_ILLOPC
     switch (siginfo->si_signo)
     {
@@ -501,6 +505,7 @@ uint32_t GetExceptionCodeForSignal(const siginfo_t *siginfo, const void *context
     }
     return EXCEPTION_ILLEGAL_INSTRUCTION;
 #endif  // ILL_ILLOPC
+#endif  // __KOS__
 }
 
 // Common handler for hardware exception signals

@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <NativeOptimizationDataSupported Condition="'$(TargetOS)' == 'windows' And ('$(TargetArchitecture)' == 'x64' Or '$(TargetArchitecture)' == 'x86' Or '$(TargetArchitecture)' == 'arm64')">true</NativeOptimizationDataSupported>
-    <NativeOptimizationDataSupported Condition="'$(TargetOS)' == 'linux' And ('$(TargetArchitecture)' == 'x64' Or '$(TargetArchitecture)' == 'arm64')">true</NativeOptimizationDataSupported>
+    <NativeOptimizationDataSupported Condition="'$(TargetOS)' == 'linux' And ('$(TargetArchitecture)' == 'x64' Or '$(TargetArchitecture)' == 'arm64') And !$(CppCompilerAndLinker.Contains('gcc'))">true</NativeOptimizationDataSupported>
     <NativeOptimizationDataSupported Condition="'$(NoPgoOptimize)' == 'true'">false</NativeOptimizationDataSupported>
     <NativeOptimizationDataSupported Condition="'$(Configuration)' != 'Release'">false</NativeOptimizationDataSupported>
 

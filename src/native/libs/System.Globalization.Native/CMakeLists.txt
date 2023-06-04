@@ -13,6 +13,10 @@ if(CLR_CMAKE_TARGET_UNIX OR CLR_CMAKE_TARGET_WASI)
     # Workaround for https://unicode-org.atlassian.net/browse/ICU-20601
     add_compile_options(-Wno-extra-semi-stmt)
     add_compile_options(-Wno-unknown-warning-option)
+    
+    if (CLR_CMAKE_TARGET_KOS)
+        add_compile_options(-Wno-deprecated-declarations)
+    endif()
 
     if (NOT CLR_CMAKE_TARGET_ANDROID AND NOT DEFINED CMAKE_ICU_DIR)
         if (CLR_CMAKE_TARGET_OSX)
@@ -71,7 +75,7 @@ if (CMAKE_USE_PTHREADS)
     add_linker_flag(-pthread)
 endif()
 
-if (LOCAL_BUILD)
+if (LOCAL_BUILD OR CLR_CMAKE_TARGET_KOS)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     set(NATIVEGLOBALIZATION_SOURCES ${NATIVEGLOBALIZATION_SOURCES} pal_icushim_static.c)
     add_definitions(-DLOCAL_BUILD)
@@ -93,7 +97,7 @@ if (CLR_CMAKE_TARGET_APPLE)
 endif()
 
 # time zone names are filtered out of icu data for the browser and associated functionality is disabled
-if (NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI)
+if (NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI AND NOT CLR_CMAKE_TARGET_KOS)
     set(NATIVEGLOBALIZATION_SOURCES ${NATIVEGLOBALIZATION_SOURCES} pal_timeZoneInfo.c)
 endif()
 

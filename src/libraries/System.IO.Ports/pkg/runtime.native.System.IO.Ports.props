@@ -7,21 +7,23 @@
     <IsPackable>true</IsPackable>
     <AllowedOutputExtensionsInSymbolsPackageBuildOutputFolder>$(SymbolsSuffix)</AllowedOutputExtensionsInSymbolsPackageBuildOutputFolder>
     <!-- When KeepNativeSymbols is set, debug symbols are kept in the .so files.  Separate symbol files do not exist that need to be packed. -->
-    <TargetsForTfmSpecificDebugSymbolsInPackage Condition="'$(KeepNativeSymbols)' != 'true'">$(TargetsForTfmSpecificDebugSymbolsInPackage);AddRuntimeSpecificNativeSymbolToPackage</TargetsForTfmSpecificDebugSymbolsInPackage>
+    <TargetsForTfmSpecificDebugSymbolsInPackage Condition="'$(KeepNativeSymbols)' != 'true' and '$(TargetsKOS)' != 'true'">$(TargetsForTfmSpecificDebugSymbolsInPackage);AddRuntimeSpecificNativeSymbolToPackage</TargetsForTfmSpecificDebugSymbolsInPackage>
     <UseRuntimePackageDisclaimer>true</UseRuntimePackageDisclaimer>
     <!-- This is a native package and doesn't contain any ref/lib assets. -->
     <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <NativeLibSuffix>$(LibSuffix)</NativeLibSuffix>
+    <NativeLibSuffix Condition="'$(TargetsKOS)' == 'true'">$(StaticLibSuffix)</NativeLibSuffix>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="$(NativeBinDir)$(LibPrefix)System.IO.Ports.Native$(LibSuffix)"
+    <None Include="$(NativeBinDir)$(LibPrefix)System.IO.Ports.Native$(NativeLibSuffix)"
           PackagePath="runtimes/$(OutputRID)/native"
           Pack="true" />
   </ItemGroup>
 
   <Target Name="AddRuntimeSpecificNativeSymbolToPackage">
     <ItemGroup>
-      <TfmSpecificDebugSymbolsFile Include="$(NativeBinDir)$(LibPrefix)System.IO.Ports.Native$(LibSuffix)$(SymbolsSuffix)"
+      <TfmSpecificDebugSymbolsFile Include="$(NativeBinDir)$(LibPrefix)System.IO.Ports.Native$(NativeLibSuffix)$(SymbolsSuffix)"
                                    TargetPath="/runtimes/$(OutputRID)/native"
                                    TargetFramework="$(TargetFramework)" />
     </ItemGroup>

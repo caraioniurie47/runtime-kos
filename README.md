@@ -1,3 +1,8 @@
+# KasperskyOS
+
+This is a fork customized to be used with KasperskyOS.
+- [How to build?](HOWTO-KOS.md)
+
 # .NET Runtime
 
 [![Build Status](https://dev.azure.com/dnceng-public/public/_apis/build/status/dotnet/runtime/runtime?branchName=main)](https://dev.azure.com/dnceng-public/public/_build/latest?definitionId=129&branchName=main)

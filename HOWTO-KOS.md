@@ -81,10 +81,10 @@ wget https://github.com/caraioniurie47/runtime-kos/releases/download/release_v01
 unzip kos-net-packages.zip
 
 **OR Build .NET NativeAOT package:**
-
-cd /home/runtime-kos
-git clean -ffdx
-
+  
+cd /home/runtime-kos  
+git clean -ffdx  
+  
 sudo env "PATH=$PATH" ROOTFS_DIR="/opt/KasperskyOS-Community-Edition-1.1.1.40" ./build.sh -s clr.nativeaotruntime+clr.nativeaotlibs -c release --cross --gcc --kos --arch arm64 --icudir "/opt/icu4c/kos"
 
 sudo env "PATH=$PATH" ROOTFS_DIR="/opt/KasperskyOS-Community-Edition-1.1.1.40" ./build.sh -s libs -c release --cross --gcc --kos --arch arm64 --icudir "/opt/icu4c/kos"

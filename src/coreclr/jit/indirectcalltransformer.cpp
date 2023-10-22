@@ -218,12 +218,15 @@ private:
         // Arguments:
         //    jumpKind - jump kind for the new basic block
         //    insertAfter - basic block, after which compiler has to insert the new one.
+        //    jumpDest - jump target for the new basic block. Defaults to nullptr.
         //
         // Return Value:
         //    new basic block.
-        BasicBlock* CreateAndInsertBasicBlock(BBjumpKinds jumpKind, BasicBlock* insertAfter)
+        BasicBlock* CreateAndInsertBasicBlock(BBjumpKinds jumpKind,
+                                              BasicBlock* insertAfter,
+                                              BasicBlock* jumpDest = nullptr)
         {
-            BasicBlock* block = compiler->fgNewBBafter(jumpKind, insertAfter, true);
+            BasicBlock* block = compiler->fgNewBBafter(jumpKind, insertAfter, true, jumpDest);
             block->bbFlags |= BBF_IMPORTED;
             return block;
         }
@@ -274,12 +277,13 @@ private:
             }
 
             // checkBlock
-            checkBlock->bbJumpDest = elseBlock;
+            assert(checkBlock->KindIs(BBJ_NONE));
+            checkBlock->SetJumpKindAndTarget(BBJ_COND, elseBlock DEBUG_ARG(compiler));
             compiler->fgAddRefPred(elseBlock, checkBlock);
             compiler->fgAddRefPred(thenBlock, checkBlock);
 
             // thenBlock
-            thenBlock->bbJumpDest = remainderBlock;
+            assert(thenBlock->HasJumpTo(remainderBlock));
             compiler->fgAddRefPred(remainderBlock, thenBlock);
 
             // elseBlock
@@ -361,7 +365,7 @@ private:
         {
             assert(checkIdx == 0);
 
-            checkBlock                 = CreateAndInsertBasicBlock(BBJ_COND, currBlock);
+            checkBlock                 = CreateAndInsertBasicBlock(BBJ_NONE, currBlock);
             GenTree*   fatPointerMask  = new (compiler, GT_CNS_INT) GenTreeIntCon(TYP_I_IMPL, FAT_POINTER_MASK);
             GenTree*   fptrAddressCopy = compiler->gtCloneExpr(fptrAddress);
             GenTree*   fatPointerAnd   = compiler->gtNewOperNode(GT_AND, TYP_I_IMPL, fptrAddressCopy, fatPointerMask);
@@ -378,7 +382,8 @@ private:
         //
         virtual void CreateThen(uint8_t checkIdx)
         {
-            thenBlock                     = CreateAndInsertBasicBlock(BBJ_ALWAYS, checkBlock);
+            assert(remainderBlock != nullptr);
+            thenBlock                     = CreateAndInsertBasicBlock(BBJ_ALWAYS, checkBlock, remainderBlock);
             Statement* copyOfOriginalStmt = compiler->gtCloneStmt(stmt);
             compiler->fgInsertStmtAtEnd(thenBlock, copyOfOriginalStmt);
         }
@@ -484,7 +489,8 @@ private:
             JITDUMP("Likelihood of correct guess is %u\n", likelihood);
 
             // TODO: implement chaining for multiple GDV candidates
-            const bool canChainGdv = GetChecksCount() == 1;
+            const bool canChainGdv =
+                (GetChecksCount() == 1) && ((origCall->gtCallMoreFlags & GTF_CALL_M_GUARDED_DEVIRT_EXACT) == 0);
             if (canChainGdv)
             {
                 const bool isChainedGdv = (origCall->gtCallMoreFlags & GTF_CALL_M_GUARDED_DEVIRT_CHAIN) != 0;
@@ -571,17 +577,18 @@ private:
             {
                 // There's no need for a new block here. We can just append to currBlock.
                 //
-                checkBlock             = currBlock;
-                checkBlock->bbJumpKind = BBJ_COND;
+                checkBlock        = currBlock;
+                checkFallsThrough = false;
             }
             else
             {
                 // In case of multiple checks, append to the previous thenBlock block
                 BasicBlock* prevCheckBlock = checkBlock;
-                checkBlock                 = CreateAndInsertBasicBlock(BBJ_COND, thenBlock);
+                checkBlock                 = CreateAndInsertBasicBlock(BBJ_NONE, thenBlock);
+                checkFallsThrough          = false;
 
                 // prevCheckBlock is expected to jump to this new check (if its type check doesn't succeed)
-                prevCheckBlock->bbJumpDest = checkBlock;
+                prevCheckBlock->SetJumpKindAndTarget(BBJ_COND, checkBlock DEBUG_ARG(compiler));
                 compiler->fgAddRefPred(checkBlock, prevCheckBlock);
 
                 // Calculate the total likelihood for this check as a sum of likelihoods
@@ -643,6 +650,17 @@ private:
             // because flow along the "cold path" is going to bypass the check block.
             //
             lastStmt = checkBlock->lastStmt();
+
+            // In case if GDV candidates are "exact" (e.g. we have the full list of classes implementing
+            // the given interface in the app - NativeAOT only at this moment) we assume the last
+            // check will always be true, so we just simplify the block to BBJ_NONE
+            const bool isLastCheck = (checkIdx == origCall->GetInlineCandidatesCount() - 1);
+            if (isLastCheck && ((origCall->gtCallMoreFlags & GTF_CALL_M_GUARDED_DEVIRT_EXACT) != 0))
+            {
+                checkBlock->SetJumpKindAndTarget(BBJ_NONE DEBUG_ARG(compiler));
+                checkFallsThrough = true;
+                return;
+            }
 
             InlineCandidateInfo* guardedInfo = origCall->GetGDVCandidateInfo(checkIdx);
 
@@ -850,7 +868,7 @@ private:
 
             JITDUMP("Direct call [%06u] in block " FMT_BB "\n", compiler->dspTreeID(call), block->bbNum);
 
-            CORINFO_METHOD_HANDLE  methodHnd = call->gtCallMethHnd;
+            CORINFO_METHOD_HANDLE  methodHnd = inlineInfo->guardedMethodHandle;
             CORINFO_CONTEXT_HANDLE context   = inlineInfo->exactContextHnd;
             if (clsHnd != NO_CLASS_HANDLE)
             {
@@ -860,7 +878,8 @@ private:
                 unsigned   methodFlags            = compiler->info.compCompHnd->getMethodAttribs(methodHnd);
                 const bool isLateDevirtualization = true;
                 const bool explicitTailCall = (call->AsCall()->gtCallMoreFlags & GTF_CALL_M_EXPLICIT_TAILCALL) != 0;
-                compiler->impDevirtualizeCall(call, nullptr, &methodHnd, &methodFlags, &context, nullptr,
+                CORINFO_CONTEXT_HANDLE contextInput = context;
+                compiler->impDevirtualizeCall(call, nullptr, &methodHnd, &methodFlags, &contextInput, &context,
                                               isLateDevirtualization, explicitTailCall);
             }
             else
@@ -896,6 +915,21 @@ private:
             // So above code should succeed in devirtualizing.
             //
             assert(!call->IsVirtual() && !call->IsDelegateInvoke());
+
+            // If this call is in tail position, see if we've created a recursive tail call
+            // candidate...
+            //
+            if (call->CanTailCall() && compiler->gtIsRecursiveCall(methodHnd))
+            {
+                compiler->setMethodHasRecursiveTailcall();
+                block->bbFlags |= BBF_RECURSIVE_TAILCALL;
+                JITDUMP("[%06u] is a recursive call in tail position\n", compiler->dspTreeID(call));
+            }
+            else
+            {
+                JITDUMP("[%06u] is%s in tail position and is%s recursive\n", compiler->dspTreeID(call),
+                        call->CanTailCall() ? "" : " not", compiler->gtIsRecursiveCall(methodHnd) ? "" : " not");
+            }
 
             // If the devirtualizer was unable to transform the call to invoke the unboxed entry, the inline info
             // we set up may be invalid. We won't be able to inline anyways. So demote the call as an inline candidate.
@@ -965,13 +999,12 @@ private:
         //
         virtual void CreateThen(uint8_t checkIdx)
         {
-            thenBlock = CreateAndInsertBasicBlock(BBJ_ALWAYS, checkBlock);
+            // thenBlock always jumps to remainderBlock
+            thenBlock = CreateAndInsertBasicBlock(BBJ_ALWAYS, checkBlock, remainderBlock);
             thenBlock->bbFlags |= currBlock->bbFlags & BBF_SPLIT_GAINED;
-            thenBlock->bbJumpDest = remainderBlock;
             thenBlock->inheritWeightPercentage(currBlock, origCall->GetGDVCandidateInfo(checkIdx)->likelihood);
 
-            // thenBlock always jumps to remainderBlock. Also, it has a single pred - last checkBlock
-            thenBlock->bbJumpDest = remainderBlock;
+            // Also, thenBlock has a single pred - last checkBlock
             compiler->fgAddRefPred(thenBlock, checkBlock);
             compiler->fgAddRefPred(remainderBlock, thenBlock);
 
@@ -986,10 +1019,23 @@ private:
             elseBlock = CreateAndInsertBasicBlock(BBJ_NONE, thenBlock);
             elseBlock->bbFlags |= currBlock->bbFlags & BBF_SPLIT_GAINED;
 
+            // CheckBlock flows into elseBlock unless we deal with the case
+            // where we know the last check is always true (in case of "exact" GDV)
+            if (!checkFallsThrough)
+            {
+                checkBlock->SetJumpKindAndTarget(BBJ_COND, elseBlock DEBUG_ARG(compiler));
+                compiler->fgAddRefPred(elseBlock, checkBlock);
+            }
+            else
+            {
+                // In theory, we could simplify the IR here, but since it's a rare case
+                // and is NativeAOT-only, we just assume the unreached block will be removed
+                // by other phases.
+                assert(origCall->gtCallMoreFlags & GTF_CALL_M_GUARDED_DEVIRT_EXACT);
+            }
+
             // elseBlock always flows into remainderBlock
-            checkBlock->bbJumpDest = elseBlock;
             compiler->fgAddRefPred(remainderBlock, elseBlock);
-            compiler->fgAddRefPred(elseBlock, checkBlock);
 
             // Calculate the likelihood of the else block as a remainder of the sum
             // of all the other likelihoods.
@@ -1045,17 +1091,17 @@ private:
             // Find the hot/cold predecessors. (Consider: just record these when
             // we did the scouting).
             //
-            BasicBlock* const coldBlock = checkBlock->bbPrev;
+            BasicBlock* const coldBlock = checkBlock->Prev();
 
-            if (coldBlock->bbJumpKind != BBJ_NONE)
+            if (!coldBlock->KindIs(BBJ_NONE))
             {
                 JITDUMP("Unexpected flow from cold path " FMT_BB "\n", coldBlock->bbNum);
                 return;
             }
 
-            BasicBlock* const hotBlock = coldBlock->bbPrev;
+            BasicBlock* const hotBlock = coldBlock->Prev();
 
-            if ((hotBlock->bbJumpKind != BBJ_ALWAYS) || (hotBlock->bbJumpDest != checkBlock))
+            if (!hotBlock->KindIs(BBJ_ALWAYS) || !hotBlock->HasJumpTo(checkBlock))
             {
                 JITDUMP("Unexpected flow from hot path " FMT_BB "\n", hotBlock->bbNum);
                 return;
@@ -1100,8 +1146,7 @@ private:
             // not fall through to the check block.
             //
             compiler->fgRemoveRefPred(checkBlock, coldBlock);
-            coldBlock->bbJumpKind = BBJ_ALWAYS;
-            coldBlock->bbJumpDest = elseBlock;
+            coldBlock->SetJumpKindAndTarget(BBJ_ALWAYS, elseBlock DEBUG_ARG(compiler));
             compiler->fgAddRefPred(elseBlock, coldBlock);
         }
 
@@ -1243,6 +1288,7 @@ private:
     private:
         unsigned   returnTemp;
         Statement* lastStmt;
+        bool       checkFallsThrough;
 
         //------------------------------------------------------------------------
         // CreateTreeForLookup: Create a tree representing a lookup of a method address.

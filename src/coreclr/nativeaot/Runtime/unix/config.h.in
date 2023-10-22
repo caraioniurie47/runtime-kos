@@ -5,6 +5,8 @@
 #cmakedefine01 HAVE_SYS_SYSCALL_H
 #cmakedefine01 HAVE_STRINGS_H
 
+#cmakedefine01 HAVE_PRCTL_H
+#cmakedefine01 HAVE_PR_SET_PTRACER
 #cmakedefine01 HAVE_PTHREAD_ATTR_GET_NP
 #cmakedefine01 HAVE_PTHREAD_GETATTR_NP
 #cmakedefine01 HAVE_PTHREAD_CONDATTR_SETCLOCK
@@ -17,6 +19,7 @@
 #cmakedefine01 HAVE___GREGSET_T
 
 #cmakedefine01 HAVE_SIGINFO_T
+#cmakedefine01 HAVE_SIGINFO_T_ERRORNO
 
 #cmakedefine01 HAVE_LWP_SELF
 #cmakedefine01 HAVE_CLOCK_MONOTONIC

@@ -3,7 +3,7 @@
 __dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The SDK variable should specify the path to the KasperskyOS Community Edition installation directory.
-SDK="/opt/KasperskyOS-Community-Edition-1.1.1.13"
+SDK="/opt/KasperskyOS-Community-Edition-1.1.1.40"
 TOOLCHAIN=$SDK/toolchain
 SYSROOT=$SDK/sysroot-aarch64-kos
 PATH=$TOOLCHAIN/bin:$PATH

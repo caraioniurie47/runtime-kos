@@ -48,13 +48,14 @@ else(CLR_CMAKE_HOST_WIN32)
     if(CLR_CMAKE_HOST_LINUX OR CLR_CMAKE_HOST_FREEBSD OR CLR_CMAKE_HOST_NETBSD OR CLR_CMAKE_HOST_SUNOS)
         # This option is necessary to ensure that the overloaded new/delete operators defined inside
         # of the utilcode will be used instead of the standard library delete operator.
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Xlinker -Bsymbolic")
+        add_link_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>:LINKER:-Bsymbolic>)
     endif(CLR_CMAKE_HOST_LINUX OR CLR_CMAKE_HOST_FREEBSD OR CLR_CMAKE_HOST_NETBSD OR CLR_CMAKE_HOST_SUNOS)
 
     set_exports_linker_option(${EXPORTS_FILE})
 endif(CLR_CMAKE_HOST_WIN32)
 
 add_library_clr(mscordbi SHARED ${MSCORDBI_SOURCES})
+set_target_properties(mscordbi PROPERTIES DBI_COMPONENT TRUE)
 target_precompile_headers(mscordbi PRIVATE $<$<COMPILE_LANGUAGE:CXX>:stdafx.h>)
 
 if(CLR_CMAKE_HOST_UNIX)
@@ -107,7 +108,7 @@ elseif(CLR_CMAKE_HOST_UNIX)
     if(COMMAND check_linker_flag)
         check_linker_flag(CXX -Wl,--undefined-version LINKER_SUPPORTS_UNDEFINED_VERSION)
         if (LINKER_SUPPORTS_UNDEFINED_VERSION)
-            add_linker_flag(-Wl,--undefined-version)
+            target_link_options(mscordbi PRIVATE "LINKER:--undefined-version")
         endif(LINKER_SUPPORTS_UNDEFINED_VERSION)
     endif(COMMAND check_linker_flag)
 
@@ -125,4 +126,4 @@ elseif(CLR_CMAKE_HOST_UNIX)
 endif(CLR_CMAKE_HOST_WIN32)
 
 # add the install targets
-install_clr(TARGETS mscordbi DESTINATIONS . sharedFramework COMPONENT runtime)
+install_clr(TARGETS mscordbi DESTINATIONS . sharedFramework COMPONENT debug)

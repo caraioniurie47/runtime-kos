@@ -2,7 +2,7 @@
 
 initTargetDistroRid()
 {
-    source "$__RepoRootDir/eng/native/init-distro-rid.sh"
+    source "$__RepoRootDir/eng/common/native/init-distro-rid.sh"
 
     local passedRootfsDir=""
 
@@ -11,7 +11,7 @@ initTargetDistroRid()
         passedRootfsDir="$ROOTFS_DIR"
     fi
 
-    initDistroRidGlobal "$__TargetOS" "$__TargetArch" "$__PortableBuild" "$passedRootfsDir"
+    initDistroRidGlobal "$__TargetOS" "$__TargetArch" "$passedRootfsDir"
 }
 
 setup_dirs()
@@ -83,7 +83,7 @@ build_native()
         __Compiler="default"
     fi
 
-    if [[ ( "$targetOS" == android || "$targetOS" == linux-bionic ) && -z "$ROOTFS_DIR" ]]; then
+    if [[ "$targetOS" == android || "$targetOS" == linux-bionic ]]; then
         if [[ -z "$ANDROID_NDK_ROOT" ]]; then
             echo "Error: You need to set the ANDROID_NDK_ROOT environment variable pointing to the Android NDK root."
             exit 1
@@ -109,7 +109,7 @@ build_native()
             echo "Error: Unknown Android architecture $hostArch."
             exit 1
         fi
-    elif [[ "$__TargetOS" == iossimulator ]]; then
+    elif [[ "$targetOS" == iossimulator ]]; then
         cmakeArgs="-C $__RepoRootDir/eng/native/tryrun_ios_tvos.cmake $cmakeArgs"
 
         # set default iOS simulator deployment target
@@ -123,7 +123,7 @@ build_native()
             echo "Error: Unknown iOS Simulator architecture $__TargetArch."
             exit 1
         fi
-    elif [[ "$__TargetOS" == ios ]]; then
+    elif [[ "$targetOS" == ios ]]; then
         cmakeArgs="-C $__RepoRootDir/eng/native/tryrun_ios_tvos.cmake $cmakeArgs"
 
         # set default iOS device deployment target
@@ -135,7 +135,7 @@ build_native()
             echo "Error: Unknown iOS architecture $__TargetArch."
             exit 1
         fi
-    elif [[ "$__TargetOS" == tvossimulator ]]; then
+    elif [[ "$targetOS" == tvossimulator ]]; then
         cmakeArgs="-C $__RepoRootDir/eng/native/tryrun_ios_tvos.cmake $cmakeArgs"
 
         # set default tvOS simulator deployment target
@@ -149,7 +149,7 @@ build_native()
             echo "Error: Unknown tvOS Simulator architecture $__TargetArch."
             exit 1
         fi
-    elif [[ "$__TargetOS" == tvos ]]; then
+    elif [[ "$targetOS" == tvos ]]; then
         cmakeArgs="-C $__RepoRootDir/eng/native/tryrun_ios_tvos.cmake $cmakeArgs"
 
         # set default tvOS device deployment target
@@ -276,6 +276,7 @@ usage()
     echo "-portablebuild: pass -portablebuild=false to force a non-portable build."
     echo "-skipconfigure: skip build configuration."
     echo "-keepnativesymbols: keep native/unmanaged debug symbols."
+    echo "-fsanitize: Enable native sanitizers"
     echo "-verbose: optional argument to enable verbose build output."
     echo ""
     echo "Additional Options:"
@@ -291,7 +292,6 @@ source "$__RepoRootDir/eng/native/init-os-and-arch.sh"
 
 __TargetArch=$arch
 __TargetOS=$os
-__HostOS=$os
 __OutputRid=''
 
 # Get the number of processors available to the scheduler
@@ -317,7 +317,7 @@ while :; do
 
     lowerI="$(echo "${1/--/-}" | tr "[:upper:]" "[:lower:]")"
     case "$lowerI" in
-        -\?|-h|--help)
+        -\?|-h|-help)
             usage
             exit 1
             ;;
@@ -401,6 +401,17 @@ while :; do
 
         keepnativesymbols|-keepnativesymbols)
             __CMakeArgs="$__CMakeArgs -DCLR_CMAKE_KEEP_NATIVE_SYMBOLS=true"
+            ;;
+
+        -fsanitize)
+            __CMakeArgs="$__CMakeArgs -DCLR_CMAKE_ENABLE_SANITIZERS=$2"
+            EnableNativeSanitizers=$2
+            shift
+            ;;
+        -fsanitize=*)
+            sanitizers="${lowerI/#-fsanitize=/}" # -fsanitize=address => address
+            __CMakeArgs="$__CMakeArgs -DCLR_CMAKE_ENABLE_SANITIZERS=$sanitizers"
+            EnableNativeSanitizers=$sanitizers
             ;;
 
         ninja|-ninja)
@@ -492,6 +503,16 @@ while :; do
             fi
             ;;
 
+        hostos|-hostos)
+            if [[ -n "$2" ]]; then
+                __HostOS="$2"
+                shift
+            else
+                echo "ERROR: 'hostos' requires a non-empty option argument"
+                exit 1
+            fi
+            ;;
+
         *)
             handle_arguments "$1" "$2"
             if [[ "$__ShiftArgs" == 1 ]]; then
@@ -506,6 +527,10 @@ done
 
 if [[ -z "$__HostArch" ]]; then
     __HostArch=$__TargetArch
+fi
+
+if [[ -z "$__HostOS" ]]; then
+    __HostOS=$__TargetOS
 fi
 
 __CommonMSBuildArgs="/p:TargetArchitecture=$__TargetArch /p:Configuration=$__BuildType /p:TargetOS=$__TargetOS /nodeReuse:false $__OfficialBuildIdArg $__SignTypeArg $__SkipRestoreArg"

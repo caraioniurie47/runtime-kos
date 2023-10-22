@@ -460,7 +460,7 @@ namespace System.Formats.Tar.Tests
             Assert.Equal(expectedType, entry.GetType());
         }
 
-        protected TarEntryType GetTarEntryTypeForTarEntryFormat(TarEntryType entryType, TarEntryFormat format)
+        protected static TarEntryType GetTarEntryTypeForTarEntryFormat(TarEntryType entryType, TarEntryFormat format)
         {
             if (format is TarEntryFormat.V7)
             {
@@ -580,7 +580,7 @@ namespace System.Formats.Tar.Tests
             }
             else
             {
-                Assert.True(false, "Unchecked entry type.");
+                Assert.Fail("Unchecked entry type.");
             }
 
             AssertFileModeEquals(destination, TestPermission1);

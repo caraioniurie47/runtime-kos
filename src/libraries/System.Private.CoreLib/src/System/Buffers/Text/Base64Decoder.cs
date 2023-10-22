@@ -311,7 +311,7 @@ namespace System.Buffers.Text
         /// <summary>
         /// Returns the maximum length (in bytes) of the result if you were to decode base 64 encoded text within a byte span of size "length".
         /// </summary>
-        /// <exception cref="System.ArgumentOutOfRangeException">
+        /// <exception cref="ArgumentOutOfRangeException">
         /// Thrown when the specified <paramref name="length"/> is less than 0.
         /// </exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1006,8 +1006,8 @@ namespace System.Buffers.Text
         }
 
         // Pre-computing this table using a custom string(s_characters) and GenerateDecodingMapAndVerify (found in tests)
-        private static ReadOnlySpan<sbyte> DecodingMap => new sbyte[]
-        {
+        private static ReadOnlySpan<sbyte> DecodingMap =>
+        [
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63,         //62 is placed at index 43 (for +), 63 at index 47 (for /)
@@ -1024,6 +1024,6 @@ namespace System.Buffers.Text
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-        };
+        ];
     }
 }

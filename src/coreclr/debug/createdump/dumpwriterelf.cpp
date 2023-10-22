@@ -176,28 +176,37 @@ DumpWriter::WriteDump()
         size_t size = memoryRegion.Size();
         total += size;
 
-        while (size > 0)
+        if (address == SpecialDiagInfoAddress)
         {
-            size_t bytesToRead = std::min(size, sizeof(m_tempBuffer));
-            size_t read = 0;
-
-            if (!m_crashInfo.ReadProcessMemory((void*)address, m_tempBuffer, bytesToRead, &read)) {
-                printf_error("Error reading memory at %" PRIA PRIx64 " size %08zx FAILED %s (%d)\n", address, bytesToRead, strerror(g_readProcessMemoryErrno), g_readProcessMemoryErrno);
+            if (!WriteDiagInfo(size)) {
                 return false;
             }
+        }
+        else
+        {
+            while (size > 0)
+            {
+                size_t bytesToRead = std::min(size, sizeof(m_tempBuffer));
+                size_t read = 0;
 
-            // This can happen if the target process dies before createdump is finished
-            if (read == 0) {
-                printf_error("Error reading memory at %" PRIA PRIx64 " size %08zx returned 0 bytes read: %s (%d)\n", address, bytesToRead, strerror(g_readProcessMemoryErrno), g_readProcessMemoryErrno);
-                return false;
+                if (!m_crashInfo.ReadProcessMemory((void*)address, m_tempBuffer, bytesToRead, &read)) {
+                    printf_error("Error reading memory at %" PRIA PRIx64 " size %08zx FAILED %s (%d)\n", address, bytesToRead, strerror(g_readProcessMemoryErrno), g_readProcessMemoryErrno);
+                    return false;
+                }
+
+                // This can happen if the target process dies before createdump is finished
+                if (read == 0) {
+                    printf_error("Error reading memory at %" PRIA PRIx64 " size %08zx returned 0 bytes read: %s (%d)\n", address, bytesToRead, strerror(g_readProcessMemoryErrno), g_readProcessMemoryErrno);
+                    return false;
+                }
+
+                if (!WriteData(m_tempBuffer, read)) {
+                    return false;
+                }
+
+                address += read;
+                size -= read;
             }
-
-            if (!WriteData(m_tempBuffer, read)) {
-                return false;
-            }
-
-            address += read;
-            size -= read;
         }
     }
 
@@ -369,7 +378,9 @@ DumpWriter::WriteThread(const ThreadInfo& thread)
         siginfo = m_crashInfo.SigInfo();
         pr.pr_info.si_signo = siginfo->si_signo;
         pr.pr_info.si_code = siginfo->si_code;
+#if HAVE_SIGINFO_T_ERRORNO // TODO-KOS: si_errno is not defined
         pr.pr_info.si_errno = siginfo->si_errno;
+#endif
         pr.pr_cursig = siginfo->si_signo;
     }
     pr.pr_pid = thread.Tid();
@@ -427,7 +438,13 @@ DumpWriter::WriteThread(const ThreadInfo& thread)
     if (siginfo != nullptr)
     {
         TRACE("Writing NT_SIGINFO tid %04x signo %d (%04x) code %04x errno %04x addr %p\n",
-            thread.Tid(), siginfo->si_signo, siginfo->si_signo, siginfo->si_code, siginfo->si_errno, siginfo->si_addr);
+            thread.Tid(), siginfo->si_signo, siginfo->si_signo, siginfo->si_code, 
+#if HAVE_SIGINFO_T_ERRORNO // TODO-KOS: si_errno is not defined
+            siginfo->si_errno,
+#else
+            0,
+#endif
+            siginfo->si_addr);
 
         nhdr.n_namesz = 5;
         nhdr.n_descsz = sizeof(siginfo_t);

@@ -76,11 +76,6 @@ if(CLR_CMAKE_HOST_OS STREQUAL linux)
             COMMAND bash -c "source ${LINUX_ID_FILE} && echo \$ID"
             OUTPUT_VARIABLE CLR_CMAKE_LINUX_ID
             OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-        execute_process(
-            COMMAND bash -c "if strings \"${CMAKE_SYSROOT}/usr/bin/ldd\" 2>&1 | grep -q musl; then echo musl; fi"
-            OUTPUT_VARIABLE CLR_CMAKE_LINUX_MUSL
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
     endif()
 
     if(DEFINED CLR_CMAKE_LINUX_ID)
@@ -88,12 +83,8 @@ if(CLR_CMAKE_HOST_OS STREQUAL linux)
             set(CLR_CMAKE_TARGET_TIZEN_LINUX 1)
             set(CLR_CMAKE_HOST_OS ${CLR_CMAKE_LINUX_ID})
         elseif(CLR_CMAKE_LINUX_ID STREQUAL alpine)
-            set(CLR_CMAKE_HOST_ALPINE_LINUX 1)
-            set(CLR_CMAKE_HOST_OS ${CLR_CMAKE_LINUX_ID})
-        endif()
-
-        if(CLR_CMAKE_LINUX_MUSL STREQUAL musl)
             set(CLR_CMAKE_HOST_LINUX_MUSL 1)
+            set(CLR_CMAKE_HOST_OS ${CLR_CMAKE_LINUX_ID})
         endif()
     elseif(EXISTS ${CROSS_ROOTFS}/sysroot-${CMAKE_SYSTEM_PROCESSOR}-kos)
         set(CLR_CMAKE_TARGET_OS KOS)
@@ -365,21 +356,17 @@ if(CLR_CMAKE_TARGET_OS STREQUAL linux)
     set(CLR_CMAKE_TARGET_LINUX 1)
 endif(CLR_CMAKE_TARGET_OS STREQUAL linux)
 
-if(CLR_CMAKE_HOST_LINUX_MUSL)
-    set(CLR_CMAKE_TARGET_LINUX_MUSL 1)
-endif(CLR_CMAKE_HOST_LINUX_MUSL)
-
 if(CLR_CMAKE_TARGET_OS STREQUAL tizen)
     set(CLR_CMAKE_TARGET_UNIX 1)
     set(CLR_CMAKE_TARGET_LINUX 1)
     set(CLR_CMAKE_TARGET_TIZEN_LINUX 1)
 endif(CLR_CMAKE_TARGET_OS STREQUAL tizen)
 
-if(CLR_CMAKE_TARGET_OS STREQUAL alpine)
+if(CLR_CMAKE_HOST_LINUX_MUSL OR CLR_CMAKE_TARGET_OS STREQUAL alpine)
     set(CLR_CMAKE_TARGET_UNIX 1)
     set(CLR_CMAKE_TARGET_LINUX 1)
-    set(CLR_CMAKE_TARGET_ALPINE_LINUX 1)
-endif(CLR_CMAKE_TARGET_OS STREQUAL alpine)
+    set(CLR_CMAKE_TARGET_LINUX_MUSL 1)
+endif(CLR_CMAKE_HOST_LINUX_MUSL OR CLR_CMAKE_TARGET_OS STREQUAL alpine)
 
 if(CLR_CMAKE_TARGET_OS STREQUAL android)
     set(CLR_CMAKE_TARGET_UNIX 1)
@@ -491,7 +478,7 @@ if (NOT (CLR_CMAKE_TARGET_OS STREQUAL CLR_CMAKE_HOST_OS) AND NOT CLR_CMAKE_TARGE
             message(FATAL_ERROR "Invalid host and target os/arch combination. Host OS: ${CLR_CMAKE_HOST_OS}")
         endif()
     endif()
-    if(NOT (CLR_CMAKE_TARGET_LINUX OR CLR_CMAKE_TARGET_ALPINE_LINUX))
+    if(NOT (CLR_CMAKE_TARGET_LINUX OR CLR_CMAKE_TARGET_LINUX_MUSL))
         if(NOT CLR_CMAKE_TARGET_KOS)
             message(FATAL_ERROR "Invalid host and target os/arch combination. Target OS: ${CLR_CMAKE_TARGET_OS}")
         endif()
@@ -507,10 +494,10 @@ if(NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI)
     # The default linker on Solaris also does not support PIE.
     if(NOT CLR_CMAKE_TARGET_ANDROID AND NOT CLR_CMAKE_TARGET_SUNOS AND NOT CLR_CMAKE_TARGET_APPLE AND NOT MSVC)
         if(NOT CLR_CMAKE_TARGET_KOS)
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pie")
+            add_link_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:-pie>)
             add_compile_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:-fPIE>)
             add_compile_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>:-fPIC>)
-        endif(NOT CLR_CMAKE_TARGET_KOS)
+        endif(NOT CLR_CMAKE_TARGET_KOS)    
     endif()
 
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)

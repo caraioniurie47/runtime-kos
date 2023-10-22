@@ -60,6 +60,7 @@ enum SpecialCodeKind
     SCK_OVERFLOW = SCK_ARITH_EXCPN, // target on overflow
     SCK_ARG_EXCPN,                  // target on ArgumentException (currently used only for SIMD intrinsics)
     SCK_ARG_RNG_EXCPN,              // target on ArgumentOutOfRangeException (currently used only for SIMD intrinsics)
+    SCK_FAIL_FAST,                  // target for fail fast exception
     SCK_COUNT
 };
 
@@ -453,7 +454,7 @@ enum GenTreeFlags : unsigned int
     GTF_LIVENESS_MASK     = GTF_VAR_DEF | GTF_VAR_USEASG | GTF_VAR_DEATH_MASK,
 
     GTF_VAR_ITERATOR      = 0x01000000, // GT_LCL_VAR -- this is a iterator reference in the loop condition
-    GTF_VAR_CLONED        = 0x00800000, // GT_LCL_VAR -- this node has been cloned or is a clone
+    GTF_VAR_MOREUSES      = 0x00800000, // GT_LCL_VAR -- this node has additonal uses, for example due to cloning
     GTF_VAR_CONTEXT       = 0x00400000, // GT_LCL_VAR -- this node is part of a runtime lookup
     GTF_VAR_EXPLICIT_INIT = 0x00200000, // GT_LCL_VAR -- this node is an "explicit init" store. Valid until rationalization.
 
@@ -490,9 +491,10 @@ enum GenTreeFlags : unsigned int
     GTF_IND_INVARIANT           = 0x01000000, // GT_IND -- the target is invariant (a prejit indirection)
     GTF_IND_NONNULL             = 0x00400000, // GT_IND -- the indirection never returns null (zero)
     GTF_IND_INITCLASS           = 0x00200000, // OperIsIndir() -- the indirection requires preceding static cctor
+    GTF_IND_ALLOW_NON_ATOMIC    = 0x00100000, // GT_IND -- this memory access does not need to be atomic
 
-    GTF_IND_FLAGS = GTF_IND_VOLATILE | GTF_IND_NONFAULTING | GTF_IND_UNALIGNED | GTF_IND_INVARIANT |
-                    GTF_IND_NONNULL | GTF_IND_TGT_NOT_HEAP | GTF_IND_TGT_HEAP | GTF_IND_INITCLASS,
+    GTF_IND_COPYABLE_FLAGS = GTF_IND_VOLATILE | GTF_IND_NONFAULTING | GTF_IND_UNALIGNED | GTF_IND_INITCLASS,
+    GTF_IND_FLAGS = GTF_IND_COPYABLE_FLAGS | GTF_IND_NONNULL | GTF_IND_TGT_NOT_HEAP | GTF_IND_TGT_HEAP | GTF_IND_INVARIANT,
 
     GTF_ADDRMODE_NO_CSE         = 0x80000000, // GT_ADD/GT_MUL/GT_LSH -- Do not CSE this node only, forms complex
                                               //                         addressing mode
@@ -1087,7 +1089,7 @@ public:
         return TypeIs(type) || TypeIs(rest...);
     }
 
-    static bool StaticOperIs(genTreeOps operCompare, genTreeOps oper)
+    static constexpr bool StaticOperIs(genTreeOps operCompare, genTreeOps oper)
     {
         return operCompare == oper;
     }
@@ -1536,8 +1538,9 @@ public:
     // OperIsIndir() returns true also for indirection nodes such as GT_BLK, etc. as well as GT_NULLCHECK.
     static bool OperIsIndir(genTreeOps gtOper)
     {
-        static_assert_no_msg(AreContiguous(GT_IND, GT_STOREIND, GT_BLK, GT_STORE_BLK, GT_STORE_DYN_BLK, GT_NULLCHECK));
-        return (GT_IND <= gtOper) && (gtOper <= GT_NULLCHECK);
+        static_assert_no_msg(AreContiguous(GT_LOCKADD, GT_XAND, GT_XORR, GT_XADD, GT_XCHG, GT_CMPXCHG, GT_IND,
+                                           GT_STOREIND, GT_BLK, GT_STORE_BLK, GT_STORE_DYN_BLK, GT_NULLCHECK));
+        return (GT_LOCKADD <= gtOper) && (gtOper <= GT_NULLCHECK);
     }
 
     static bool OperIsArrLength(genTreeOps gtOper)
@@ -1612,6 +1615,22 @@ public:
         return OperIsAtomicOp(gtOper);
     }
 
+    bool OperIsAtomicZeroDiffQuirk() const
+    {
+        // TODO-Cleanup: delete.
+        return OperIsAtomicOp();
+    }
+
+    static bool OperIsLoad(genTreeOps gtOper)
+    {
+        return (gtOper == GT_IND) || (gtOper == GT_BLK);
+    }
+
+    bool OperIsLoad() const
+    {
+        return OperIsLoad(gtOper);
+    }
+
     static bool OperIsStore(genTreeOps gtOper)
     {
         return (OperKind(gtOper) & GTK_STORE) != 0;
@@ -1650,6 +1669,8 @@ public:
     {
         return OperIsHWIntrinsic(gtOper);
     }
+
+    bool OperIsHWIntrinsic(NamedIntrinsic intrinsicId) const;
 
     // This is here for cleaner GT_LONG #ifdefs.
     static bool OperIsLong(genTreeOps gtOper)
@@ -1834,6 +1855,10 @@ public:
     // Sets the GTF flag equivalent for the regIndex'th register of a multi-reg node.
     void SetRegSpillFlagByIdx(GenTreeFlags flags, int regIndex);
 
+#ifdef TARGET_ARM64
+    bool NeedsConsecutiveRegisters() const;
+#endif
+
     // Last-use information for either GenTreeLclVar or GenTreeCopyOrReload nodes.
 private:
     GenTreeFlags GetLastUseBit(int regIndex) const;
@@ -1850,12 +1875,18 @@ public:
     // Returns true if it is a GT_COPY or GT_RELOAD of a multi-reg call node
     inline bool IsCopyOrReloadOfMultiRegCall() const;
 
-    bool OperRequiresAsgFlag();
+    bool OperRequiresAsgFlag() const;
 
-    bool OperRequiresCallFlag(Compiler* comp);
+    bool OperRequiresCallFlag(Compiler* comp) const;
 
-    bool OperMayThrow(Compiler* comp);
     ExceptionSetFlags OperExceptions(Compiler* comp);
+    bool OperMayThrow(Compiler* comp);
+
+    bool OperRequiresGlobRefFlag(Compiler* comp) const;
+
+    bool OperSupportsOrderingSideEffect() const;
+
+    GenTreeFlags OperEffects(Compiler* comp);
 
     unsigned GetScaleIndexMul();
     unsigned GetScaleIndexShf();
@@ -1888,7 +1919,8 @@ public:
 
 //---------------------------------------------------------------------
 
-#if defined(DEBUG) || NODEBASH_STATS || MEASURE_NODE_SIZE || COUNT_AST_OPERS || DUMP_FLOWGRAPHS
+#if defined(DEBUG) || CALL_ARG_STATS || COUNT_BASIC_BLOCKS || COUNT_LOOPS || EMITTER_STATS || MEASURE_MEM_ALLOC ||     \
+    NODEBASH_STATS || MEASURE_NODE_SIZE || COUNT_AST_OPERS || DUMP_FLOWGRAPHS
     static const char* OpName(genTreeOps op);
 #endif
 
@@ -2150,6 +2182,12 @@ public:
         gtFlags |= sourceFlags;
     }
 
+    void SetHasOrderingSideEffect()
+    {
+        assert(OperSupportsOrderingSideEffect());
+        gtFlags |= GTF_ORDER_SIDEEFF;
+    }
+
     inline bool IsCnsIntOrI() const;
 
     inline bool IsIntegralConst() const;
@@ -2309,7 +2347,7 @@ public:
     void SetIndirExceptionFlags(Compiler* comp);
 
 #if MEASURE_NODE_SIZE
-    static void DumpNodeSizes(FILE* fp);
+    static void DumpNodeSizes();
 #endif
 
 #ifdef DEBUG
@@ -3502,6 +3540,11 @@ public:
         return m_ssaNum.IsComposite();
     }
 
+    bool HasSsaIdentity() const
+    {
+        return !m_ssaNum.IsInvalid();
+    }
+
 #if DEBUGGABLE_GENTREE
     GenTreeLclVarCommon() : GenTreeUnOp()
     {
@@ -3627,7 +3670,7 @@ public:
         }
         else
         {
-            gtOtherReg[regIndex - 1] = regNumberSmall(reg);
+            gtOtherReg[regIndex - 1] = (regNumberSmall)reg;
         }
     }
 
@@ -4046,6 +4089,7 @@ enum GenTreeCallFlags : unsigned int
     GTF_CALL_M_DEVIRTUALIZED           = 0x00040000, // this call was devirtualized
     GTF_CALL_M_UNBOXED                 = 0x00080000, // this call was optimized to use the unboxed entry point
     GTF_CALL_M_GUARDED_DEVIRT          = 0x00100000, // this call is a candidate for guarded devirtualization
+    GTF_CALL_M_GUARDED_DEVIRT_EXACT    = 0x80000000, // this call is a candidate for guarded devirtualization without a fallback
     GTF_CALL_M_GUARDED_DEVIRT_CHAIN    = 0x00200000, // this call is a candidate for chained guarded devirtualization
     GTF_CALL_M_GUARDED                 = 0x00400000, // this call was transformed by guarded devirtualization
     GTF_CALL_M_ALLOC_SIDE_EFFECTS      = 0x00800000, // this is a call to an allocator with side effects
@@ -4344,7 +4388,6 @@ struct CallArgABIInformation
 #endif
         , ArgType(TYP_UNDEF)
         , IsBackFilled(false)
-        , IsStruct(false)
         , PassedByRef(false)
 #if FEATURE_ARG_SPLIT
         , m_isSplit(false)
@@ -4393,8 +4436,6 @@ public:
     // True when the argument fills a register slot skipped due to alignment
     // requirements of previous arguments.
     bool IsBackFilled : 1;
-    // True if this is a struct arg
-    bool IsStruct : 1;
     // True iff the argument is passed by reference.
     bool PassedByRef : 1;
 
@@ -5368,7 +5409,7 @@ struct GenTreeCall final : public GenTree
 
     void ClearGuardedDevirtualizationCandidate()
     {
-        gtCallMoreFlags &= ~GTF_CALL_M_GUARDED_DEVIRT;
+        gtCallMoreFlags &= ~(GTF_CALL_M_GUARDED_DEVIRT | GTF_CALL_M_GUARDED_DEVIRT_EXACT);
     }
 
     void SetIsGuarded()
@@ -5612,31 +5653,6 @@ struct GenTreeCall final : public GenTree
     }
 #if DEBUGGABLE_GENTREE
     GenTreeCall() : GenTree()
-    {
-    }
-#endif
-};
-
-struct GenTreeCmpXchg : public GenTree
-{
-    GenTree* gtOpLocation;
-    GenTree* gtOpValue;
-    GenTree* gtOpComparand;
-
-    GenTreeCmpXchg(var_types type, GenTree* loc, GenTree* val, GenTree* comparand)
-        : GenTree(GT_CMPXCHG, type), gtOpLocation(loc), gtOpValue(val), gtOpComparand(comparand)
-    {
-        // There's no reason to do a compare-exchange on a local location, so we'll assume that all of these
-        // have global effects.
-        gtFlags |= (GTF_GLOB_REF | GTF_ASG);
-
-        // Merge in flags from operands
-        gtFlags |= gtOpLocation->gtFlags & GTF_ALL_EFFECT;
-        gtFlags |= gtOpValue->gtFlags & GTF_ALL_EFFECT;
-        gtFlags |= gtOpComparand->gtFlags & GTF_ALL_EFFECT;
-    }
-#if DEBUGGABLE_GENTREE
-    GenTreeCmpXchg() : GenTree()
     {
     }
 #endif
@@ -6068,15 +6084,66 @@ protected:
     NamedIntrinsic gtHWIntrinsicId;
 
 public:
-    regNumber GetOtherReg() const
+    //-----------------------------------------------------------
+    // GetRegNumByIdx: Get regNumber of i'th position.
+    //
+    // Arguments:
+    //    idx   -   register position.
+    //
+    // Return Value:
+    //    Returns regNumber assigned to i'th position.
+    //
+    regNumber GetRegNumByIdx(unsigned idx) const
     {
+#ifdef TARGET_ARM64
+        assert(idx < MAX_MULTIREG_COUNT);
+
+        if (idx == 0)
+        {
+            return GetRegNum();
+        }
+
+        if (NeedsConsecutiveRegisters())
+        {
+            assert(IsMultiRegNode());
+            return (regNumber)(GetRegNum() + idx);
+        }
+#endif
+        // should only be used to get otherReg
+        assert(idx == 1);
         return (regNumber)gtOtherReg;
     }
 
-    void SetOtherReg(regNumber reg)
+    //-----------------------------------------------------------
+    // SetRegNumByIdx: Set the regNumber for i'th position.
+    //
+    // Arguments:
+    //    reg   -   reg number
+    //    idx   -   register position.
+    //
+    // Return Value:
+    //    None.
+    //
+    void SetRegNumByIdx(regNumber reg, unsigned idx)
     {
+#ifdef TARGET_ARM64
+        assert(idx < MAX_MULTIREG_COUNT);
+
+        if (idx == 0)
+        {
+            SetRegNum(reg);
+            return;
+        }
+        if (NeedsConsecutiveRegisters())
+        {
+            assert(IsMultiRegNode());
+            assert(reg == (regNumber)(GetRegNum() + idx));
+            return;
+        }
+#endif
+        // should only be used to set otherReg
+        assert(idx == 1);
         gtOtherReg = (regNumberSmall)reg;
-        assert(gtOtherReg == reg);
     }
 
     GenTreeFlags GetRegSpillFlagByIdx(unsigned idx) const
@@ -6245,9 +6312,11 @@ struct GenTreeHWIntrinsic : public GenTreeJitIntrinsic
     bool OperIsMemoryStoreOrBarrier() const;
     bool OperIsEmbBroadcastCompatible() const;
     bool OperIsBroadcastScalar() const;
+    bool OperIsCreateScalarUnsafe() const;
 
     bool OperRequiresAsgFlag() const;
     bool OperRequiresCallFlag() const;
+    bool OperRequiresGlobRefFlag() const;
 
     unsigned GetResultOpNumForRmwIntrinsic(GenTree* use, GenTree* op1, GenTree* op2, GenTree* op3);
 
@@ -6338,6 +6407,8 @@ struct GenTreeHWIntrinsic : public GenTreeJitIntrinsic
     }
 
     static bool Equals(GenTreeHWIntrinsic* op1, GenTreeHWIntrinsic* op2);
+
+    genTreeOps HWOperGet();
 
 private:
     void SetHWIntrinsicId(NamedIntrinsic intrinsicId);
@@ -6709,6 +6780,10 @@ struct GenTreeVecCon : public GenTree
     GenTreeVecCon(var_types type) : GenTree(GT_CNS_VEC, type)
     {
         assert(varTypeIsSIMD(type));
+
+        // Some uses of GenTreeVecCon do not specify all bits in the vector they are using but failing to zero out the
+        // buffer will cause determinism issues with the compiler.
+        memset(&gtSimdVal, 0, sizeof(gtSimdVal));
 
 #if defined(TARGET_XARCH)
         assert(sizeof(simd_t) == sizeof(simd64_t));
@@ -7141,11 +7216,10 @@ struct GenTreeIndir : public GenTreeOp
 
     GenTree*& Data()
     {
-        assert(OperIs(GT_STOREIND) || OperIsStoreBlk());
+        assert(OperIs(GT_STOREIND) || OperIsStoreBlk() || OperIsAtomicOp());
         return gtOp2;
     }
 
-    // these methods provide an interface to the indirection node which
     bool     HasBase();
     bool     HasIndex();
     GenTree* Base();
@@ -7169,6 +7243,14 @@ struct GenTreeIndir : public GenTreeOp
     bool IsUnaligned() const
     {
         return (gtFlags & GTF_IND_UNALIGNED) != 0;
+    }
+
+    // True if this indirection is invariant.
+    bool IsInvariantLoad() const
+    {
+        bool isInvariant = (gtFlags & GTF_IND_INVARIANT) != 0;
+        assert(!isInvariant || OperIs(GT_IND, GT_BLK));
+        return isInvariant;
     }
 
 #if DEBUGGABLE_GENTREE
@@ -7434,6 +7516,30 @@ protected:
         SetRMWStatusDefault();
     }
 #endif
+};
+
+struct GenTreeCmpXchg : public GenTreeIndir
+{
+private:
+    GenTree* m_comparand;
+
+public:
+    GenTreeCmpXchg(var_types type, GenTree* loc, GenTree* val, GenTree* comparand)
+        : GenTreeIndir(GT_CMPXCHG, type, loc, val), m_comparand(comparand)
+    {
+        gtFlags |= comparand->gtFlags & GTF_ALL_EFFECT;
+    }
+
+#if DEBUGGABLE_GENTREE
+    GenTreeCmpXchg() : GenTreeIndir()
+    {
+    }
+#endif
+
+    GenTree*& Comparand()
+    {
+        return m_comparand;
+    }
 };
 
 /* gtRetExp -- Place holder for the return expression from an inline candidate (GT_RET_EXPR) */
@@ -8614,7 +8720,7 @@ public:
             NONE, NONE, SGE,  SGT,  SLT,  SLE,  NS, S,
             NE,   EQ,   UGE,  UGT,  ULT,  ULE,  NC, C,
             FNEU, FEQU, FGEU, FGTU, FLTU, FLEU, NO, O,
-            FNE,  FEQ,  FGE,  FGT,  FLT,  FGT,  NP, P
+            FNE,  FEQ,  FGE,  FGT,  FLT,  FLE,  NP, P
         };
         // clang-format on
 
@@ -9291,9 +9397,7 @@ inline regNumber GenTree::GetRegByIndex(int regIndex) const
 #ifdef FEATURE_HW_INTRINSICS
     if (OperIs(GT_HWINTRINSIC))
     {
-        assert(regIndex == 1);
-        // TODO-ARM64-NYI: Support hardware intrinsics operating on multiple contiguous registers.
-        return AsHWIntrinsic()->GetOtherReg();
+        return AsHWIntrinsic()->GetRegNumByIdx(regIndex);
     }
 #endif // FEATURE_HW_INTRINSICS
 

@@ -5,13 +5,11 @@ import { mono_wasm_new_root_buffer } from "./roots";
 import { MonoString, MonoStringNull, WasmRoot, WasmRootBuffer } from "./types/internal";
 import { Module } from "./globals";
 import cwraps from "./cwraps";
-import { mono_wasm_new_root } from "./roots";
 import { isSharedArrayBuffer, localHeapViewU8, getU32_local, setU16_local, localHeapViewU32, getU16_local, localHeapViewU16 } from "./memory";
 import { NativePointer, CharPtr } from "./types/emscripten";
 
 export const interned_js_string_table = new Map<string, MonoString>();
 export const mono_wasm_empty_string = "";
-let mono_wasm_string_root: any;
 let mono_wasm_string_decoder_buffer: NativePointer | undefined;
 export const interned_string_table = new Map<MonoString, string>();
 let _empty_string_ptr: MonoString = <any>0;
@@ -31,7 +29,6 @@ export function strings_init(): void {
             _text_decoder_utf8_validating = new TextDecoder("utf-8");
             _text_encoder_utf8 = new TextEncoder();
         }
-        mono_wasm_string_root = mono_wasm_new_root();
         mono_wasm_string_decoder_buffer = Module._malloc(12);
     }
 }
@@ -98,17 +95,6 @@ export function stringToUTF16(dstPtr: number, endPtr: number, text: string) {
         dstPtr += 2;
         if (dstPtr >= endPtr) break;
     }
-}
-
-/* @deprecated not GC safe, use monoStringToString */
-export function monoStringToStringUnsafe(mono_string: MonoString): string | null {
-    if (mono_string === MonoStringNull)
-        return null;
-
-    mono_wasm_string_root.value = mono_string;
-    const result = monoStringToString(mono_wasm_string_root);
-    mono_wasm_string_root.value = MonoStringNull;
-    return result;
 }
 
 export function monoStringToString(root: WasmRoot<MonoString>): string | null {
@@ -256,9 +242,6 @@ function stringToMonoStringNewRoot(string: string, result: WasmRoot<MonoString>)
 // When threading is enabled, TextDecoder does not accept a view of a
 // SharedArrayBuffer, we must make a copy of the array first.
 // See https://github.com/whatwg/encoding/issues/172
-// BEWARE: In some cases, `instanceof SharedArrayBuffer` returns false even though buffer is an SAB.
-// Patch adapted from https://github.com/emscripten-core/emscripten/pull/16994
-// See also https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/toStringTag
 export function viewOrCopy(view: Uint8Array, start: CharPtr, end: CharPtr): Uint8Array {
     // this condition should be eliminated by rollup on non-threading builds
     const needsCopy = isSharedArrayBuffer(view.buffer);

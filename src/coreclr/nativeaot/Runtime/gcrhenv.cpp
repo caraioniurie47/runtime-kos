@@ -736,8 +736,6 @@ void GCToEEInterface::DiagGCEnd(size_t index, int gen, int reason, bool fConcurr
     {
         ETW::GCLog::WalkHeap();
     }
-#else
-    UNREFERENCED_PARAMETER(fConcurrent);
 #endif // FEATURE_EVENT_TRACE
 }
 

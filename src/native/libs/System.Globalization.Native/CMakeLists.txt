@@ -64,6 +64,7 @@ set(NATIVEGLOBALIZATION_SOURCES
     pal_calendarData.c
     pal_casing.c
     pal_collation.c
+    pal_common.c
     pal_idna.c
     pal_locale.c
     pal_localeNumberData.c

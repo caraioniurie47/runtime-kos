@@ -10,6 +10,7 @@
     <IlcHostPackagePath>TODO</IlcHostPackagePath>
     <IlcVerboseLogging>false</IlcVerboseLogging>
     <CppCompilerAndLinker>aarch64-kos-g++</CppCompilerAndLinker>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>

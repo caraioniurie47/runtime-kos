@@ -9,12 +9,12 @@
 #include "UnixSignals.h"
 
 // Add handler for hardware exception signal
-bool AddSignalHandler(int signal, SignalHandler handler, struct sigaction* previousAction)
+bool AddSignalHandler(int signal, SignalHandler handler, struct sigaction* previousAction, int additionalFlags)
 {
 #if !defined(__KOS__) // TODO-KOS
     struct sigaction newAction;
 
-    newAction.sa_flags = SA_RESTART;
+    newAction.sa_flags = SA_RESTART | additionalFlags;
     newAction.sa_handler = NULL;
     newAction.sa_sigaction = handler;
     newAction.sa_flags |= SA_SIGINFO;

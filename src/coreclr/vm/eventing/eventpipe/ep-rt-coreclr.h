@@ -17,6 +17,9 @@
 #include "typestring.h"
 #include "clrversion.h"
 #include "hostinformation.h"
+#include <minipal/guid.h>
+#include <minipal/strings.h>
+#include <minipal/time.h>
 
 #undef EP_INFINITE_WAIT
 #define EP_INFINITE_WAIT INFINITE
@@ -228,6 +231,15 @@ ep_rt_atomic_dec_int64_t (volatile int64_t *value)
 
 static
 inline
+int64_t
+ep_rt_atomic_compare_exchange_int64_t (volatile int64_t *target, int64_t expected, int64_t value)
+{
+	STATIC_CONTRACT_NOTHROW;
+	return static_cast<int64_t>(InterlockedCompareExchangeT<int64_t> (target, value, expected));
+}
+
+static
+inline
 size_t
 ep_rt_atomic_compare_exchange_size_t (volatile size_t *target, size_t expected, size_t value)
 {
@@ -258,7 +270,7 @@ ep_rt_init (void)
 	extern CrstStatic _ep_rt_coreclr_config_lock;
 
 	_ep_rt_coreclr_config_lock_handle.lock = &_ep_rt_coreclr_config_lock;
-	_ep_rt_coreclr_config_lock_handle.lock->InitNoThrow (CrstEventPipe, (CrstFlags)(CRST_REENTRANCY | CRST_TAKEN_DURING_SHUTDOWN | CRST_HOST_BREAKABLE));
+	_ep_rt_coreclr_config_lock_handle.lock->InitNoThrow (CrstEventPipe, (CrstFlags)(CRST_REENTRANCY | CRST_TAKEN_DURING_SHUTDOWN));
 
 	if (CLRConfig::GetConfigValue (CLRConfig::INTERNAL_EventPipeProcNumbers) != 0) {
 #ifndef TARGET_UNIX
@@ -398,7 +410,7 @@ ep_rt_method_get_full_name (
 	{
 		result = false;
 	}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 
 	return result;
 }
@@ -420,9 +432,9 @@ ep_rt_provider_config_init (EventPipeProviderConfiguration *provider_config)
 // This function is auto-generated from /src/scripts/genEventPipe.py
 #ifdef TARGET_UNIX
 extern "C" void InitProvidersAndEvents ();
-#else
+#else // TARGET_UNIX
 extern void InitProvidersAndEvents ();
-#endif
+#endif // TARGET_UNIX
 
 static
 void
@@ -435,7 +447,7 @@ ep_rt_init_providers_and_events (void)
 		InitProvidersAndEvents ();
 	}
 	EX_CATCH {}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 }
 
 static
@@ -485,7 +497,7 @@ ep_rt_provider_invoke_callback (
 			callback_data);
 	}
 	EX_CATCH {}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 }
 
 /*
@@ -548,6 +560,15 @@ ep_rt_config_value_get_enable_stackwalk (void)
 	return CLRConfig::GetConfigValue(CLRConfig::INTERNAL_EventPipeEnableStackwalk) != 0;
 }
 
+static
+inline
+uint32_t
+ep_rt_config_value_get_sampling_rate (void)
+{
+	STATIC_CONTRACT_NOTHROW;
+	return CLRConfig::GetConfigValue(CLRConfig::INTERNAL_EventPipeThreadSamplingRate);
+}
+
 /*
  * EventPipeSampleProfiler.
  */
@@ -568,16 +589,42 @@ ep_rt_sample_profiler_write_sampling_event_for_threads (
 static
 inline
 void
+ep_rt_sample_profiler_enabled (EventPipeEvent *sampling_event)
+{
+    STATIC_CONTRACT_NOTHROW;
+    // no-op
+}
+
+static
+inline
+void
+ep_rt_sample_profiler_session_enabled (void)
+{
+    STATIC_CONTRACT_NOTHROW;
+    // no-op
+}
+
+static
+inline
+void
+ep_rt_sample_profiler_disabled (void)
+{
+    STATIC_CONTRACT_NOTHROW;
+    // no-op
+}
+
+static
+inline
+void
 ep_rt_notify_profiler_provider_created (EventPipeProvider *provider)
 {
 	STATIC_CONTRACT_NOTHROW;
-
-#ifndef DACCESS_COMPILE
+#if !defined(DACCESS_COMPILE) && defined(PROFILING_SUPPORTED)
 		// Let the profiler know the provider has been created so it can register if it wants to
 		BEGIN_PROFILER_CALLBACK (CORProfilerTrackEventPipe ());
 		(&g_profControlBlock)->EventPipeProviderCreated (provider);
 		END_PROFILER_CALLBACK ();
-#endif // DACCESS_COMPILE
+#endif // !DACCESS_COMPILE && PROFILING_SUPPORTED
 }
 
 /*
@@ -630,7 +677,7 @@ ep_rt_wait_event_alloc (
 				wait_event->event->CreateAutoEvent (initial);
 		}
 		EX_CATCH {}
-		EX_END_CATCH(SwallowAllExceptions);
+		EX_END_CATCH
 	}
 }
 
@@ -678,7 +725,7 @@ ep_rt_wait_event_wait (
 	{
 		result = -1;
 	}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 	return result;
 }
 
@@ -725,7 +772,7 @@ bool
 ep_rt_process_detach (void)
 {
 	STATIC_CONTRACT_NOTHROW;
-	return (bool)g_fProcessDetach;
+	return (bool)IsAtProcessExit();
 }
 
 static
@@ -735,20 +782,6 @@ ep_rt_process_shutdown (void)
 {
 	STATIC_CONTRACT_NOTHROW;
 	return (bool)g_fEEShutDown;
-}
-
-static
-inline
-void
-ep_rt_create_activity_id (
-	uint8_t *activity_id,
-	uint32_t activity_id_len)
-{
-	STATIC_CONTRACT_NOTHROW;
-	EP_ASSERT (activity_id != NULL);
-	EP_ASSERT (activity_id_len == EP_ACTIVITY_ID_SIZE);
-
-	CoCreateGuid (reinterpret_cast<GUID *>(activity_id));
 }
 
 static
@@ -878,9 +911,18 @@ ep_rt_thread_create (
 	{
 		result = false;
 	}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 
 	return result;
+}
+
+static
+bool
+ep_rt_queue_job (
+	void *job_func,
+	void *params)
+{
+    EP_UNREACHABLE ("Not implemented in CoreCLR");
 }
 
 static
@@ -966,11 +1008,7 @@ ep_rt_perf_counter_query (void)
 {
 	STATIC_CONTRACT_NOTHROW;
 
-	LARGE_INTEGER value;
-	if (QueryPerformanceCounter (&value))
-		return static_cast<int64_t>(value.QuadPart);
-	else
-		return 0;
+	return minipal_hires_ticks();
 }
 
 static
@@ -980,11 +1018,7 @@ ep_rt_perf_frequency_query (void)
 {
 	STATIC_CONTRACT_NOTHROW;
 
-	LARGE_INTEGER value;
-	if (QueryPerformanceFrequency (&value))
-		return static_cast<int64_t>(value.QuadPart);
-	else
-		return 0;
+	return minipal_hires_tick_frequency();
 }
 
 static
@@ -1169,7 +1203,7 @@ ep_rt_lock_acquire (ep_rt_lock_handle_t *lock)
 	{
 		result = false;
 	}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 
 	return result;
 }
@@ -1192,7 +1226,7 @@ ep_rt_lock_release (ep_rt_lock_handle_t *lock)
 	{
 		result = false;
 	}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 
 	return result;
 }
@@ -1233,7 +1267,7 @@ ep_rt_spin_lock_alloc (ep_rt_spin_lock_handle_t *spin_lock)
 		spin_lock->lock->Init (LOCK_TYPE_DEFAULT);
 	}
 	EX_CATCH {}
-	EX_END_CATCH(SwallowAllExceptions);
+	EX_END_CATCH
 }
 
 static
@@ -1370,7 +1404,11 @@ ep_rt_utf8_string_strtok (
 	ep_char8_t **context)
 {
 	STATIC_CONTRACT_NOTHROW;
+#ifdef HOST_WINDOWS
 	return strtok_s (str, delimiter, context);
+#else
+	return strtok_r (str, delimiter, context);
+#endif
 }
 
 // STATIC_CONTRACT_NOTHROW
@@ -1456,7 +1494,7 @@ ep_rt_utf16_string_len (const ep_char16_t *str)
 	STATIC_CONTRACT_NOTHROW;
 	EP_ASSERT (str != NULL);
 
-	return u16_strlen (reinterpret_cast<LPCWSTR>(str));
+	return minipal_u16_strlen (reinterpret_cast<const CHAR16_T*> (str));
 }
 
 static

@@ -11,11 +11,21 @@ endif(CLR_CMAKE_HOST_WIN32)
 #Required to expose symbols for global symbol discovery.
 set(CLR_CMAKE_KEEP_NATIVE_SYMBOLS TRUE)
 
+if (CLR_CMAKE_HOST_APPLE)
+    # Prevent exporting symbols except for GetCurrentClrDetails from corerun. This is necessary
+    # to avoid a problem with local typeinfo for standard C++ EH types like std::bad_alloc,
+    # std::out_of_range etc. being exposed for binding for external shared libraries and causing
+    # mismatch in catch type matching.
+    add_link_options(LINKER:-exported_symbol,_GetCurrentClrDetails)
+endif()
+
 add_executable_clr(corerun
   corerun.cpp
   dotenv.cpp
   native.rc
 )
+
+target_link_libraries(corerun PRIVATE minipal)
 
 if(CLR_CMAKE_HOST_WIN32)
     target_link_libraries(corerun
@@ -27,6 +37,10 @@ if(CLR_CMAKE_HOST_WIN32)
         ${STATIC_MT_CRT_LIB}
         ${STATIC_MT_VCRT_LIB}
     )
+    # Enable CET-compatibility
+    if (CLR_CMAKE_HOST_ARCH_AMD64)
+        target_link_options(corerun PRIVATE "/CETCOMPAT")
+    endif()
 else(CLR_CMAKE_HOST_WIN32)
     target_link_libraries(corerun PRIVATE ${CMAKE_DL_LIBS})
     # Required to expose symbols for global symbol discovery

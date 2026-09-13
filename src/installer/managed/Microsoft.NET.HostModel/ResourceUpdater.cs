@@ -13,21 +13,12 @@ namespace Microsoft.NET.HostModel
     /// <summary>
     /// Provides methods for modifying the embedded native resources in a PE image.
     /// </summary>
-    public class ResourceUpdater : IDisposable
+    public sealed class ResourceUpdater : IDisposable
     {
         private readonly FileStream stream;
         private readonly PEReader _reader;
         private ResourceData _resourceData;
         private readonly bool leaveOpen;
-
-        ///<summary>
-        /// Determines if the ResourceUpdater is supported by the current operating system.
-        /// Some versions of Windows, such as Nano Server, do not support the needed APIs.
-        /// </summary>
-        public static bool IsSupportedOS()
-        {
-            return true;
-        }
 
         /// <summary>
         /// Create a resource updater for the given PE file.
@@ -76,7 +67,7 @@ namespace Microsoft.NET.HostModel
             if (_resourceData == null)
                 ThrowExceptionForInvalidUpdate();
 
-            using var module = new PEReader(File.Open(peFile, FileMode.Open, FileAccess.Read, FileShare.Read));
+            using var module = new PEReader(File.OpenRead(peFile));
             var moduleResources = new ResourceData(module);
             _resourceData.CopyResourcesFrom(moduleResources);
             return this;
@@ -340,12 +331,15 @@ namespace Microsoft.NET.HostModel
             GC.SuppressFinalize(this);
         }
 
-        public void Dispose(bool disposing)
+        private void Dispose(bool disposing)
         {
-            if (disposing && !leaveOpen)
+            if (disposing)
             {
                 _reader.Dispose();
-                stream.Dispose();
+                if (!leaveOpen)
+                {
+                    stream.Dispose();
+                }
             }
         }
     }

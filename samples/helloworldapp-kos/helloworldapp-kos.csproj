@@ -2,11 +2,13 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Version of the locally built packages in nuget.config's "local" feed. -->
+    <KosNetVersion>10.0.13-dev</KosNetVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <StripSymbols>false</StripSymbols>
     <Nullable>enable</Nullable>
-    <IlcToolsPath>/home/ilc-tools</IlcToolsPath>
+    <IlcToolsPath>/home/ilc-tools-10</IlcToolsPath>
     <IlcHostPackagePath>TODO</IlcHostPackagePath>
     <IlcVerboseLogging>false</IlcVerboseLogging>
     <CppCompilerAndLinker>aarch64-kos-g++</CppCompilerAndLinker>
@@ -14,7 +16,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.DotNet.ILCompiler; runtime.linux-arm64.Microsoft.DotNet.ILCompiler" Version="9.0.0-dev" />
+    <PackageReference Include="Microsoft.DotNet.ILCompiler; runtime.linux-arm64.Microsoft.DotNet.ILCompiler" Version="$(KosNetVersion)" />
+    <!-- The NativeAOT runtime (runtime libraries, framework) ships in this pack. The SDK would pick its own shipped
+         version of it, so restore the local one explicitly and point ILC at it below. -->
+    <PackageDownload Include="Microsoft.NETCore.App.Runtime.NativeAOT.linux-arm64" Version="[$(KosNetVersion)]" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <_KosNativeAotRuntimePack>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))microsoft.netcore.app.runtime.nativeaot.linux-arm64/$(KosNetVersion)/runtimes/linux-arm64/</_KosNativeAotRuntimePack>
+    <IlcFrameworkPath>$(_KosNativeAotRuntimePack)lib/</IlcFrameworkPath>
+    <IlcFrameworkNativePath>$(_KosNativeAotRuntimePack)native/</IlcFrameworkNativePath>
+    <IlcSdkPath>$(IlcFrameworkNativePath)</IlcSdkPath>
+  </PropertyGroup>
 
 </Project>

@@ -14,8 +14,8 @@ using Xunit.Abstractions;
 
 namespace System.Net.Quic.Tests
 {
-    [Collection(nameof(DisableParallelization))]
-    [ConditionalClass(typeof(QuicTestBase), nameof(QuicTestBase.IsSupported))]
+    [Collection(nameof(QuicTestCollection))]
+    [ConditionalClass(typeof(QuicTestBase), nameof(QuicTestBase.IsSupported), nameof(QuicTestBase.IsNotArm32CoreClrStressTest), nameof(QuicTestBase.IsNotAzureLinux3VM))]
     public sealed class QuicStreamConformanceTests : ConnectedStreamConformanceTests
     {
         protected override bool UsableAfterCanceledReads => false;

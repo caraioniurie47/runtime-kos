@@ -311,8 +311,17 @@
   <data name="security_ExtendedProtectionPolicy_NoEmptyServiceNameCollection" xml:space="preserve">
     <value>The ServiceNameCollection must contain at least one service name.</value>
   </data>
+  <data name="net_extprotection_not_supported" xml:space="preserve">
+    <value>Extended Protection is not supported on this platform.</value>
+  </data>
   <data name="net_allocate_ssl_context_failed" xml:space="preserve">
     <value>Failed to allocate SSL/TLS context, OpenSSL error - {0}.</value>
+  </data>
+  <data name="net_ssl_get_default_sigalgs_failed" xml:space="preserve">
+    <value>Failed to get default signature algorithms.</value>
+  </data>
+  <data name="net_ssl_set_sigalgs_failed" xml:space="preserve">
+    <value>Failed to set {0} signature algorithms.</value>
   </data>
   <data name="net_generic_operation_failed" xml:space="preserve">
     <value>Operation failed with error - {0}.</value>
@@ -409,6 +418,9 @@
   </data>
   <data name="net_ssl_ciphersuites_policy_not_supported" xml:space="preserve">
     <value>CipherSuitesPolicy is not supported on this platform.</value>
+  </data>
+  <data name="net_ssl_allow_rsa_padding_not_supported" xml:space="preserve">
+    <value>Disabling AllowRsaPssPadding or AllowRsaPkcs1Padding is not supported on this platform.</value>
   </data>
   <data name="SystemNetSecurity_PlatformNotSupported" xml:space="preserve">
     <value>System.Net.Security is not supported on this platform.</value>

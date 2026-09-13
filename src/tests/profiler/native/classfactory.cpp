@@ -3,14 +3,18 @@
 
 #include "classfactory.h"
 #include "eltprofiler/slowpatheltprofiler.h"
+#include "enumthreadsprofiler/enumthreadsprofiler.h"
 #include "eventpipeprofiler/eventpipereadingprofiler.h"
 #include "eventpipeprofiler/eventpipewritingprofiler.h"
+#include "exceptionprofiler/exceptionprofiler.h"
 #include "getappdomainstaticaddress/getappdomainstaticaddress.h"
 #include "gcallocateprofiler/gcallocateprofiler.h"
 #include "nongcheap/nongcheap.h"
 #include "gcbasicprofiler/gcbasicprofiler.h"
+#include "gcheapenumerationprofiler/gcheapenumerationprofiler.h"
 #include "gcprofiler/gcprofiler.h"
 #include "handlesprofiler/handlesprofiler.h"
+#include "ijw/ijwprofiler.h"
 #include "metadatagetdispenser/metadatagetdispenser.h"
 #include "nullprofiler/nullprofiler.h"
 #include "rejitprofiler/rejitprofiler.h"
@@ -20,6 +24,8 @@
 #include "inlining/inlining.h"
 #include "moduleload/moduleload.h"
 #include "assemblyprofiler/assemblyprofiler.h"
+#include "classload/classload.h"
+#include "dynamicjitoptimization/dynamicjitoptimization.h"
 
 ClassFactory::ClassFactory(REFCLSID clsid) : refCount(0), clsid(clsid)
 {
@@ -91,6 +97,10 @@ HRESULT STDMETHODCALLTYPE ClassFactory::CreateInstance(IUnknown *pUnkOuter, REFI
     {
         profiler = new EventPipeWritingProfiler();
     }
+    else if (clsid == ExceptionProfiler::GetClsid())
+    {
+        profiler = new ExceptionProfiler();
+    }
     else if (clsid == MetaDataGetDispenser::GetClsid())
     {
         profiler = new MetaDataGetDispenser();
@@ -131,6 +141,10 @@ HRESULT STDMETHODCALLTYPE ClassFactory::CreateInstance(IUnknown *pUnkOuter, REFI
     {
         profiler = new HandlesProfiler();
     }
+    else if (clsid == IjwProfiler::GetClsid())
+    {
+        profiler = new IjwProfiler();
+    }
     else if (clsid == ModuleLoad::GetClsid())
     {
         profiler = new ModuleLoad();
@@ -138,6 +152,22 @@ HRESULT STDMETHODCALLTYPE ClassFactory::CreateInstance(IUnknown *pUnkOuter, REFI
     else if (clsid == AssemblyProfiler::GetClsid())
     {
         profiler = new AssemblyProfiler();
+    }
+    else if (clsid == GCHeapEnumerationProfiler::GetClsid())
+    {
+        profiler = new GCHeapEnumerationProfiler();
+    }
+    else if (clsid == EnumThreadsProfiler::GetClsid())
+    {
+        profiler = new EnumThreadsProfiler();
+    }
+    else if (clsid == ClassLoad::GetClsid())
+    {
+        profiler = new ClassLoad();
+    }
+    else if (clsid == DynamicJitOptimizations::GetClsid())
+    {
+        profiler = new DynamicJitOptimizations();
     }
     else
     {

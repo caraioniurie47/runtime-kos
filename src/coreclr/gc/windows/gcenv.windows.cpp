@@ -290,8 +290,8 @@ static size_t GetRestrictedPhysicalMemoryLimit()
                 (job_process_memory_limit != (size_t)UINTPTR_MAX) ||
                 (job_workingset_limit != (size_t)UINTPTR_MAX))
             {
-                job_physical_memory_limit = min (job_memory_limit, job_process_memory_limit);
-                job_physical_memory_limit = min (job_physical_memory_limit, job_workingset_limit);
+                job_physical_memory_limit = std::min (job_memory_limit, job_process_memory_limit);
+                job_physical_memory_limit = std::min (job_physical_memory_limit, job_workingset_limit);
 
                 MEMORYSTATUSEX ms;
                 ::GetProcessMemoryLoad(&ms);
@@ -299,7 +299,7 @@ static size_t GetRestrictedPhysicalMemoryLimit()
                 total_physical = ms.ullAvailPhys;
 
                 // A sanity check in case someone set a larger limit than there is actual physical memory.
-                job_physical_memory_limit = (size_t) min (job_physical_memory_limit, ms.ullTotalPhys);
+                job_physical_memory_limit = (size_t) std::min (job_physical_memory_limit, (size_t)ms.ullTotalPhys);
             }
         }
     }
@@ -512,6 +512,11 @@ bool GCToOSInterface::Initialize()
     InitNumaNodeInfo();
     InitCPUGroupInfo();
 
+    if (!g_processAffinitySet.Initialize(GCToOSInterface::GetTotalProcessorCount()))
+    {
+        return false;
+    }
+
     if (CanEnableGCCPUGroups())
     {
         // When CPU groups are enabled, then the process is not bound by the process affinity set at process launch.
@@ -559,7 +564,7 @@ uint64_t GCToOSInterface::GetCurrentThreadIdForLogging()
 // Get id of the process
 uint32_t GCToOSInterface::GetCurrentProcessId()
 {
-    return ::GetCurrentThreadId();
+    return ::GetCurrentProcessId();
 }
 
 // Set ideal processor for the current thread
@@ -916,7 +921,7 @@ const AffinitySet* GCToOSInterface::SetGCThreadsAffinitySet(uintptr_t configAffi
         if (!configAffinitySet->IsEmpty())
         {
             // Update the process affinity set using the configured set
-            for (size_t i = 0; i < MAX_SUPPORTED_CPUS; i++)
+            for (size_t i = 0; i < GCToOSInterface::GetTotalProcessorCount(); i++)
             {
                 if (g_processAffinitySet.Contains(i) && !configAffinitySet->Contains(i))
                 {
@@ -943,7 +948,16 @@ const AffinitySet* GCToOSInterface::SetGCThreadsAffinitySet(uintptr_t configAffi
     return &g_processAffinitySet;
 }
 
-// Return the size of the user-mode portion of the virtual address space of this process.
+// Return the maximum address of the of the virtual address space of this process.
+// Return:
+//  non zero if it has succeeded, 0 if it has failed
+size_t GCToOSInterface::GetVirtualMemoryMaxAddress()
+{
+    // On Windows, the maximum address is the same as the virtual memory limit, unlike Unix
+    return GCToOSInterface::GetVirtualMemoryLimit();
+}
+
+// Return the size of the available user-mode portion of the virtual address space of this process.
 // Return:
 //  non zero if it has succeeded, (size_t)-1 if not available
 size_t GCToOSInterface::GetVirtualMemoryLimit()
@@ -1107,6 +1121,11 @@ uint32_t GCToOSInterface::GetTotalProcessorCount()
     }
 }
 
+uint32_t GCToOSInterface::GetMaxProcessorCount()
+{
+    return (uint32_t)g_processAffinitySet.MaxCpuCount();
+}
+
 bool GCToOSInterface::CanEnableGCNumaAware()
 {
     return g_fEnableGCNumaAware;
@@ -1130,7 +1149,7 @@ bool GCToOSInterface::GetNumaInfo(uint16_t* total_nodes, uint32_t* max_procs_per
                     mask &= mask - 1;
                 }
 
-                currentProcsOnNode = max(currentProcsOnNode, procsOnNode);
+                currentProcsOnNode = std::max(currentProcsOnNode, procsOnNode);
             }
             *max_procs_per_node = currentProcsOnNode;
             *total_nodes = (uint16_t)g_nNodes;
@@ -1154,7 +1173,7 @@ bool GCToOSInterface::GetCPUGroupInfo(uint16_t* total_groups, uint32_t* max_proc
         DWORD currentProcsInGroup = 0;
         for (WORD i = 0; i < g_nGroups; i++)
         {
-            currentProcsInGroup = max(currentProcsInGroup, g_CPUGroupInfoArray[i].nr_active);
+            currentProcsInGroup = std::max(currentProcsInGroup, (DWORD)g_CPUGroupInfoArray[i].nr_active);
         }
         *max_procs_per_group = currentProcsInGroup;
         return true;
@@ -1177,13 +1196,13 @@ bool GCToOSInterface::GetProcessorForHeap(uint16_t heap_number, uint16_t* proc_n
     // Locate heap_number-th available processor
     uint16_t procIndex = 0;
     size_t cnt = heap_number;
-    for (uint16_t i = 0; i < MAX_SUPPORTED_CPUS; i++)
+    for (uint32_t i = 0; i < GCToOSInterface::GetTotalProcessorCount(); i++)
     {
         if (g_processAffinitySet.Contains(i))
         {
             if (cnt == 0)
             {
-                procIndex = i;
+                procIndex = (uint16_t)i;
                 success = true;
                 break;
             }
@@ -1308,31 +1327,6 @@ static DWORD GCThreadStub(void* param)
     function(threadParam);
 
     return 0;
-}
-
-// Initialize the critical section
-bool CLRCriticalSection::Initialize()
-{
-    ::InitializeCriticalSection(&m_cs);
-    return true;
-}
-
-// Destroy the critical section
-void CLRCriticalSection::Destroy()
-{
-    ::DeleteCriticalSection(&m_cs);
-}
-
-// Enter the critical section. Blocks until the section can be entered.
-void CLRCriticalSection::Enter()
-{
-    ::EnterCriticalSection(&m_cs);
-}
-
-// Leave the critical section
-void CLRCriticalSection::Leave()
-{
-    ::LeaveCriticalSection(&m_cs);
 }
 
 // WindowsEvent is an implementation of GCEvent that forwards

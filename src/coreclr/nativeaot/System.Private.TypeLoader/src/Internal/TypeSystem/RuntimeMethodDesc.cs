@@ -10,7 +10,7 @@ using Internal.Runtime.TypeLoader;
 namespace Internal.TypeSystem.NoMetadata
 {
     /// <summary>
-    /// Represents a method within the Redhawk runtime
+    /// Represents a method within the NativeAOT runtime
     /// </summary>
     internal sealed partial class RuntimeMethodDesc : NoMetadataMethodDesc
     {
@@ -63,7 +63,7 @@ namespace Internal.TypeSystem.NoMetadata
             }
         }
 
-        private TypeDesc _owningType;
+        private DefType _owningType;
         public override TypeDesc OwningType
         {
             get
@@ -93,7 +93,7 @@ namespace Internal.TypeSystem.NoMetadata
         {
             get
             {
-                return _nameAndSignature.Name;
+                return NameAndSignature.GetName();
             }
         }
 
@@ -117,7 +117,7 @@ namespace Internal.TypeSystem.NoMetadata
             }
 
             // Otherwise, find its equivalent on the type definition of the owning type
-            return Context.ResolveRuntimeMethod(UnboxingStub, (DefType)owningTypeDefinition, _nameAndSignature, IntPtr.Zero, false);
+            return Context.ResolveRuntimeMethod(UnboxingStub, (DefType)owningTypeDefinition, _nameAndSignature);
         }
 
         public override MethodDesc InstantiateSignature(Instantiation typeInstantiation, Instantiation methodInstantiation)
@@ -127,7 +127,7 @@ namespace Internal.TypeSystem.NoMetadata
             TypeDesc owningType = method.OwningType;
             TypeDesc instantiatedOwningType = owningType.InstantiateSignature(typeInstantiation, methodInstantiation);
             if (owningType != instantiatedOwningType)
-                method = instantiatedOwningType.Context.ResolveRuntimeMethod(UnboxingStub, (DefType)instantiatedOwningType, _nameAndSignature, IntPtr.Zero, false);
+                method = instantiatedOwningType.Context.ResolveRuntimeMethod(UnboxingStub, (DefType)instantiatedOwningType, _nameAndSignature);
 
             Instantiation instantiation = method.Instantiation;
             TypeDesc[] clone = null;
@@ -163,7 +163,7 @@ namespace Internal.TypeSystem.NoMetadata
 
         public override string ToString()
         {
-            string result = OwningType.ToString() + ".Method(" + NameAndSignature.Name + ")";
+            string result = OwningType.ToString() + ".Method(" + Name + ")";
             return result;
         }
 #endif

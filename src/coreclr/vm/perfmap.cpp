@@ -9,7 +9,6 @@
 #if defined(FEATURE_PERFMAP) && !defined(DACCESS_COMPILE)
 #include <clrconfignocache.h>
 #include "perfmap.h"
-#include "perfinfo.h"
 #include "pal.h"
 
 
@@ -28,17 +27,35 @@
 #endif
 
 Volatile<bool> PerfMap::s_enabled = false;
+Volatile<bool> PerfMap::s_dependenciesReady = false;
 PerfMap * PerfMap::s_Current = nullptr;
 bool PerfMap::s_ShowOptimizationTiers = false;
+bool PerfMap::s_GroupStubsOfSameType = false;
+bool PerfMap::s_IndividualAllocationStubReporting = false;
+bool PerfMap::s_LogStubs = false;
+
 unsigned PerfMap::s_StubsMapped = 0;
 CrstStatic PerfMap::s_csPerfMap;
+
+bool PerfMapLowGranularityStubs()
+{
+    return PerfMap::LowGranularityStubs();
+}
 
 // Initialize the map for the process - called from EEStartupHelper.
 void PerfMap::Initialize()
 {
     LIMITED_METHOD_CONTRACT;
 
-    s_csPerfMap.Init(CrstPerfMap);
+    // Use CRST_UNSAFE_ANYMODE to avoid a GC-mode toggle deadlock: callers such as
+    // CodeFragmentHeap::RealAllocAlignedMem hold CRST_UNSAFE_ANYMODE locks in cooperative
+    // mode. A default Crst here would toggle cooperative->preemptive->acquire->cooperative,
+    // and the post-acquire DisablePreemptiveGC can block on a pending GC suspension,
+    // forming a deadlock cycle with threads waiting on the outer UNSAFE_ANYMODE lock.
+    // All data accessed under this lock is native (FILE*, fd, SString) so holding it
+    // in cooperative mode does not introduce new GC-safety issues. Doing I/O
+    // in cooperative mode is still less than ideal.
+    s_csPerfMap.Init(CrstPerfMap, CrstFlags(CRST_UNSAFE_ANYMODE));
 
     PerfMapType perfMapType = (PerfMapType)CLRConfig::GetConfigValue(CLRConfig::EXTERNAL_PerfMapEnabled);
     PerfMap::Enable(perfMapType, false);
@@ -46,7 +63,11 @@ void PerfMap::Initialize()
 
 const char * PerfMap::InternalConstructPath()
 {
+#ifdef HOST_WINDOWS
     CLRConfigNoCache value = CLRConfigNoCache::Get("PerfMapJitDumpPath");
+#else
+    CLRConfigNoCache value = CLRConfigNoCache::Get("PerfMapJitDumpPath", /* noPrefix */ false, &PAL_getenv);
+#endif
     if (value.IsSet())
     {
         return value.AsString();
@@ -54,9 +75,26 @@ const char * PerfMap::InternalConstructPath()
     return TEMP_DIRECTORY_PATH;
 }
 
+void PerfMap::InitializeConfiguration()
+{
+    if (CLRConfig::GetConfigValue(CLRConfig::EXTERNAL_PerfMapShowOptimizationTiers) != 0)
+    {
+        s_ShowOptimizationTiers = true;
+    }
+
+    DWORD granularity = CLRConfig::GetConfigValue(CLRConfig::EXTERNAL_PerfMapStubGranularity);
+    s_GroupStubsOfSameType = (granularity & 1) != 1;
+    s_IndividualAllocationStubReporting = (granularity & 2) != 0;
+    s_LogStubs = (granularity & 4) == 0;
+}
+
 void PerfMap::Enable(PerfMapType type, bool sendExisting)
 {
-    LIMITED_METHOD_CONTRACT;
+    CONTRACTL
+    {
+        MODE_PREEMPTIVE;
+    }
+    CONTRACTL_END;
 
     if (type == PerfMapType::DISABLED)
     {
@@ -78,10 +116,7 @@ void PerfMap::Enable(PerfMapType type, bool sendExisting)
                 PAL_IgnoreProfileSignal(signalNum);
             }
 
-            if (CLRConfig::GetConfigValue(CLRConfig::EXTERNAL_PerfMapShowOptimizationTiers) != 0)
-            {
-                s_ShowOptimizationTiers = true;
-            }
+            InitializeConfiguration();
 
             int currentPid = GetCurrentProcessId();
             s_Current->OpenFileForPid(currentPid, basePath);
@@ -92,25 +127,30 @@ void PerfMap::Enable(PerfMapType type, bool sendExisting)
         {
             PAL_PerfJitDump_Start(basePath);
 
-            if (CLRConfig::GetConfigValue(CLRConfig::EXTERNAL_PerfMapShowOptimizationTiers) != 0)
-            {
-                s_ShowOptimizationTiers = true;
-            }
-            
+            InitializeConfiguration();
+
             s_enabled = true;
         }
     }
 
     if (sendExisting)
     {
+        // When Enable is called very early in startup (e.g., via DiagnosticServer IPC before
+        // SystemDomain::Attach and ExecutionManager::Init), the AppDomain and EEJitManager
+        // may not exist yet. We use s_dependenciesReady (a Volatile<bool>) to guard against
+        // this, rather than null-checking individual pointers which would have race conditions
+        // due to non-Volatile statics like m_pEEJitManager.
+        // Safe to skip: no assemblies are loaded and no code is JIT'd at that point.
+        if (!s_dependenciesReady)
+        {
+            return;
+        }
+
         AppDomain::AssemblyIterator assemblyIterator = GetAppDomain()->IterateAssembliesEx(
             (AssemblyIterationFlags)(kIncludeLoaded | kIncludeExecution));
-        CollectibleAssemblyHolder<DomainAssembly *> pDomainAssembly;
-        while (assemblyIterator.Next(pDomainAssembly.This()))
+        CollectibleAssemblyHolder<Assembly *> pAssembly;
+        while (assemblyIterator.Next(pAssembly.This()))
         {
-            CollectibleAssemblyHolder<Assembly *> pAssembly = pDomainAssembly->GetAssembly();
-            PerfMap::LogImageLoad(pAssembly->GetPEAssembly());
-
             // PerfMap does not log R2R methods so only proceed if we are emitting jitdumps
             if (type == PerfMapType::ALL || type == PerfMapType::JITDUMP)
             {
@@ -123,7 +163,7 @@ void PerfMap::Enable(PerfMapType type, bool sendExisting)
                     {
                         // Call GetMethodDesc_NoRestore instead of GetMethodDesc to avoid restoring methods.
                         MethodDesc *hotDesc = (MethodDesc *)mi.GetMethodDesc_NoRestore();
-                        if (hotDesc != nullptr && hotDesc->GetNativeCode() != NULL)
+                        if (hotDesc != nullptr && hotDesc->GetNativeCode() != (PCODE)NULL)
                         {
                             PerfMap::LogPreCompiledMethod(hotDesc, hotDesc->GetNativeCode());
                         }
@@ -135,7 +175,7 @@ void PerfMap::Enable(PerfMapType type, bool sendExisting)
         {
             CodeVersionManager::LockHolder codeVersioningLockHolder;
 
-            EEJitManager::CodeHeapIterator heapIterator(nullptr);
+            CodeHeapIterator heapIterator = ExecutionManager::GetEEJitManager()->GetCodeHeapIterator();
             while (heapIterator.Next())
             {
                 MethodDesc * pMethod = heapIterator.GetMethod();
@@ -164,7 +204,7 @@ void PerfMap::Enable(PerfMapType type, bool sendExisting)
                 codeInfo.GetMethodRegionInfo(&methodRegionInfo);
                 _ASSERTE(methodRegionInfo.hotStartAddress == codeStart);
                 _ASSERTE(methodRegionInfo.hotSize > 0);
-                    
+
                 PrepareCodeConfig config(!nativeCodeVersion.IsNull() ? nativeCodeVersion : NativeCodeVersion(pMethod), FALSE, FALSE);
                 PerfMap::LogJITCompiledMethod(pMethod, codeStart, methodRegionInfo.hotSize, &config);
             }
@@ -193,6 +233,15 @@ void PerfMap::Disable()
     }
 }
 
+// Signal that all dependencies (AppDomain, ExecutionManager) are ready.
+// This method must be called before any code is JITed or restored from R2R image.
+void PerfMap::SignalDependenciesReady()
+{
+    LIMITED_METHOD_CONTRACT;
+
+    s_dependenciesReady = true;
+}
+
 // Construct a new map for the process.
 PerfMap::PerfMap()
 {
@@ -200,7 +249,6 @@ PerfMap::PerfMap()
 
     // Initialize with no failures.
     m_ErrorEncountered = false;
-    m_PerfInfo = nullptr;
 }
 
 // Clean-up resources.
@@ -210,9 +258,6 @@ PerfMap::~PerfMap()
 
     delete m_FileStream;
     m_FileStream = nullptr;
-
-    delete m_PerfInfo;
-    m_PerfInfo = nullptr;
 }
 
 void PerfMap::OpenFileForPid(int pid, const char* basePath)
@@ -222,8 +267,6 @@ void PerfMap::OpenFileForPid(int pid, const char* basePath)
 
     // Open the map file for writing.
     OpenFile(fullPath);
-
-    m_PerfInfo = new PerfInfo(pid, basePath);
 }
 
 // Open the specified destination map file.
@@ -274,50 +317,11 @@ void PerfMap::WriteLine(SString& line)
         }
 
     }
-    EX_CATCH{} EX_END_CATCH(SwallowAllExceptions);
-}
-
-void PerfMap::LogImageLoad(PEAssembly * pPEAssembly)
-{
-    CrstHolder ch(&(s_csPerfMap));
-
-    if (s_enabled && s_Current != nullptr)
-    {
-        s_Current->LogImage(pPEAssembly);
-    }
-}
-
-// Log an image load to the map.
-void PerfMap::LogImage(PEAssembly * pPEAssembly)
-{
-    CONTRACTL{
-        THROWS;
-        GC_NOTRIGGER;
-        MODE_PREEMPTIVE;
-        PRECONDITION(pPEAssembly != nullptr);
-    } CONTRACTL_END;
-
-
-    if (m_FileStream == nullptr || m_ErrorEncountered)
-    {
-        // A failure occurred, do not log.
-        return;
-    }
-
-    EX_TRY
-    {
-        CHAR szSignature[GUID_STR_BUFFER_LEN];
-        GetNativeImageSignature(pPEAssembly, szSignature, ARRAY_SIZE(szSignature));
-
-        m_PerfInfo->LogImage(pPEAssembly, szSignature);
-    }
-    EX_CATCH{} EX_END_CATCH(SwallowAllExceptions);
+    EX_CATCH{} EX_END_CATCH
 }
 
 void PerfMap::LogJITCompiledMethod(MethodDesc * pMethod, PCODE pCode, size_t codeSize, PrepareCodeConfig *pConfig)
 {
-    LIMITED_METHOD_CONTRACT;
-
     CONTRACTL{
         THROWS;
         GC_NOTRIGGER;
@@ -361,17 +365,22 @@ void PerfMap::LogJITCompiledMethod(MethodDesc * pMethod, PCODE pCode, size_t cod
                 s_Current->WriteLine(line);
             }
 
-            PAL_PerfJitDump_LogMethod((void*)pCode, codeSize, name.GetUTF8(), nullptr, nullptr);
+            PAL_PerfJitDump_LogMethod((void*)pCode, codeSize, name.GetUTF8(), nullptr, nullptr, /*reportCodeBlock*/true);
         }
     }
-    EX_CATCH{} EX_END_CATCH(SwallowAllExceptions);
+    EX_CATCH{} EX_END_CATCH
 
 }
 
 // Log a pre-compiled method to the perfmap.
 void PerfMap::LogPreCompiledMethod(MethodDesc * pMethod, PCODE pCode)
 {
-    LIMITED_METHOD_CONTRACT;
+    CONTRACTL
+    {
+        THROWS;
+        MODE_PREEMPTIVE;
+    }
+    CONTRACTL_END;
 
     if (!s_enabled)
     {
@@ -402,33 +411,46 @@ void PerfMap::LogPreCompiledMethod(MethodDesc * pMethod, PCODE pCode)
         if (methodRegionInfo.hotSize > 0)
         {
             CrstHolder ch(&(s_csPerfMap));
-            PAL_PerfJitDump_LogMethod((void*)methodRegionInfo.hotStartAddress, methodRegionInfo.hotSize, name.GetUTF8(), nullptr, nullptr);
+            PAL_PerfJitDump_LogMethod((void*)methodRegionInfo.hotStartAddress, methodRegionInfo.hotSize, name.GetUTF8(), nullptr, nullptr, /*reportCodeBlock*/true);
         }
 
         if (methodRegionInfo.coldSize > 0)
         {
-            CrstHolder ch(&(s_csPerfMap));
-
             if (s_ShowOptimizationTiers)
             {
                 pMethod->GetFullMethodInfo(name);
                 name.Append(W("[PreJit-cold]"));
             }
 
-            PAL_PerfJitDump_LogMethod((void*)methodRegionInfo.coldStartAddress, methodRegionInfo.coldSize, name.GetUTF8(), nullptr, nullptr);
+            CrstHolder ch(&(s_csPerfMap));
+
+            PAL_PerfJitDump_LogMethod((void*)methodRegionInfo.coldStartAddress, methodRegionInfo.coldSize, name.GetUTF8(), nullptr, nullptr, /*reportCodeBlock*/true);
         }
     }
-    EX_CATCH{} EX_END_CATCH(SwallowAllExceptions);
+    EX_CATCH{} EX_END_CATCH
 }
 
 // Log a set of stub to the map.
-void PerfMap::LogStubs(const char* stubType, const char* stubOwner, PCODE pCode, size_t codeSize)
+void PerfMap::LogStubs(const char* stubType, const char* stubOwner, PCODE pCode, size_t codeSize, PerfMapStubType stubAllocationType)
 {
-    LIMITED_METHOD_CONTRACT;
+    CONTRACTL
+    {
+        GC_NOTRIGGER;
+        MODE_ANY;
+    }
+    CONTRACTL_END;
 
-    if (!s_enabled)
+    if (!s_enabled || !s_LogStubs)
     {
         return;
+    }
+
+    if (stubAllocationType != PerfMapStubType::Individual)
+    {
+        if ((stubAllocationType == PerfMapStubType::IndividualWithinBlock) != s_IndividualAllocationStubReporting)
+        {
+            return;
+        }
     }
 
     // Logging failures should not cause any exceptions to flow upstream.
@@ -445,7 +467,14 @@ void PerfMap::LogStubs(const char* stubType, const char* stubOwner, PCODE pCode,
 
         SString name;
         // Build the map file line.
-        name.Printf("stub<%d> %s<%s>", ++(s_StubsMapped), stubType, stubOwner);
+        if (s_GroupStubsOfSameType)
+        {
+            name.Printf("stub %s<%s>", stubType, stubOwner);
+        }
+        else
+        {
+            name.Printf("stub<%d> %s<%s>", ++(s_StubsMapped), stubType, stubOwner);
+        }
         SString line;
         line.Printf(FMT_CODE_ADDR " %x %s\n", pCode, codeSize, name.GetUTF8());
 
@@ -457,10 +486,17 @@ void PerfMap::LogStubs(const char* stubType, const char* stubOwner, PCODE pCode,
                 s_Current->WriteLine(line);
             }
 
-            PAL_PerfJitDump_LogMethod((void*)pCode, codeSize, name.GetUTF8(), nullptr, nullptr);
+            // For block-level stub allocations, the memory may be reserved but not yet committed.
+            // Emitting code bytes in that case can cause jitdump logging to fail, and the bytes
+            // are optional in the jitdump specification.
+            //
+            // Even when the memory is committed, block-level stubs are reported at commit time
+            // before the actual stub code has been written, so the code bytes would be zeros or
+            // uninitialized. We therefore skip code bytes for block allocations entirely.
+            PAL_PerfJitDump_LogMethod((void*)pCode, codeSize, name.GetUTF8(), nullptr, nullptr, /*reportCodeBlock*/ stubAllocationType != PerfMapStubType::Block);
         }
     }
-    EX_CATCH{} EX_END_CATCH(SwallowAllExceptions);
+    EX_CATCH{} EX_END_CATCH
 }
 
 void PerfMap::GetNativeImageSignature(PEAssembly * pPEAssembly, CHAR * pszSig, unsigned int nSigSize)
@@ -468,16 +504,21 @@ void PerfMap::GetNativeImageSignature(PEAssembly * pPEAssembly, CHAR * pszSig, u
     CONTRACTL{
         PRECONDITION(pPEAssembly != nullptr);
         PRECONDITION(pszSig != nullptr);
-        PRECONDITION(nSigSize >= GUID_STR_BUFFER_LEN);
+        PRECONDITION(nSigSize >= MINIPAL_GUID_BUFFER_LEN);
     } CONTRACTL_END;
 
     // We use the MVID as the signature, since ready to run images
     // don't have a native image signature.
     GUID mvid;
     pPEAssembly->GetMVID(&mvid);
-    if(!GuidToLPSTR(mvid, pszSig, nSigSize))
-    {
-        pszSig[0] = '\0';
-    }
+    minipal_guid_as_string(mvid, pszSig, nSigSize);
 }
+
+void ReportStubBlock(void* start, size_t size, StubCodeBlockKind kind)
+{
+    WRAPPER_NO_CONTRACT;
+
+    PerfMap::LogStubs(__FUNCTION__, GetStubCodeBlockKindString(kind), (PCODE)start, size, PerfMapStubType::Block);
+}
+
 #endif // FEATURE_PERFMAP && !DACCESS_COMPILE

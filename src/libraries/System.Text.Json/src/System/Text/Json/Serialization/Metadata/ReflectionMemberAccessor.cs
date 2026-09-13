@@ -8,11 +8,15 @@ using System.Reflection;
 
 namespace System.Text.Json.Serialization.Metadata
 {
+    [RequiresDynamicCode(JsonSerializer.SerializationRequiresDynamicCodeMessage)]
+    [RequiresUnreferencedCode(JsonSerializer.SerializationRequiresDynamicCodeMessage)]
     internal sealed class ReflectionMemberAccessor : MemberAccessor
     {
-        public override Func<object>? CreateParameterlessConstructor(
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type type,
-            ConstructorInfo? ctorInfo)
+        public ReflectionMemberAccessor()
+        {
+        }
+
+        public override Func<object>? CreateParameterlessConstructor(Type type, ConstructorInfo? ctorInfo)
         {
             Debug.Assert(type != null);
             Debug.Assert(ctorInfo is null || ctorInfo.GetParameters().Length == 0);
@@ -108,6 +112,10 @@ namespace System.Text.Json.Serialization.Metadata
             };
         }
 
+#if !NET9_0_OR_GREATER
+        [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2046",
+            Justification = "The type is annotated with RequiresUnreferencedCode, so the trimmer will warn at construction time.")]
+#endif
         public override Action<TCollection, object?> CreateAddMethodDelegate<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)] TCollection>()
         {
             Type collectionType = typeof(TCollection);
@@ -122,8 +130,6 @@ namespace System.Text.Json.Serialization.Metadata
             };
         }
 
-        [RequiresUnreferencedCode(IEnumerableConverterFactoryHelpers.ImmutableConvertersUnreferencedCodeMessage)]
-        [RequiresDynamicCode(IEnumerableConverterFactoryHelpers.ImmutableConvertersUnreferencedCodeMessage)]
         public override Func<IEnumerable<TElement>, TCollection> CreateImmutableEnumerableCreateRangeDelegate<TCollection, TElement>()
         {
             MethodInfo createRange = typeof(TCollection).GetImmutableEnumerableCreateRangeMethod(typeof(TElement));
@@ -131,8 +137,6 @@ namespace System.Text.Json.Serialization.Metadata
                 typeof(Func<IEnumerable<TElement>, TCollection>));
         }
 
-        [RequiresUnreferencedCode(IEnumerableConverterFactoryHelpers.ImmutableConvertersUnreferencedCodeMessage)]
-        [RequiresDynamicCode(IEnumerableConverterFactoryHelpers.ImmutableConvertersUnreferencedCodeMessage)]
         public override Func<IEnumerable<KeyValuePair<TKey, TValue>>, TCollection> CreateImmutableDictionaryCreateRangeDelegate<TCollection, TKey, TValue>()
         {
             MethodInfo createRange = typeof(TCollection).GetImmutableDictionaryCreateRangeMethod(typeof(TKey), typeof(TValue));

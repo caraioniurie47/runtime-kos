@@ -44,7 +44,6 @@ Abstract:
 #endif
 
 #define CGROUP2_SUPER_MAGIC 0x63677270
-#define TMPFS_MAGIC 0x01021994
 
 #define PROC_MOUNTINFO_FILENAME "/proc/self/mountinfo"
 #define PROC_CGROUP_FILENAME "/proc/self/cgroup"
@@ -61,7 +60,7 @@ Abstract:
 
 extern bool ReadMemoryValueFromFile(const char* filename, uint64_t* val);
 
-namespace 
+namespace
 {
 class CGroup
 {
@@ -134,12 +133,16 @@ private:
         if (result != 0)
             return 0;
 
-        switch (stats.f_type)
+        if (stats.f_type == CGROUP2_SUPER_MAGIC)
         {
-            case TMPFS_MAGIC: return 1;
-            case CGROUP2_SUPER_MAGIC: return 2;
-            default:
-                return 0;
+            return 2;
+        }
+        else
+        {
+            // Assume that if /sys/fs/cgroup exists and the file system type is not cgroup2fs,
+            // it is cgroup v1. Typically the file system type is tmpfs, but other values have
+            // been seen in the wild.
+            return 1;
         }
 #endif
     }
@@ -473,7 +476,8 @@ private:
         size_t cgroupPathLength = strlen(s_memory_cgroup_path);
 
         // Iterate over the directory hierarchy representing the cgroup hierarchy until reaching the 
-        // mount directory. The mount directory doesn't contain the memory.max.
+        // mount directory. The mount directory can also contain the memory.max in case it
+        // is not the global root cgroup.
         do
         {
             if (ReadMemoryValueFromFile(mem_limit_filename, &limit))
@@ -483,6 +487,11 @@ private:
                 {
                     min_limit = limit;
                 }
+            }
+
+            if (cgroupPathLength == memory_cgroup_hierarchy_mount_length)
+            {
+                break;
             }
 
             // Get the parent cgroup memory limit file path
@@ -496,7 +505,7 @@ private:
 
             strcpy(parent_directory_end, CGROUP2_MEMORY_LIMIT_FILENAME);
         }
-        while (cgroupPathLength != memory_cgroup_hierarchy_mount_length);
+        while (true);
 
         free(mem_limit_filename);
 

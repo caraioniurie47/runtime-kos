@@ -181,6 +181,8 @@ namespace System.Reflection
             }
         }
 
+        public override bool IsCollectible => false;
+
         private string FormatNameAndSig()
         {
             // Serialization uses ToString to resolve MethodInfo overloads.
@@ -336,7 +338,7 @@ namespace System.Reflection
 
             // Have to clone because GetParametersInfo icall returns cached value
             var dest = new ParameterInfo[src.Length];
-            Array.FastCopy(ObjectHandleOnStack.Create (ref src), 0, ObjectHandleOnStack.Create (ref dest), 0, src.Length);
+            Array.FastCopy(ObjectHandleOnStack.Create(ref src), 0, ObjectHandleOnStack.Create(ref dest), 0, src.Length);
             return dest;
         }
 
@@ -746,6 +748,8 @@ namespace System.Reflection
                 return GetRuntimeModule();
             }
         }
+
+        public override bool IsCollectible => false;
 
         internal RuntimeModule GetRuntimeModule()
         {

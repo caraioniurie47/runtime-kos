@@ -52,7 +52,7 @@ namespace Microsoft.Extensions.DependencyModel
             {
                 throw new ArgumentException(null, nameof(version));
             }
-            ThrowHelper.ThrowIfNull(dependencies);
+            ArgumentNullException.ThrowIfNull(dependencies);
 
             Type = type;
             Name = name;
@@ -81,6 +81,6 @@ namespace Microsoft.Extensions.DependencyModel
 
         public string? HashPath { get; }
 
-        public string? RuntimeStoreManifestName {get;}
+        public string? RuntimeStoreManifestName { get; }
     }
 }

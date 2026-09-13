@@ -1,23 +1,26 @@
 set(GC_DIR ../../gc)
+set(RUNTIME_DIR ../../runtime)
 
 set(COMMON_RUNTIME_SOURCES
     allocheap.cpp
     rhassert.cpp
-    CachedInterfaceDispatch.cpp
+    ${RUNTIME_DIR}/CachedInterfaceDispatch.cpp
+    CachedInterfaceDispatch_Aot.cpp
     Crst.cpp
     DebugHeader.cpp
     MethodTable.cpp
     EHHelpers.cpp
     event.cpp
     FinalizerHelpers.cpp
+    GcEnum.cpp
     GCHelpers.cpp
     gctoclreventsink.cpp
     gcheaputilities.cpp
     GCMemoryHelpers.cpp
-    gcrhenv.cpp
-    gcrhscan.cpp
+    gcenv.ee.cpp
     GcStressControl.cpp
     HandleTableHelpers.cpp
+    interoplibinterface_java.cpp
     MathHelpers.cpp
     MiscHelpers.cpp
     TypeManager.cpp
@@ -36,6 +39,7 @@ set(COMMON_RUNTIME_SOURCES
     yieldprocessornormalized.cpp
 
     ${GC_DIR}/gceventstatus.cpp
+    ${GC_DIR}/gcbridge.cpp
     ${GC_DIR}/gcload.cpp
     ${GC_DIR}/gcconfig.cpp
     ${GC_DIR}/gchandletable.cpp
@@ -49,9 +53,14 @@ set(COMMON_RUNTIME_SOURCES
     ${GC_DIR}/handletablescan.cpp
     ${GC_DIR}/objecthandle.cpp
     ${GC_DIR}/softwarewritewatch.cpp
-
-    ${CLR_SRC_NATIVE_DIR}/minipal/cpufeatures.c
+    ${CLR_SRC_NATIVE_DIR}/minipal/xoshiro128pp.c
 )
+
+if (CLR_CMAKE_TARGET_UNIX AND NOT CLR_CMAKE_TARGET_ARCH_WASM)
+    list(APPEND COMMON_RUNTIME_SOURCES
+        ${RUNTIME_DIR}/asyncsafethreadmap.cpp
+    )
+endif()
 
 set(SERVER_GC_SOURCES
     ${GC_DIR}/gceesvr.cpp
@@ -77,6 +86,7 @@ include_directories(.)
 include_directories(${GC_DIR})
 include_directories(${GC_DIR}/env)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/eventpipe/inc)
+include_directories(${RUNTIME_DIR})
 
 if (WIN32)
   set(GC_HEADERS
@@ -118,8 +128,8 @@ if (WIN32)
   include_directories(windows)
 
   list(APPEND COMMON_RUNTIME_SOURCES
-    windows/PalRedhawkCommon.cpp
-    windows/PalRedhawkMinWin.cpp
+    windows/PalCommon.cpp
+    windows/PalMinWin.cpp
     ${GC_DIR}/windows/gcenv.windows.cpp
   )
 
@@ -131,7 +141,6 @@ else()
   include_directories(unix)
 
   # sal.h, pshpack/poppack.h
-  add_definitions(-DPAL_STDCPP_COMPAT)
   include_directories(../../pal/inc/rt)
 
   include(CheckIncludeFiles)
@@ -154,7 +163,7 @@ else()
   endif()
 
   list(APPEND COMMON_RUNTIME_SOURCES
-    unix/PalRedhawkUnix.cpp
+    unix/PalUnix.cpp
     unix/PalCreateDump.cpp
     ${GC_DIR}/unix/gcenv.unix.cpp
     ${GC_DIR}/unix/numasupport.cpp
@@ -165,7 +174,7 @@ else()
   list(APPEND FULL_RUNTIME_SOURCES
     unix/cgroupcpu.cpp
     unix/HardwareExceptions.cpp
-    unix/UnixContext.cpp
+    unix/NativeContext.cpp
     unix/UnixSignals.cpp
     unix/UnwindHelpers.cpp
     unix/UnixNativeCodeManager.cpp
@@ -189,7 +198,7 @@ if (CLR_CMAKE_TARGET_APPLE)
   )
 endif (CLR_CMAKE_TARGET_APPLE)
 
-if (CLR_CMAKE_TARGET_ARCH_AMD64 AND CLR_CMAKE_TARGET_WIN32)
+if (CLR_CMAKE_TARGET_ARCH_AMD64)
   set(VXSORT_SOURCES
     ${GC_DIR}/vxsort/isa_detection.cpp
     ${GC_DIR}/vxsort/do_vxsort_avx2.cpp
@@ -205,20 +214,25 @@ if (CLR_CMAKE_TARGET_ARCH_AMD64 AND CLR_CMAKE_TARGET_WIN32)
   set(DUMMY_VXSORT_SOURCES
     ${GC_DIR}/vxsort/dummy.cpp
   )
-endif (CLR_CMAKE_TARGET_ARCH_AMD64 AND CLR_CMAKE_TARGET_WIN32)
+endif (CLR_CMAKE_TARGET_ARCH_AMD64)
 
 list(APPEND RUNTIME_SOURCES_ARCH_ASM
-  ${ARCH_SOURCES_DIR}/AllocFast.${ASM_SUFFIX}
+  ${RUNTIME_DIR}/${ARCH_SOURCES_DIR}/AllocFast.${ASM_SUFFIX}
   ${ARCH_SOURCES_DIR}/ExceptionHandling.${ASM_SUFFIX}
   ${ARCH_SOURCES_DIR}/GcProbe.${ASM_SUFFIX}
-  ${ARCH_SOURCES_DIR}/Interlocked.${ASM_SUFFIX}
   ${ARCH_SOURCES_DIR}/MiscStubs.${ASM_SUFFIX}
   ${ARCH_SOURCES_DIR}/PInvoke.${ASM_SUFFIX}
   ${ARCH_SOURCES_DIR}/InteropThunksHelpers.${ASM_SUFFIX}
-  ${ARCH_SOURCES_DIR}/StubDispatch.${ASM_SUFFIX}
+  ${RUNTIME_DIR}/${ARCH_SOURCES_DIR}/StubDispatch.${ASM_SUFFIX}
   ${ARCH_SOURCES_DIR}/UniversalTransition.${ASM_SUFFIX}
-  ${ARCH_SOURCES_DIR}/WriteBarriers.${ASM_SUFFIX}
+  ${RUNTIME_DIR}/${ARCH_SOURCES_DIR}/WriteBarriers.${ASM_SUFFIX}
 )
+
+if (CLR_CMAKE_TARGET_ARCH_AMD64 OR CLR_CMAKE_TARGET_ARCH_ARM64)
+  list(APPEND RUNTIME_SOURCES_ARCH_ASM
+    ${ARCH_SOURCES_DIR}/CachedInterfaceDispatchAot.${ASM_SUFFIX}
+  )
+endif ()
 
 # Add architecture specific folder for looking up headers.
 convert_to_absolute_path(ARCH_SOURCES_DIR ${ARCH_SOURCES_DIR})
@@ -237,10 +251,19 @@ if(FEATURE_EVENT_TRACE)
   add_definitions(-DFEATURE_EVENT_TRACE)
 endif()
 
+if (NOT CLR_CMAKE_TARGET_ARCH_WASM)
+  add_definitions(-DFEATURE_HIJACK)
+endif()
+
 add_definitions(-DFEATURE_BASICFREEZE)
 add_definitions(-DFEATURE_CONSERVATIVE_GC)
-add_definitions(-DFEATURE_USE_SOFTWARE_WRITE_WATCH_FOR_GC_HEAP)
-add_definitions(-DFEATURE_MANUALLY_MANAGED_CARD_BUNDLES)
+if(CLR_CMAKE_TARGET_ARCH_AMD64 OR CLR_CMAKE_TARGET_ARCH_ARM64 OR CLR_CMAKE_TARGET_ARCH_RISCV64 OR CLR_CMAKE_TARGET_ARCH_LOONGARCH64)
+  add_definitions(-DFEATURE_USE_SOFTWARE_WRITE_WATCH_FOR_GC_HEAP)
+  add_definitions(-DFEATURE_MANUALLY_MANAGED_CARD_BUNDLES)
+endif()
+if(CLR_CMAKE_TARGET_ARCH_ARM OR CLR_CMAKE_TARGET_ARCH_WASM)
+  add_definitions(-DFEATURE_64BIT_ALIGNMENT)
+endif()
 
 add_definitions(-DFEATURE_CUSTOM_IMPORTS)
 add_definitions(-DFEATURE_DYNAMIC_CODE)
@@ -249,22 +272,29 @@ add_definitions(-DFEATURE_NATIVEAOT)
 add_definitions(-DVERIFY_HEAP)
 add_definitions(-DNATIVEAOT)
 add_definitions(-DFEATURE_CACHED_INTERFACE_DISPATCH)
+if(CLR_CMAKE_TARGET_ARCH_I386 OR CLR_CMAKE_TARGET_ARCH_ARM)
+  add_definitions(-DINTERFACE_DISPATCH_CACHE_HAS_CELL_BACKPOINTER)
+endif()
 add_definitions(-D_LIB)
 
 # there is a problem with undefined symbols when this is set
 # add_definitions(-DSTRESS_HEAP)
 
-if(WIN32)
+if(CLR_CMAKE_TARGET_WIN32)
   set(FEATURE_ETW 1)
   add_definitions(-DFEATURE_ETW)
   add_definitions(-DFEATURE_SUSPEND_REDIRECTION)
-  add_definitions(-DFEATURE_SPECIAL_USER_MODE_APC)
+  if (CLR_CMAKE_TARGET_ARCH_AMD64 OR CLR_CMAKE_TARGET_ARCH_ARM64)
+    add_definitions(-DFEATURE_SPECIAL_USER_MODE_APC)
+  endif()
+  if (CLR_CMAKE_TARGET_ARCH_I386)
+    add_compile_options($<$<COMPILE_LANGUAGE:ASM_MASM>:/safeseh>)
+  endif()
 else()
-  if(NOT CLR_CMAKE_TARGET_MACCATALYST AND NOT CLR_CMAKE_TARGET_IOS AND NOT CLR_CMAKE_TARGET_TVOS AND NOT CLR_CMAKE_TARGET_KOS)
+  if(NOT CLR_CMAKE_TARGET_APPLE AND NOT CLR_CMAKE_TARGET_ARCH_WASM AND NOT CLR_CMAKE_TARGET_KOS)
     add_definitions(-DFEATURE_READONLY_GS_COOKIE)
   endif()
   include(unix/configure.cmake)
-  include(${CLR_SRC_NATIVE_DIR}/minipal/configure.cmake)
   include_directories(${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
@@ -280,7 +310,7 @@ if (CLR_CMAKE_TARGET_UNIX)
 
 endif(CLR_CMAKE_TARGET_UNIX)
 
-set(RUNTIME_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(NATIVEAOT_RUNTIME_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 list(APPEND COMMON_RUNTIME_SOURCES ${GC_HEADERS})
 

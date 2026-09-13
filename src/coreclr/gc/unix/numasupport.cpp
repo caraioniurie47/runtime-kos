@@ -9,10 +9,12 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <string.h>
-#if !defined(__KOS__)
+#include <limits.h>
+#include <minipal/utils.h>
+
+#if defined(TARGET_LINUX) && !defined(__KOS__)
 #include <sys/syscall.h>
 #endif
-#include <minipal/utils.h>
 
 // The highest NUMA node available
 int g_highestNumaNode = 0;
@@ -34,9 +36,12 @@ static int GetNodeNum(const char* path, bool firstOnly)
             if (strncmp(entry->d_name, "node", STRING_LENGTH("node")))
                 continue;
 
-            int nodeNum = strtoul(entry->d_name + STRING_LENGTH("node"), NULL, 0);
-            if (result < nodeNum)
-                result = nodeNum;
+            unsigned long nodeNum = strtoul(entry->d_name + STRING_LENGTH("node"), NULL, 0);
+            if (nodeNum > INT_MAX)
+                nodeNum = INT_MAX;
+
+            if (result < (int)nodeNum)
+                result = (int)nodeNum;
 
             if (firstOnly)
                 break;
@@ -52,7 +57,7 @@ static int GetNodeNum(const char* path, bool firstOnly)
 void NUMASupportInitialize()
 {
 #if defined(TARGET_LINUX) && !defined(__KOS__)
-    if (syscall(__NR_get_mempolicy, NULL, NULL, 0, 0, 0) < 0 && errno == ENOSYS)
+    if (syscall(__NR_get_mempolicy, NULL, NULL, 0, 0, 0) < 0)
         return;
 
     int highestNumaNode = GetNodeNum("/sys/devices/system/node", false);

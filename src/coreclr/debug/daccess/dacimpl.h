@@ -13,20 +13,12 @@
 #ifndef __DACIMPL_H__
 #define __DACIMPL_H__
 
+#include <minipal/mutex.h>
 #include "gcinterface.dac.h"
 //---------------------------------------------------------------------------------------
 // Setting DAC_HASHTABLE tells the DAC to use the hand rolled hashtable for
-// storing code:DAC_INSTANCE .  Otherwise, the DAC uses the STL unordered_map to.
-
-#define DAC_HASHTABLE
-
-#ifndef DAC_HASHTABLE
-#pragma push_macro("return")
-#undef return
-#include <unordered_map>
-#pragma pop_macro("return")
-#endif //DAC_HASHTABLE
-extern CRITICAL_SECTION g_dacCritSec;
+// storing code:DAC_INSTANCE .  Otherwise, the DAC uses SHash.
+extern minipal_mutex g_dacMutex;
 
 // Convert between CLRDATA_ADDRESS and TADDR.
 // Note that CLRDATA_ADDRESS is sign-extended (for compat with Windbg and OS conventions).  Converting
@@ -131,16 +123,13 @@ struct DAC_MD_IMPORT
     DAC_MD_IMPORT* next;       // list link field
     TADDR peFile;              // a TADDR for a PEAssembly* or a ReflectionModule*
     IMDInternalImport* impl;   // Associated metadata interface
-    bool isAlternate;          // for NGEN images set to true if the metadata corresponds to the IL image
 
     DAC_MD_IMPORT(TADDR peFile_,
         IMDInternalImport* impl_,
-        bool isAlt_ = false,
         DAC_MD_IMPORT* next_ = NULL)
         : next(next_)
         , peFile(peFile_)
         , impl(impl_)
-        , isAlternate(isAlt_)
     {
         SUPPORTS_DAC_HOST_ONLY;
     }
@@ -179,10 +168,10 @@ public:
     }
 
     FORCEINLINE
-    DAC_MD_IMPORT* Add(TADDR peFile, IMDInternalImport* impl, bool isAlt)
+    DAC_MD_IMPORT* Add(TADDR peFile, IMDInternalImport* impl)
     {
         SUPPORTS_DAC;
-        DAC_MD_IMPORT* importList = new (nothrow) DAC_MD_IMPORT(peFile, impl, isAlt, m_head);
+        DAC_MD_IMPORT* importList = new (nothrow) DAC_MD_IMPORT(peFile, impl, m_head);
         if (!importList)
         {
             return NULL;
@@ -528,14 +517,12 @@ struct ProcessModIter
                 kIncludeLoaded | kIncludeExecution));
         }
 
-        CollectibleAssemblyHolder<DomainAssembly *> pDomainAssembly;
-        if (!m_assemIter.Next(pDomainAssembly.This()))
+        CollectibleAssemblyHolder<Assembly *> pAssembly;
+        if (!m_assemIter.Next(pAssembly.This()))
         {
             return NULL;
         }
 
-        // Note: DAC doesn't need to keep the assembly alive - see code:CollectibleAssemblyHolder#CAH_DAC
-        CollectibleAssemblyHolder<Assembly *> pAssembly = pDomainAssembly->GetAssembly();
         return pAssembly;
     }
 
@@ -732,54 +719,28 @@ private:
     HashInstanceKeyBlock* m_hash[DAC_INSTANCE_HASH_SIZE];
 #else //DAC_HASHTABLE
 
-    // We're going to use the STL unordered_map for our instance hash.
-    // This has the benefit of scaling to different workloads appropriately (as opposed to having a
-    // fixed number of buckets).
-
-    class DacHashCompare : public std::hash_compare<TADDR>
+    // SHash-based hash table for DAC instances, keyed by target address.
+    // The custom hash function avoids pseudo-randomizing in favor of a simple
+    // shift that clusters nearby addresses together.  This improves access
+    // locality and has a significant positive impact on minidump library
+    // performance when enumerating entries during dump generation (as dbghelp
+    // has to coalesce adjacent memory regions).
+    class DacInstanceSHashTraits : public NonDacAwareSHashTraits<MapSHashTraits<TADDR, DAC_INSTANCE*>>
     {
     public:
-        // Custom hash function
-        // The default hash function uses a pseudo-randomizing function to get a random
-        // distribution.  In our case, we'd actually like a more even distribution to get
-        // better access locality (see comments for DAC_INSTANCE_HASH_BITS).
-        //
-        // Also, when enumerating the hash during dump generation, clustering nearby addresses
-        // together can have a significant positive impact on the performance of the minidump
-        // library (at least the un-optimized version 6.5 linked into our dw20.exe - on Vista+
-        // we use the OS's version 6.7+ with radically improved perf characteristics).  Having
-        // a random distribution is actually the worst-case because it means most blocks won't
-        // be merged until near the end, and a large number of intermediate blocks will have to
-        // be searched with each call.
-        //
-        // The default pseudo-randomizing function also requires a call to ldiv which shows up as
-        // a 3%-5% perf hit in most perf-sensitive scenarios, so this should also always be
-        // faster.
-        inline size_t operator()(const TADDR& keyval) const
+        typedef MapSHashTraits<TADDR, DAC_INSTANCE*> PARENT;
+        typedef PARENT::element_t element_t;
+        typedef PARENT::count_t count_t;
+        typedef PARENT::key_t key_t;
+
+        static count_t Hash(key_t k)
         {
-            return (unsigned)(keyval >>DAC_INSTANCE_HASH_SHIFT);
+            return (count_t)(k >> DAC_INSTANCE_HASH_SHIFT);
         }
-
-        // Explicitly bring in the two-argument comparison function from the base class (just less-than)
-        // This is necessary because once we override one form of operator() above, we don't automatically
-        // get the others by C++ inheritance rules.
-    using std::hash_compare<TADDR>::operator();
-
-#ifdef NIDUMP_CUSTOMIZED_DAC_HASH   // not set
-        //this particular number is supposed to be roughly the same amount of
-        //memory as the old code (buckets * number of entries in the old
-        //blocks.)
-        //disabled for now.  May tweak implementation later.  It turns out that
-        //having a large number of initial buckets is excellent for nidump, but it
-        // is terrible for most other scenarios due to the cost of clearing them at
-        // every Flush.  Once there is a better perf suite, we can tweak these values more.
-        static const size_t min_buckets = DAC_INSTANCE_HASH_SIZE * 256;
-#endif
-
     };
-    typedef std::unordered_map<TADDR, DAC_INSTANCE*, DacHashCompare > DacInstanceHash;
-    typedef DacInstanceHash::value_type DacInstanceHashValue;
-    typedef DacInstanceHash::iterator DacInstanceHashIterator;
+
+    typedef SHash<DacInstanceSHashTraits> DacInstanceHash;
+    typedef DacInstanceHash::Iterator DacInstanceHashIterator;
     DacInstanceHash m_hash;
 #endif //DAC_HASHTABLE
 
@@ -794,6 +755,49 @@ class DacStreamManager;
 
 #endif // FEATURE_MINIMETADATA_IN_TRIAGEDUMPS
 
+#include "cdac.h"
+
+//----------------------------------------------------------------------------
+//
+// DacPatchCache - Caches debugger breakpoint patches from the target process.
+//
+// DacReplacePatchesInHostMemory needs to iterate the target's patch hash table
+// to replace breakpoint instructions with original opcodes. This iteration is
+// expensive because it walks all hash buckets and entries and it will hit either a
+// hash lookup in the instance cache or a cache miss + remote read. Since the target
+// is not running during DAC operations, the patches should not change while we are performing
+// memory enumeration, but if they do we'll miss them until the next time Flush() gets called.
+//
+//----------------------------------------------------------------------------
+
+struct DacPatchCacheEntry
+{
+    CORDB_ADDRESS address;
+    PRD_TYPE opcode;
+};
+
+class DacPatchCache
+{
+public:
+    DacPatchCache()
+        : m_isPopulated(false)
+    {
+    }
+
+    const SArray<DacPatchCacheEntry>& GetEntries();
+
+    void Flush()
+    {
+        m_entries.Clear();
+        m_isPopulated = false;
+    }
+
+private:
+    void Populate();
+
+    SArray<DacPatchCacheEntry> m_entries;
+    bool m_isPopulated;
+};
 
 //----------------------------------------------------------------------------
 //
@@ -816,7 +820,10 @@ class ClrDataAccess
       public ISOSDacInterface10,
       public ISOSDacInterface11,
       public ISOSDacInterface12,
-      public ISOSDacInterface13
+      public ISOSDacInterface13,
+      public ISOSDacInterface14,
+      public ISOSDacInterface15,
+      public ISOSDacInterface16
 {
 public:
     ClrDataAccess(ICorDebugDataTarget * pTarget, ICLRDataTarget * pLegacyTarget=0);
@@ -1058,7 +1065,7 @@ public:
     virtual HRESULT STDMETHODCALLTYPE GetAppDomainData(CLRDATA_ADDRESS addr, struct DacpAppDomainData *data);
     virtual HRESULT STDMETHODCALLTYPE GetAppDomainName(CLRDATA_ADDRESS addr, unsigned int count, _Inout_updates_z_(count) WCHAR *name, unsigned int *pNeeded);
     virtual HRESULT STDMETHODCALLTYPE GetAssemblyList(CLRDATA_ADDRESS appDomain, int count, CLRDATA_ADDRESS values[], int *fetched);
-    virtual HRESULT STDMETHODCALLTYPE GetAssemblyData(CLRDATA_ADDRESS baseDomainPtr, CLRDATA_ADDRESS assembly, struct DacpAssemblyData *data);
+    virtual HRESULT STDMETHODCALLTYPE GetAssemblyData(CLRDATA_ADDRESS domainPtr, CLRDATA_ADDRESS assembly, struct DacpAssemblyData *data);
     virtual HRESULT STDMETHODCALLTYPE GetAssemblyName(CLRDATA_ADDRESS assembly, unsigned int count, _Inout_updates_z_(count) WCHAR *name, unsigned int *pNeeded);
     virtual HRESULT STDMETHODCALLTYPE GetThreadData(CLRDATA_ADDRESS thread, struct DacpThreadData *data);
     virtual HRESULT STDMETHODCALLTYPE GetThreadFromThinlockID(UINT thinLockId, CLRDATA_ADDRESS *pThread);
@@ -1086,8 +1093,8 @@ public:
     virtual HRESULT STDMETHODCALLTYPE GetModuleData(CLRDATA_ADDRESS moduleAddr, struct DacpModuleData *data);
     virtual HRESULT STDMETHODCALLTYPE TraverseModuleMap(ModuleMapType mmt, CLRDATA_ADDRESS moduleAddr, MODULEMAPTRAVERSE pCallback, LPVOID token);
     virtual HRESULT STDMETHODCALLTYPE GetMethodDescFromToken(CLRDATA_ADDRESS moduleAddr, mdToken token, CLRDATA_ADDRESS *methodDesc);
-    virtual HRESULT STDMETHODCALLTYPE GetPEFileBase(CLRDATA_ADDRESS addr, CLRDATA_ADDRESS *base);
-    virtual HRESULT STDMETHODCALLTYPE GetPEFileName(CLRDATA_ADDRESS addr, unsigned int count, _Inout_updates_z_(count) WCHAR *fileName, unsigned int *pNeeded);
+    virtual HRESULT STDMETHODCALLTYPE GetPEFileBase(CLRDATA_ADDRESS moduleAddr, CLRDATA_ADDRESS *base);
+    virtual HRESULT STDMETHODCALLTYPE GetPEFileName(CLRDATA_ADDRESS moduleAddr, unsigned int count, _Inout_updates_z_(count) WCHAR *fileName, unsigned int *pNeeded);
     virtual HRESULT STDMETHODCALLTYPE GetAssemblyModuleList(CLRDATA_ADDRESS assembly, unsigned int count, CLRDATA_ADDRESS modules[], unsigned int *pNeeded);
     virtual HRESULT STDMETHODCALLTYPE GetGCHeapData(struct DacpGcHeapData *data);
     virtual HRESULT STDMETHODCALLTYPE GetGCHeapList(unsigned int count, CLRDATA_ADDRESS heaps[], unsigned int *pNeeded);
@@ -1207,7 +1214,7 @@ public:
         CLRDATA_ADDRESS *allocLimit);
 
     // ISOSDacInterface13
-    virtual HRESULT STDMETHODCALLTYPE TraverseLoaderHeap(CLRDATA_ADDRESS loaderHeapAddr, LoaderHeapKind kind, VISITHEAP pCallback);        
+    virtual HRESULT STDMETHODCALLTYPE TraverseLoaderHeap(CLRDATA_ADDRESS loaderHeapAddr, LoaderHeapKind kind, VISITHEAP pCallback);
     virtual HRESULT STDMETHODCALLTYPE GetDomainLoaderAllocator(CLRDATA_ADDRESS domainAddress, CLRDATA_ADDRESS *pLoaderAllocator);
     virtual HRESULT STDMETHODCALLTYPE GetLoaderAllocatorHeapNames(int count, const char **ppNames, int *pNeeded);
     virtual HRESULT STDMETHODCALLTYPE GetLoaderAllocatorHeaps(CLRDATA_ADDRESS loaderAllocator, int count, CLRDATA_ADDRESS *pLoaderHeaps, LoaderHeapKind *pKinds, int *pNeeded);
@@ -1215,6 +1222,17 @@ public:
     virtual HRESULT STDMETHODCALLTYPE GetGCBookkeepingMemoryRegions(ISOSMemoryEnum **ppEnum);
     virtual HRESULT STDMETHODCALLTYPE GetGCFreeRegions(ISOSMemoryEnum **ppEnum);
     virtual HRESULT STDMETHODCALLTYPE LockedFlush();
+
+    // ISOSDacInterface14
+    virtual HRESULT STDMETHODCALLTYPE GetStaticBaseAddress(CLRDATA_ADDRESS methodTable, CLRDATA_ADDRESS *nonGCStaticsAddress, CLRDATA_ADDRESS *GCStaticsAddress);
+    virtual HRESULT STDMETHODCALLTYPE GetThreadStaticBaseAddress(CLRDATA_ADDRESS methodTable, CLRDATA_ADDRESS thread, CLRDATA_ADDRESS *nonGCStaticsAddress, CLRDATA_ADDRESS *GCStaticsAddress);
+    virtual HRESULT STDMETHODCALLTYPE GetMethodTableInitializationFlags(CLRDATA_ADDRESS methodTable, MethodTableInitializationFlags *initializationStatus);
+
+    // ISOSDacInterface15
+    virtual HRESULT STDMETHODCALLTYPE GetMethodTableSlotEnumerator(CLRDATA_ADDRESS mt, ISOSMethodEnum **enumerator);
+
+    // ISOSDacInterface16
+    virtual HRESULT STDMETHODCALLTYPE GetGCDynamicAdaptationMode(int* pDynamicAdaptationMode);
 
     //
     // ClrDataAccess.
@@ -1347,8 +1365,7 @@ public:
     JITNotification* GetHostJitNotificationTable();
     GcNotification*  GetHostGcNotificationTable();
 
-    void* GetMetaDataFromHost(PEAssembly* pPEAssembly,
-                              bool* isAlternate);
+    void* GetMetaDataFromHost(PEAssembly* pPEAssembly);
 
     virtual
     interface IMDInternalImport* GetMDImport(const PEAssembly* pPEAssembly,
@@ -1407,6 +1424,12 @@ public:
     DacInstanceManager m_instances;
     ULONG32 m_instanceAge;
     bool m_debugMode;
+
+    DacPatchCache m_patchCache;
+
+    // This currently exists on the DAC as a way of managing lifetime of loading/freeing the cdac
+    // TODO: [cdac] Remove when cDAC deploys with SOS - https://github.com/dotnet/runtime/issues/108720
+    CDAC m_cdac;
 
 #ifdef FEATURE_MINIMETADATA_IN_TRIAGEDUMPS
 
@@ -1491,6 +1514,7 @@ private:
     BOOL DACIsComWrappersCCW(CLRDATA_ADDRESS ccwPtr);
     TADDR DACGetManagedObjectWrapperFromCCW(CLRDATA_ADDRESS ccwPtr);
     HRESULT DACTryGetComWrappersObjectFromCCW(CLRDATA_ADDRESS ccwPtr, OBJECTREF* objRef);
+    TADDR GetIdentityForManagedObjectWrapper(TADDR mow);
 #endif
 
 protected:
@@ -1499,22 +1523,14 @@ protected:
 #endif
 
 public:
-    // APIs for picking up the info needed for a debugger to look up an ngen image or IL image
-    // from it's search path.
+    // API for picking up the info needed for a debugger to look up an image from its search path.
     static bool GetMetaDataFileInfoFromPEFile(PEAssembly *pPEAssembly,
                                               DWORD &dwImageTimestamp,
                                               DWORD &dwImageSize,
                                               DWORD &dwDataSize,
                                               DWORD &dwRvaHint,
-                                              bool  &isNGEN,
                                               _Out_writes_(cchFilePath) LPWSTR wszFilePath,
                                               DWORD cchFilePath);
-
-    static bool GetILImageInfoFromNgenPEFile(PEAssembly *pPEAssembly,
-                                             DWORD &dwTimeStamp,
-                                             DWORD &dwSize,
-                                             _Out_writes_(cchPath) LPWSTR wszPath,
-                                             const DWORD cchPath);
 };
 
 extern ClrDataAccess* g_dacImpl;
@@ -1958,7 +1974,7 @@ public:
 
     virtual ~DacMemoryEnumerator() {}
     virtual HRESULT Init() = 0;
-    
+
     HRESULT STDMETHODCALLTYPE Skip(unsigned int count);
     HRESULT STDMETHODCALLTYPE Reset();
     HRESULT STDMETHODCALLTYPE GetCount(unsigned int *pCount);
@@ -1968,6 +1984,29 @@ public:
 
 protected:
     DacReferenceList<SOSMemoryRegion> mRegions;
+
+private:
+    unsigned int mIteratorIndex;
+};
+
+class DacMethodTableSlotEnumerator : public DefaultCOMImpl<ISOSMethodEnum, IID_ISOSMethodEnum>
+{
+public:
+    DacMethodTableSlotEnumerator() : mIteratorIndex(0)
+    {
+    }
+
+    virtual ~DacMethodTableSlotEnumerator() {}
+
+    HRESULT Init(PTR_MethodTable mTable);
+
+    HRESULT STDMETHODCALLTYPE Skip(unsigned int count);
+    HRESULT STDMETHODCALLTYPE Reset();
+    HRESULT STDMETHODCALLTYPE GetCount(unsigned int *pCount);
+    HRESULT STDMETHODCALLTYPE Next(unsigned int count, SOSMethodData methods[], unsigned int *pFetched);
+
+protected:
+    DacReferenceList<SOSMethodData> mMethods;
 
 private:
     unsigned int mIteratorIndex;
@@ -2043,7 +2082,7 @@ public:
 
 private:
     static StackWalkAction Callback(CrawlFrame *pCF, VOID *pData);
-    static void GCEnumCallback(LPVOID hCallback, OBJECTREF *pObject, uint32_t flags, DacSlotLocation loc);
+    static void GCEnumCallbackFunc(LPVOID hCallback, OBJECTREF *pObject, uint32_t flags, DacSlotLocation loc);
     static void GCReportCallback(PTR_PTR_Object ppObj, ScanContext *sc, uint32_t flags);
 
     CLRDATA_ADDRESS ReadPointer(TADDR addr);
@@ -2117,7 +2156,7 @@ private:
     void WalkHandles();
     static inline bool IsAlwaysStrongReference(unsigned int type)
     {
-        return type == HNDTYPE_STRONG || type == HNDTYPE_PINNED || type == HNDTYPE_SIZEDREF;
+        return type == HNDTYPE_STRONG || type == HNDTYPE_PINNED;
     }
 
 private:
@@ -3392,12 +3431,7 @@ private:
 //
 //----------------------------------------------------------------------------
 
-#ifdef FEATURE_EH_FUNCLETS
-typedef ExceptionTracker ClrDataExStateType;
-#else // FEATURE_EH_FUNCLETS
 typedef ExInfo ClrDataExStateType;
-#endif // FEATURE_EH_FUNCLETS
-
 
 class ClrDataExceptionState : public IXCLRDataExceptionState
 {
@@ -3785,7 +3819,7 @@ public:
 //----------------------------------------------------------------------------
 
 #define DAC_ENTER() \
-    EnterCriticalSection(&g_dacCritSec); \
+    minipal_mutex_enter(&g_dacMutex); \
     ClrDataAccess* __prevDacImpl = g_dacImpl; \
     g_dacImpl = this;
 
@@ -3793,10 +3827,10 @@ public:
 // the process's host instance cache hasn't been flushed
 // since the child was created.
 #define DAC_ENTER_SUB(dac) \
-    EnterCriticalSection(&g_dacCritSec); \
+    minipal_mutex_enter(&g_dacMutex); \
     if (dac->m_instanceAge != m_instanceAge) \
     { \
-        LeaveCriticalSection(&g_dacCritSec); \
+        minipal_mutex_leave(&g_dacMutex); \
         return E_INVALIDARG; \
     } \
     ClrDataAccess* __prevDacImpl = g_dacImpl; \
@@ -3804,7 +3838,7 @@ public:
 
 #define DAC_LEAVE() \
     g_dacImpl = __prevDacImpl; \
-    LeaveCriticalSection(&g_dacCritSec)
+    minipal_mutex_leave(&g_dacMutex)
 
 
 #define SOSHelperEnter() \
@@ -3822,7 +3856,7 @@ public:
             EX_RETHROW; \
         }               \
     }                   \
-    EX_END_CATCH(SwallowAllExceptions) \
+    EX_END_CATCH \
     DAC_LEAVE();
 
 HRESULT DacGetHostVtPtrs(void);
@@ -3847,7 +3881,7 @@ HRESULT GetServerHeaps(CLRDATA_ADDRESS pGCHeaps[], ICorDebugDataTarget* pTarget)
 
 #pragma warning( disable: 4035 )        /* Don't complain about lack of return value */
 
-__inline unsigned __int64 GetCycleCount ()
+__inline uint64_t GetCycleCount ()
 {
 __asm   _emit   0x0F
 __asm   _emit   0x31    /* rdtsc */
@@ -3871,7 +3905,7 @@ __asm   pop     EDX
 
 #define CCNT_OVERHEAD    0 // Don't know
 
-__inline unsigned __int64 GetCycleCount()
+__inline uint64_t GetCycleCount()
 {
     LIMITED_METHOD_CONTRACT;
 
@@ -3882,16 +3916,16 @@ __inline unsigned __int64 GetCycleCount()
 
 #endif  // #if defined(TARGET_X86)
 
-extern unsigned __int64 g_nTotalTime;
-extern unsigned __int64 g_nStackTotalTime;
-extern unsigned __int64 g_nReadVirtualTotalTime;
-extern unsigned __int64 g_nFindTotalTime;
-extern unsigned __int64 g_nFindHashTotalTime;
-extern unsigned __int64 g_nFindHits;
-extern unsigned __int64 g_nFindCalls;
-extern unsigned __int64 g_nFindFails;
-extern unsigned __int64 g_nStackWalk;
-extern unsigned __int64 g_nFindStackTotalTime;
+extern uint64_t g_nTotalTime;
+extern uint64_t g_nStackTotalTime;
+extern uint64_t g_nReadVirtualTotalTime;
+extern uint64_t g_nFindTotalTime;
+extern uint64_t g_nFindHashTotalTime;
+extern uint64_t g_nFindHits;
+extern uint64_t g_nFindCalls;
+extern uint64_t g_nFindFails;
+extern uint64_t g_nStackWalk;
+extern uint64_t g_nFindStackTotalTime;
 
 #endif // #if defined(DAC_MEASURE_PERF)
 

@@ -49,14 +49,14 @@ stack_walk_callback (
 
 	// Get the IP.
 	UINT_PTR control_pc = (UINT_PTR)frame->GetRegisterSet ()->ControlPC;
-	if (control_pc == NULL) {
+	if (control_pc == 0) {
 		if (ep_stack_contents_get_length (stack_contents) == 0) {
 			// This happens for pinvoke stubs on the top of the stack.
 			return SWA_CONTINUE;
 		}
 	}
 
-	EP_ASSERT (control_pc != NULL);
+	EP_ASSERT (control_pc != 0);
 
 	// Add the IP to the captured stack.
 	ep_stack_contents_append (stack_contents, control_pc, frame->GetFunction ());
@@ -73,10 +73,6 @@ ep_rt_coreclr_walk_managed_stack_for_thread (
 	STATIC_CONTRACT_NOTHROW;
 	EP_ASSERT (thread != NULL);
 	EP_ASSERT (stack_contents != NULL);
-
-	// Calling into StackWalkFrames in preemptive mode violates the host contract,
-	// but this contract is not used on CoreCLR.
-	CONTRACT_VIOLATION (HostViolation);
 
 	// Before we call into StackWalkFrames we need to mark GC_ON_TRANSITIONS as FALSE
 	// because under GCStress runs (GCStress=0x3), a GC will be triggered for every transition,
@@ -118,10 +114,9 @@ walk_managed_stack_for_threads (
 
 		// Walk the stack and write it out as an event.
 		if (ep_rt_coreclr_walk_managed_stack_for_thread (target_thread, current_stack_contents) && !ep_stack_contents_is_empty (current_stack_contents)) {
-			// Set the payload.  If the GC mode on suspension > 0, then the thread was in cooperative mode.
-			// Even though there are some cases where this is not managed code, we assume it is managed code here.
-			// If the GC mode on suspension == 0 then the thread was in preemptive mode, which we qualify as external here.
-			uint32_t payload_data = target_thread->GetGCModeOnSuspension () ? EP_SAMPLE_PROFILER_SAMPLE_TYPE_MANAGED : EP_SAMPLE_PROFILER_SAMPLE_TYPE_EXTERNAL;
+			// Set the payload. If the thread is trapped for suspension, it was in cooperative mode (managed code).
+			// Otherwise, it was in preemptive mode (external code).
+			uint32_t payload_data = target_thread->HasThreadState (Thread::TS_SuspensionTrapped) ? EP_SAMPLE_PROFILER_SAMPLE_TYPE_MANAGED : EP_SAMPLE_PROFILER_SAMPLE_TYPE_EXTERNAL;
 
 			// Write the sample.
 			ep_write_sample_profile_event (
@@ -132,9 +127,6 @@ walk_managed_stack_for_threads (
 				(uint8_t *)&payload_data,
 				sizeof (payload_data));
 		}
-
-		// Reset the GC mode.
-		target_thread->ClearGCModeOnSuspension ();
 	}
 
 	ep_stack_contents_fini (current_stack_contents);

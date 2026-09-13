@@ -93,7 +93,7 @@ namespace System.Net
         // Check that local certificate was used by schannel.
         internal static bool IsLocalCertificateUsed(SafeFreeCredentials? _credentialsHandle, SafeDeleteContext securityContext)
         {
-            SecPkgContext_SessionInfo info  = default;
+            SecPkgContext_SessionInfo info = default;
             // fails on Server 2008 and older. We will fall-back to probing LOCAL_CERT_CONTEXT in that case.
             if (SSPIWrapper.QueryBlittableContextAttributes(
                                     GlobalSSPI.SSPISecureChannel,
@@ -105,16 +105,15 @@ namespace System.Net
                 // This is TLS Resumed session. Windows can fail to query the local cert bellow.
                 // Instead, we will determine the usage form used credentials.
                 SafeFreeCredential_SECURITY creds = (SafeFreeCredential_SECURITY)_credentialsHandle!;
-                return creds.LocalCertificate != null;
+                return creds.HasLocalCertificate;
             }
 
             SafeFreeCertContext? localContext = null;
             try
             {
-                if (SSPIWrapper.QueryContextAttributes_SECPKG_ATTR_LOCAL_CERT_CONTEXT(GlobalSSPI.SSPISecureChannel, securityContext, out localContext) &&
-                    localContext != null)
+                if (SSPIWrapper.QueryContextAttributes_SECPKG_ATTR_LOCAL_CERT_CONTEXT(GlobalSSPI.SSPISecureChannel, securityContext, out localContext))
                 {
-                    return !localContext.IsInvalid;
+                    return localContext != null ? !localContext.IsInvalid : false;
                 }
             }
             finally

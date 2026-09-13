@@ -84,6 +84,20 @@ namespace System.IO
             }
         }
 
+        /// <summary>Allocates a buffer of the requested internal buffer size.</summary>
+        /// <returns>The allocated buffer.</returns>
+        private byte[] AllocateBuffer()
+        {
+            try
+            {
+                return new byte[_internalBufferSize];
+            }
+            catch (OutOfMemoryException)
+            {
+                throw new OutOfMemoryException(SR.Format(SR.BufferSizeTooLarge, _internalBufferSize));
+            }
+        }
+
         /// <summary>Cancels the currently running watch operation if there is one.</summary>
         private void StopRaisingEvents()
         {
@@ -475,7 +489,7 @@ namespace System.IO
             /// <param name="removeInotify">true to remove the inotify watch; otherwise, false.  The default is true.</param>
             private void RemoveWatchedDirectory(WatchedDirectory directoryEntry, bool removeInotify = true)
             {
-                Debug.Assert (_includeSubdirectories);
+                Debug.Assert(_includeSubdirectories);
                 lock (SyncObj)
                 {
                     // Work around https://github.com/dotnet/csharplang/issues/3393 preventing Parent?.Children!. from behaving as expected
@@ -484,7 +498,7 @@ namespace System.IO
                         directoryEntry.Parent.Children!.Remove(directoryEntry);
                     }
 
-                    RemoveWatchedDirectoryUnlocked (directoryEntry, removeInotify);
+                    RemoveWatchedDirectoryUnlocked(directoryEntry, removeInotify);
                 }
             }
 
@@ -498,7 +512,7 @@ namespace System.IO
                 {
                     foreach (WatchedDirectory child in directoryEntry.Children)
                     {
-                        RemoveWatchedDirectoryUnlocked (child, removeInotify);
+                        RemoveWatchedDirectoryUnlocked(child, removeInotify);
                     }
                     directoryEntry.Children = null;
                 }
@@ -720,9 +734,9 @@ namespace System.IO
 
                         break;
                     case Interop.Sys.NotifyEvents.IN_MOVED_TO:
-                        if (previousEventName != null)
+                        if (!previousEventName.IsEmpty)
                         {
-                            // If the previous name from IN_MOVED_FROM is non-null, then this is a rename.
+                            // If the previous name from IN_MOVED_FROM is non-empty, then this is a rename.
                             watcher.NotifyRenameEventArgs(WatcherChangeTypes.Renamed, expandedName, previousEventName);
                         }
                         else

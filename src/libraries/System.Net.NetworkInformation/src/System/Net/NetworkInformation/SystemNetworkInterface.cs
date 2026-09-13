@@ -43,7 +43,7 @@ namespace System.Net.NetworkInformation
         private static unsafe int GetBestInterfaceForAddress(IPAddress addr)
         {
             int index;
-            Span<byte> buffer= stackalloc byte[SocketAddressPal.IPv6AddressSize];
+            Span<byte> buffer = stackalloc byte[SocketAddressPal.IPv6AddressSize];
             IPEndPointExtensions.SetIPAddress(buffer, addr);
 
             int error = (int)Interop.IpHlpApi.GetBestInterfaceEx(buffer, &index);
@@ -85,8 +85,9 @@ namespace System.Net.NetworkInformation
             List<SystemNetworkInterface> interfaceList = new List<SystemNetworkInterface>();
 
             Interop.IpHlpApi.GetAdaptersAddressesFlags flags =
-                Interop.IpHlpApi.GetAdaptersAddressesFlags.IncludeGateways
-                | Interop.IpHlpApi.GetAdaptersAddressesFlags.IncludeWins;
+                Interop.IpHlpApi.GetAdaptersAddressesFlags.IncludeGateways |
+                Interop.IpHlpApi.GetAdaptersAddressesFlags.IncludeWins |
+                Interop.IpHlpApi.GetAdaptersAddressesFlags.IncludeAllInterfaces;
 
             // Figure out the right buffer size for the adapter information.
             uint result = Interop.IpHlpApi.GetAdaptersAddresses(

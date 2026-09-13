@@ -167,6 +167,30 @@ public static partial class DataContractJsonSerializerTests
     }
 
     [Fact]
+    public static void DCJS_DateOnlyAsRoot()
+    {
+        DateOnly value = new DateOnly(2024, 12, 31);
+        string expected = "\"2024-12-31\""; // JSON primitive as string
+            Assert.StrictEqual(value, SerializeAndDeserialize<DateOnly>(value, expected));
+
+        DateOnly? nullable = new DateOnly(2001, 1, 1);
+        string expectedNullable = "\"2001-01-01\"";
+            Assert.StrictEqual(nullable, SerializeAndDeserialize<DateOnly?>(nullable, expectedNullable));
+    }
+
+    [Fact]
+    public static void DCJS_TimeOnlyAsRoot()
+    {
+        TimeOnly value = new TimeOnly(13, 5, 7, 123);
+        string expected = "\"13:05:07.123\"";
+            Assert.StrictEqual(value, SerializeAndDeserialize<TimeOnly>(value, expected));
+
+        TimeOnly whole = new TimeOnly(6, 30, 0);
+        string expectedWhole = "\"06:30:00\"";
+            Assert.StrictEqual(whole, SerializeAndDeserialize<TimeOnly>(whole, expectedWhole));
+    }
+
+    [Fact]
     public static void DCJS_GuidAsRoot()
     {
         foreach (Guid value in new Guid[] { Guid.NewGuid(), Guid.Empty })
@@ -1669,18 +1693,18 @@ public static partial class DataContractJsonSerializerTests
     }
 
     [Fact]
-    public static void DCJS_ClassImplementingIXmlSerialiable()
+    public static void DCJS_ClassImplementingIXmlSerializable()
     {
-        ClassImplementingIXmlSerialiable value = new ClassImplementingIXmlSerialiable() { StringValue = "Foo" };
-        var deserializedValue = SerializeAndDeserialize<ClassImplementingIXmlSerialiable>(value, @"""<ClassImplementingIXmlSerialiable StringValue=\""Foo\"" BoolValue=\""True\"" xmlns=\""http:\/\/schemas.datacontract.org\/2004\/07\/SerializationTypes\""\/>""");
+        ClassImplementingIXmlSerializable value = new ClassImplementingIXmlSerializable() { StringValue = "Foo" };
+        var deserializedValue = SerializeAndDeserialize<ClassImplementingIXmlSerializable>(value, @"""<ClassImplementingIXmlSerializable StringValue=\""Foo\"" BoolValue=\""True\"" xmlns=\""http:\/\/schemas.datacontract.org\/2004\/07\/SerializationTypes\""\/>""");
         Assert.Equal(value.StringValue, deserializedValue.StringValue);
     }
 
     [Fact]
-    public static void DCJS_TypeWithNestedGenericClassImplementingIXmlSerialiable()
+    public static void DCJS_TypeWithNestedGenericClassImplementingIXmlSerializable()
     {
-        TypeWithNestedGenericClassImplementingIXmlSerialiable.NestedGenericClassImplementingIXmlSerialiable<bool> value = new TypeWithNestedGenericClassImplementingIXmlSerialiable.NestedGenericClassImplementingIXmlSerialiable<bool>() { StringValue = "Foo" };
-        var deserializedValue = SerializeAndDeserialize<TypeWithNestedGenericClassImplementingIXmlSerialiable.NestedGenericClassImplementingIXmlSerialiable<bool>>(value, @"""<TypeWithNestedGenericClassImplementingIXmlSerialiable.NestedGenericClassImplementingIXmlSerialiableOfbooleanRvdAXEcW StringValue=\""Foo\"" xmlns=\""http:\/\/schemas.datacontract.org\/2004\/07\/SerializationTypes\""\/>""");
+        TypeWithNestedGenericClassImplementingIXmlSerializable.NestedGenericClassImplementingIXmlSerializable<bool> value = new TypeWithNestedGenericClassImplementingIXmlSerializable.NestedGenericClassImplementingIXmlSerializable<bool>() { StringValue = "Foo" };
+        var deserializedValue = SerializeAndDeserialize<TypeWithNestedGenericClassImplementingIXmlSerializable.NestedGenericClassImplementingIXmlSerializable<bool>>(value, @"""<TypeWithNestedGenericClassImplementingIXmlSerializable.NestedGenericClassImplementingIXmlSerializableOfbooleanRvdAXEcW StringValue=\""Foo\"" xmlns=\""http:\/\/schemas.datacontract.org\/2004\/07\/SerializationTypes\""\/>""");
         Assert.Equal(value.StringValue, deserializedValue.StringValue);
     }
 

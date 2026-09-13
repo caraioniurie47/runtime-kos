@@ -21,6 +21,9 @@ internal unsafe static class ExceptionInteropNative
 
 public unsafe static class ExceptionInterop
 {
+    private static int s_nativeExceptionFromCatchCount;
+    private static int s_managedExceptionFromCatchCount;
+
     [Fact]
     [PlatformSpecific(TestPlatforms.Windows)]
     [SkipOnMono("Exception interop not supported on Mono.")]
@@ -155,5 +158,145 @@ public unsafe static class ExceptionInterop
                 NativeFunction();
             }
         }
+    }
+
+    [DllImport(nameof(ExceptionInteropNative))]
+    public static extern void InvokeCallbackCatchCallbackAndRethrow(delegate* unmanaged<void> callBack1, delegate* unmanaged<void> callBack2);
+
+    [UnmanagedCallersOnly]
+    static void CallPInvoke()
+    {
+        ThrowException();
+    }
+
+    [UnmanagedCallersOnly]
+    static void ThrowAndCatchException()
+    {
+        try
+        {
+            throw new Exception("This one is handled");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Caught {ex}");
+        }
+    }
+
+    [UnmanagedCallersOnly]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void ThrowNativeExceptionFromCatchInUnmanagedCallersOnly()
+    {
+        try
+        {
+            throw new Exception("This one is handled");
+        }
+        catch
+        {
+            s_nativeExceptionFromCatchCount++;
+            if (s_nativeExceptionFromCatchCount > 1)
+            {
+                return;
+            }
+
+            ThrowException();
+        }
+    }
+
+    [UnmanagedCallersOnly]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void ThrowManagedExceptionFromCatchInUnmanagedCallersOnly()
+    {
+        try
+        {
+            throw new Exception("This one is handled");
+        }
+        catch
+        {
+            s_managedExceptionFromCatchCount++;
+            if (s_managedExceptionFromCatchCount > 1)
+            {
+                return;
+            }
+
+            throw new ApplicationException();
+        }
+    }
+
+    [Fact]
+    [PlatformSpecific(TestPlatforms.Windows)]
+    [SkipOnMono("Exception interop not supported on Mono.")]
+    public static void PropagateAndRethrowCppException()
+    {
+        try
+        {
+            InvokeCallbackCatchCallbackAndRethrow(&CallPInvoke, &ThrowAndCatchException);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Caught {ex}");
+        }
+    }
+    
+    [DllImport(nameof(ExceptionInteropNative))]
+    public static extern void InvokeCallbackOnNewThread(delegate*unmanaged<void> callBack);
+
+    [Fact]
+    [PlatformSpecific(TestPlatforms.Windows)]
+    [SkipOnMono("Exception interop not supported on Mono.")]
+    public static void PropagateAndCatchCppException()
+    {
+        bool reportedUnhandledException = false;
+        UnhandledExceptionEventHandler handler = (sender, e) =>
+        {
+            Console.WriteLine($"Exception reported as unhandled: {e.ExceptionObject}");
+            reportedUnhandledException = true;
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += handler;
+        InvokeCallbackOnNewThread(&CallPInvoke);
+        AppDomain.CurrentDomain.UnhandledException -= handler;
+        Assert.False(reportedUnhandledException, "Exception should not be reported as unhandled");
+    }
+
+    [Fact]
+    [PlatformSpecific(TestPlatforms.Windows)]
+    [SkipOnMono("Exception interop not supported on Mono.")]
+    public static void ThrowNativeExceptionFromCatchInUnmanagedCallersOnlyCallback()
+    {
+        s_nativeExceptionFromCatchCount = 0;
+
+        Exception exception = null;
+        try
+        {
+            CallCallback(&ThrowNativeExceptionFromCatchInUnmanagedCallersOnly);
+        }
+        catch (Exception ex)
+        {
+            exception = ex;
+        }
+
+        Assert.Equal(1, s_nativeExceptionFromCatchCount);
+        Assert.IsType<SEHException>(exception);
+    }
+
+    [Fact]
+    [PlatformSpecific(TestPlatforms.Windows)]
+    [SkipOnMono("Exception interop not supported on Mono.")]
+    public static void ThrowManagedExceptionFromCatchInUnmanagedCallersOnlyCallback()
+    {
+        s_managedExceptionFromCatchCount = 0;
+
+        Exception exception = null;
+        try
+        {
+            CallCallback(&ThrowManagedExceptionFromCatchInUnmanagedCallersOnly);
+        }
+        catch (Exception ex)
+        {
+            exception = ex;
+        }
+
+        Assert.Equal(1, s_managedExceptionFromCatchCount);
+        Assert.IsType<ApplicationException>(exception);
     }
 }

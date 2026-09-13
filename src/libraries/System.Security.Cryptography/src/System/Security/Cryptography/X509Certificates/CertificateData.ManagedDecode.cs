@@ -33,11 +33,11 @@ namespace System.Security.Cryptography.X509Certificates
             public AlgorithmIdentifier(AlgorithmIdentifierAsn algorithmIdentifier)
             {
                 AlgorithmId = algorithmIdentifier.Algorithm;
-                Parameters = algorithmIdentifier.Parameters?.ToArray() ?? Array.Empty<byte>();
+                Parameters = algorithmIdentifier.Parameters?.ToArray();
             }
 
             internal string? AlgorithmId;
-            internal byte[] Parameters;
+            internal byte[]? Parameters;
         }
 
         private CertificateAsn certificate;
@@ -330,9 +330,11 @@ namespace System.Security.Cryptography.X509Certificates
                     }
                 }
             }
-            catch (AsnContentException e)
+            catch (AsnContentException)
             {
-                throw new CryptographicException(SR.Cryptography_Der_Invalid_Encoding, e);
+            }
+            catch (CryptographicException)
+            {
             }
 
             return null;

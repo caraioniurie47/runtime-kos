@@ -30,7 +30,7 @@ namespace System.IO.Enumeration
                         modified = true;
                         if (i >= 1 && i == length - 1 && expression[i - 1] == '*')
                         {
-                            sb[sb.Length - 1] = '<'; // DOS_STAR (ends in *.)
+                            sb[^1] = '<'; // DOS_STAR (ends in *.)
                         }
                         else if (i < length - 1 && (expression[i + 1] == '?' || expression[i + 1] == '*'))
                         {
@@ -412,6 +412,36 @@ namespace System.IO.Enumeration
             currentState = priorMatches[matchCount - 1];
 
             return currentState == maxState;
+        }
+
+        /// <summary>
+        /// Escapes the given expression so that only '*' and '?' are treated as wildcards, and
+        /// '\' isn't treated as an escape character.
+        /// </summary>
+        internal static string EscapeExpression(string expression)
+        {
+            ReadOnlySpan<char> span = expression;
+            ReadOnlySpan<char> charsToEscape = ['\\', '"', '<', '>'];
+
+            int i = span.IndexOfAny(charsToEscape);
+            if (i >= 0)
+            {
+                ValueStringBuilder vsb = new(stackalloc char[256]);
+                do
+                {
+                    vsb.Append(span.Slice(0, i));
+                    vsb.Append('\\');
+                    vsb.Append(span[i]);
+                    span = span.Slice(i + 1);
+                    i = span.IndexOfAny(charsToEscape);
+                }
+                while (i >= 0);
+
+                vsb.Append(span);
+                expression = vsb.ToString();
+            }
+
+            return expression;
         }
     }
 }

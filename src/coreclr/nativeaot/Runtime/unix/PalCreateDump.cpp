@@ -48,6 +48,7 @@
 #include "RhConfig.h"
 
 #include <minipal/utils.h>
+#include <minipal/thread.h>
 #include <generatedumpflags.h>
 
 #if !defined(HOST_MACCATALYST) && !defined(HOST_IOS) && !defined(HOST_TVOS)
@@ -58,33 +59,6 @@
 const char* g_argvCreateDump[MAX_ARGV_ENTRIES] = { nullptr };
 char* g_szCreateDumpPath = nullptr;
 char* g_ppidarg  = nullptr;
-
-/*++
-Function:
-    PlatformGetCurrentThreadId
-
-    Returns the current thread id
-*/
-
-#if defined(__KOS__)
-#define PlatformGetCurrentThreadId() (uint32_t)gettid()
-#elif defined(__linux__)
-#define PlatformGetCurrentThreadId() (uint32_t)syscall(SYS_gettid)
-#elif defined(__APPLE__)
-inline uint32_t PlatformGetCurrentThreadId() {
-    uint64_t tid;
-    pthread_threadid_np(pthread_self(), &tid);
-    return (uint32_t)tid;
-}
-#elif defined(__FreeBSD__)
-#include <pthread_np.h>
-#define PlatformGetCurrentThreadId() (uint32_t)pthread_getthreadid_np()
-#elif defined(__NetBSD__)
-#include <lwp.h>
-#define PlatformGetCurrentThreadId() (uint32_t)_lwp_self()
-#else
-#define PlatformGetCurrentThreadId() (uint32_t)pthread_self()
-#endif
 
 const size_t MaxUnsigned32BitDecString = STRING_LENGTH("4294967295");
 const size_t MaxUnsigned64BitDecString = STRING_LENGTH("18446744073709551615");
@@ -239,8 +213,8 @@ CreateCrashDump(
     char* errorMessageBuffer,
     int cbErrorMessageBuffer)
 {
-    int pipe_descs[2];
-    if (pipe(pipe_descs) == -1)
+    int pipe_descs[4];
+    if (pipe(pipe_descs) == -1 || pipe(pipe_descs + 2) == -1)
     {
         if (errorMessageBuffer != nullptr)
         {
@@ -248,9 +222,12 @@ CreateCrashDump(
         }
         return false;
     }
-    // [0] is read end, [1] is write end
-    int parent_pipe = pipe_descs[0];
-    int child_pipe = pipe_descs[1];
+    // from parent (write) to child (read), used to signal prctl(PR_SET_PTRACER, childpid) is done
+    int child_read_pipe = pipe_descs[0];
+    int parent_write_pipe = pipe_descs[1];
+    // from child (write) to parent (read), used to capture createdump's stderr
+    int parent_read_pipe = pipe_descs[2];
+    int child_write_pipe = pipe_descs[3];
 
     // Fork the core dump child process.
     pid_t childpid = fork();
@@ -262,29 +239,53 @@ CreateCrashDump(
         {
             snprintf(errorMessageBuffer, cbErrorMessageBuffer, "Problem launching createdump: fork() FAILED %s (%d)\n", strerror(errno), errno);
         }
-        close(pipe_descs[0]);
-        close(pipe_descs[1]);
+        for (int i = 0; i < 4; i++)
+        {
+            close(pipe_descs[i]);
+        }
         return false;
     }
     else if (childpid == 0)
     {
-        // Close the read end of the pipe, the child doesn't need it
-        close(parent_pipe);
+        close(parent_read_pipe);
+        close(parent_write_pipe);
+
+        // Wait for prctl(PR_SET_PTRACER, childpid) in parent
+        char buffer;
+        int bytesRead;
+        while((bytesRead = read(child_read_pipe, &buffer, 1)) < 0 && errno == EINTR);
+        close(child_read_pipe);
+
+        if (bytesRead != 1)
+        {
+            fprintf(stderr, "Problem reading from createdump child_read_pipe: %s (%d)\n", strerror(errno), errno);
+            close(child_write_pipe);
+            exit(-1);
+        }
 
         // Only dup the child's stderr if there is error buffer
         if (errorMessageBuffer != nullptr)
         {
-            dup2(child_pipe, STDERR_FILENO);
+            dup2(child_write_pipe, STDERR_FILENO);
         }
         // Execute the createdump program
         if (execv(argv[0], (char* const *)argv) == -1)
         {
-            fprintf(stderr, "Problem launching createdump (may not have execute permissions): execv(%s) FAILED %s (%d)\n", argv[0], strerror(errno), errno);
+            if (errno == ENOENT)
+            {
+                fprintf(stderr, "DOTNET_DbgEnableMiniDump is set and the createdump binary does not exist: %s\n", argv[0]);
+            }
+            else
+            {
+                fprintf(stderr, "Problem launching createdump (may not have execute permissions): execv(%s) FAILED %s (%d)\n", argv[0], strerror(errno), errno);
+            }
             exit(-1);
         }
     }
     else
     {
+        close(child_read_pipe);
+        close(child_write_pipe);
 #if HAVE_PRCTL_H && HAVE_PR_SET_PTRACER
         // Gives the child process permission to use /proc/<pid>/mem and ptrace
         if (prctl(PR_SET_PTRACER, childpid, 0, 0, 0) == -1)
@@ -296,7 +297,21 @@ CreateCrashDump(
 #endif
         }
 #endif // HAVE_PRCTL_H && HAVE_PR_SET_PTRACER
-        close(child_pipe);
+        // Signal child that prctl(PR_SET_PTRACER, childpid) is done
+        int bytesWritten;
+        while((bytesWritten = write(parent_write_pipe, "S", 1)) < 0 && errno == EINTR);
+        close(parent_write_pipe);
+
+        if (bytesWritten != 1)
+        {
+            fprintf(stderr, "Problem writing to createdump parent_write_pipe: %s (%d)\n", strerror(errno), errno);
+            close(parent_read_pipe);
+            if (errorMessageBuffer != nullptr)
+            {
+                errorMessageBuffer[0] = 0;
+            }
+            return false;
+        }
 
         // Read createdump's stderr messages (if any)
         if (errorMessageBuffer != nullptr)
@@ -304,7 +319,7 @@ CreateCrashDump(
             // Read createdump's stderr
             int bytesRead = 0;
             int count = 0;
-            while ((count = read(parent_pipe, errorMessageBuffer + bytesRead, cbErrorMessageBuffer - bytesRead)) > 0)
+            while ((count = read(parent_read_pipe, errorMessageBuffer + bytesRead, cbErrorMessageBuffer - bytesRead)) > 0)
             {
                 bytesRead += count;
             }
@@ -314,7 +329,7 @@ CreateCrashDump(
                 fputs(errorMessageBuffer, stderr);
             }
         }
-        close(parent_pipe);
+        close(parent_read_pipe);
 
         // Parent waits until the child process is done
         int wstatus = 0;
@@ -388,7 +403,7 @@ PalCreateCrashDumpIfEnabled(int signal, siginfo_t* siginfo, void* exceptionRecor
             }
 
             // Add the current thread id to the command line. This function is always called on the crashing thread.
-            crashThreadArg = FormatInt(PlatformGetCurrentThreadId());
+            crashThreadArg = FormatInt(minipal_get_current_thread_id());
             if (crashThreadArg != nullptr)
             {
                 argv[argc++] = "--crashthread";
@@ -452,7 +467,7 @@ PalCreateCrashDumpIfEnabled()
 }
 
 void
-PalCreateCrashDumpIfEnabled(void* pExceptionRecord, void* pExContext)
+PalCreateCrashDumpIfEnabled(void* pExceptionRecord)
 {
     PalCreateCrashDumpIfEnabled(SIGABRT, nullptr, pExceptionRecord);
 }
@@ -598,12 +613,6 @@ PalCreateDumpInitialize()
         }
         strncat(program, DumpGeneratorName, programLen);
 
-        struct stat fileData;
-        if (stat(program, &fileData) == -1 || !S_ISREG(fileData.st_mode))
-        {
-            fprintf(stderr, "DOTNET_DbgEnableMiniDump is set and the createdump binary does not exist: %s\n", program);
-            return true;
-        }
         g_szCreateDumpPath = program;
 
         // Format the app pid for the createdump command line

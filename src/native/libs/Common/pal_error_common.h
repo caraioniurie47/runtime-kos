@@ -340,6 +340,8 @@ inline static int32_t ConvertErrorPlatformToPal(int32_t platformErrno)
         case EWOULDBLOCK:
             return Error_EWOULDBLOCK;
 #endif
+        default:
+            break; // fall through to error
     }
 
     return Error_ENONSTANDARD;
@@ -531,6 +533,8 @@ inline static int32_t ConvertErrorPalToPlatform(int32_t error)
             return ESOCKETERROR;
 
         case Error_ENONSTANDARD:
+            break; // fall through to assert
+        default:
             break; // fall through to assert
     }
 

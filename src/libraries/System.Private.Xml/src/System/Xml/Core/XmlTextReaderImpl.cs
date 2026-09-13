@@ -167,7 +167,7 @@ namespace System.Xml
         private int _attrDuplWalkCount;
         private bool _attrNeedNamespaceLookup;
         private bool _fullAttrCleanup;
-        private NodeData[]? _attrDuplSortingArray;
+        private HashSet<NodeData>? _attrDuplSet;
 
         // name table
         private XmlNameTable _nameTable;
@@ -260,7 +260,7 @@ namespace System.Xml
         private long _charactersFromEntities;
 
         // All entities that are currently being processed
-        private Dictionary<IDtdEntityInfo, IDtdEntityInfo>? _currentEntities;
+        private HashSet<IDtdEntityInfo>? _currentEntities;
 
         // DOM helpers
         private bool _disableUndeclaredEntityCheck;
@@ -287,7 +287,7 @@ namespace System.Xml
         private const int NodesInitialSize = 8;
         private const int InitialParsingStatesDepth = 2;
         private const int MaxByteSequenceLen = 6;  // max bytes per character
-        private const int MaxAttrDuplWalkCount = 250;
+        private const int MaxAttrDuplWalkCount = 64;
         private const int MinWhitespaceLookahedCount = 4096;
 
         private const string XmlDeclarationBeginning = "<?xml";
@@ -5000,22 +5000,15 @@ namespace System.Xml
             }
             else
             {
-                if (_attrDuplSortingArray == null || _attrDuplSortingArray.Length < _attrCount)
-                {
-                    _attrDuplSortingArray = new NodeData[_attrCount];
-                }
-                Array.Copy(_nodes, _index + 1, _attrDuplSortingArray, 0, _attrCount);
-                Array.Sort(_attrDuplSortingArray, 0, _attrCount);
+                _attrDuplSet ??= new HashSet<NodeData>(NodeData.AtomizedNameEqualityComparer.Instance);
+                _attrDuplSet.Clear();
 
-                NodeData attr1 = _attrDuplSortingArray[0];
-                for (int i = 1; i < _attrCount; i++)
+                for (int i = _index + 1; i < _index + 1 + _attrCount; i++)
                 {
-                    NodeData attr2 = _attrDuplSortingArray[i];
-                    if (Ref.Equal(attr1.localName, attr2.localName) && Ref.Equal(attr1.ns, attr2.ns))
+                    if (!_attrDuplSet.Add(_nodes[i]))
                     {
-                        Throw(SR.Xml_DupAttributeName, attr2.GetNameWPrefix(_nameTable), attr2.LineNo, attr2.LinePos);
+                        Throw(SR.Xml_DupAttributeName, _nodes[i].GetNameWPrefix(_nameTable), _nodes[i].LineNo, _nodes[i].LinePos);
                     }
-                    attr1 = attr2;
                 }
             }
         }
@@ -8062,7 +8055,7 @@ namespace System.Xml
             // check entity recursion
             if (_currentEntities != null)
             {
-                if (_currentEntities.ContainsKey(entity))
+                if (_currentEntities.Contains(entity))
                 {
                     Throw(entity.IsParameterEntity ? SR.Xml_RecursiveParEntity : SR.Xml_RecursiveGenEntity, entity.Name,
                         _parsingStatesStack![_parsingStatesStackTop].LineNo, _parsingStatesStack[_parsingStatesStackTop].LinePos);
@@ -8076,9 +8069,9 @@ namespace System.Xml
             // register entity for recursion checkes
             if (entity != null)
             {
-                _currentEntities ??= new Dictionary<IDtdEntityInfo, IDtdEntityInfo>();
+                _currentEntities ??= new HashSet<IDtdEntityInfo>();
 
-                _currentEntities.Add(entity, entity);
+                _currentEntities.Add(entity);
             }
         }
 

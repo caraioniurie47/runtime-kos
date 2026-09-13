@@ -8,6 +8,7 @@ using System.IO;
 using System.Net.Http.Metrics;
 using System.Net.Security;
 using System.Runtime.Versioning;
+using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,6 +30,7 @@ namespace System.Net.Http
 
         internal bool _preAuthenticate = HttpHandlerDefaults.DefaultPreAuthenticate;
         internal ICredentials? _credentials;
+        internal TokenImpersonationLevel _impersonationLevel = HttpHandlerDefaults.DefaultImpersonationLevel;   // this is here to support impersonation on HttpWebRequest
 
         internal bool _allowAutoRedirect = HttpHandlerDefaults.DefaultAutomaticRedirection;
         internal int _maxAutomaticRedirections = HttpHandlerDefaults.DefaultMaxAutomaticRedirections;
@@ -59,6 +61,8 @@ namespace System.Net.Http
 
         internal bool _enableMultipleHttp2Connections;
 
+        internal bool _enableMultipleHttp3Connections;
+
         internal Func<SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>>? _connectCallback;
         internal Func<SocketsHttpPlaintextStreamFilterContext, CancellationToken, ValueTask<Stream>>? _plaintextStreamFilter;
 
@@ -66,6 +70,8 @@ namespace System.Net.Http
 
         // Http2 flow control settings:
         internal int _initialHttp2StreamWindowSize = HttpHandlerDefaults.DefaultInitialHttp2StreamWindowSize;
+
+        internal int _initialHttp2MaxConcurrentStreams = HttpHandlerDefaults.DefaultInitialHttp2MaxConcurrentStreams;
 
         internal ClientCertificateOption _clientCertificateOptions;
 
@@ -105,8 +111,6 @@ namespace System.Net.Http
                 _maxResponseDrainSize = _maxResponseDrainSize,
                 _maxResponseDrainTime = _maxResponseDrainTime,
                 _maxResponseHeadersLength = _maxResponseHeadersLength,
-                _meterFactory = _meterFactory,
-                _metrics = _metrics,
                 _pooledConnectionLifetime = _pooledConnectionLifetime,
                 _pooledConnectionIdleTimeout = _pooledConnectionIdleTimeout,
                 _preAuthenticate = _preAuthenticate,
@@ -121,14 +125,23 @@ namespace System.Net.Http
                 _requestHeaderEncodingSelector = _requestHeaderEncodingSelector,
                 _responseHeaderEncodingSelector = _responseHeaderEncodingSelector,
                 _enableMultipleHttp2Connections = _enableMultipleHttp2Connections,
+                _enableMultipleHttp3Connections = _enableMultipleHttp3Connections,
                 _connectCallback = _connectCallback,
                 _plaintextStreamFilter = _plaintextStreamFilter,
                 _initialHttp2StreamWindowSize = _initialHttp2StreamWindowSize,
+                _initialHttp2MaxConcurrentStreams = _initialHttp2MaxConcurrentStreams,
                 _activityHeadersPropagator = _activityHeadersPropagator,
                 _defaultCredentialsUsedForProxy = _proxy != null && (_proxy.Credentials == CredentialCache.DefaultCredentials || _defaultProxyCredentials == CredentialCache.DefaultCredentials),
                 _defaultCredentialsUsedForServer = _credentials == CredentialCache.DefaultCredentials,
                 _clientCertificateOptions = _clientCertificateOptions,
+                _impersonationLevel = _impersonationLevel,
             };
+
+            if (GlobalHttpSettings.MetricsHandler.IsGloballyEnabled)
+            {
+                settings._meterFactory = _meterFactory;
+                settings._metrics = _metrics;
+            }
 
             return settings;
         }
@@ -137,11 +150,11 @@ namespace System.Net.Http
 
         public bool EnableMultipleHttp2Connections => _enableMultipleHttp2Connections;
 
-        private byte[]? _http3SettingsFrame;
+        public bool EnableMultipleHttp3Connections => _enableMultipleHttp3Connections;
 
         [SupportedOSPlatform("windows")]
         [SupportedOSPlatform("linux")]
         [SupportedOSPlatform("macos")]
-        internal byte[] Http3SettingsFrame => _http3SettingsFrame ??= Http3Connection.BuildSettingsFrame(this);
+        internal byte[] Http3SettingsFrame => field ??= Http3Connection.BuildSettingsFrame(this);
     }
 }

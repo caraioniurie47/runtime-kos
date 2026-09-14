@@ -1,36 +1,23 @@
-# .NET NativeAOT on KasperskyOS: build and run HelloWorld
+# .NET NativeAOT on KasperskyOS: build and run the samples
 
 This branch ports the .NET 10 NativeAOT runtime (based on `release/10.0`) to KasperskyOS Community
-Edition on arm64, and boots the C# sample `samples/helloworldapp-kos` under QEMU. Two SDK versions
-are supported. Each needs its own Linux host:
+Edition 1.4.0.102 on arm64, and boots two C# samples under QEMU: `samples/helloworldapp-kos` and
+`samples/showcase-kos`.
 
 | KasperskyOS CE SDK | Host | KasperskyOS compiler | Image built by |
 | --- | --- | --- | --- |
-| 1.1.1.40 | Debian 11 (bullseye) | GCC 9.2.1 | `dist/kos-image.sh` (`einit`, `makeimg`) |
 | 1.4.0.102 | Ubuntu 22.04 | clang 17.0.6 | the `kos-image/` CMake project |
 
-Every step below applies to both SDKs unless its heading names one. Commands run as `root` inside the
-WSL distro: `wsl --import` creates no other user. The environment variables set along the way are
-used by later steps, so run everything in one shell, or set them again in a new one.
+SDK 1.1.1.40 (GCC) is supported on the frozen branch `kos-sdk-1.1.1.40`, whose `HOWTO-KOS.md` covers it.
 
-The prebuilt assets of release `release_v01` were built from .NET 8 sources and do not fit this
-branch; only its `icu4c-kos.zip` is still used.
+Commands run as `root` inside the WSL distro: `wsl --import` creates no other user. The environment
+variables set along the way are used by later steps, so run everything in one shell, or set them again
+in a new one.
 
 ## 1. Create the WSL distro (Windows)
 
 Any directory works in place of `T:\KasperskyOS`. The builds were run with `memory=16GB` and
 `processors=12` in `%UserProfile%\.wslconfig`.
-
-### SDK 1.1.1.40: Debian bullseye
-
-```powershell
-mkdir T:\KasperskyOS
-curl.exe -L -o T:\KasperskyOS\install.tar.gz https://salsa.debian.org/debian/WSL/-/raw/v1.14.0.0/x64/install.tar.gz
-wsl --import DebianKOS T:\KasperskyOS\wsl T:\KasperskyOS\install.tar.gz
-wsl -d DebianKOS -u root
-```
-
-### SDK 1.4.0.102: Ubuntu 22.04
 
 ```powershell
 mkdir T:\KasperskyOS
@@ -41,22 +28,6 @@ wsl -d UbuntuKOS -u root
 
 ## 2. Install prerequisites
 
-### SDK 1.1.1.40: Debian packages
-
-Bullseye has moved to `archive.debian.org`; the image's original sources no longer resolve.
-
-```sh
-echo 'deb [check-valid-until=no] http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends build-essential clang llvm lld lldb python-is-python3 curl wget git gdebi-core unzip file ca-certificates libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev zlib1g-dev ninja-build cpio pigz
-```
-
-No separate CMake is needed: the SDK's CMake 3.22 comes first on `PATH` (step 3), and `release/10.0`
-requires 3.20.
-
-### SDK 1.4.0.102: Ubuntu packages
-
 ```sh
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -66,32 +37,13 @@ apt-get install -y --no-install-recommends build-essential clang llvm lld lldb c
 
 ## 3. Install the KasperskyOS CE SDK
 
-### SDK 1.1.1.40: install
-
-```sh
-cd /home
-wget -nc https://products.s.kaspersky-labs.com/special/KasperskyOSCommunityEdition/1.1.1.40/multilanguage-1.1.1.40/3737323236397c44454c7c31/KasperskyOS-Community-Edition_1.1.1.40_en.deb
-gdebi -n KasperskyOS-Community-Edition_1.1.1.40_en.deb
-```
-
-### SDK 1.1.1.40: environment
-
-The SDK's `toolchain/bin` goes **first** on `PATH`, for `aarch64-kos-gcc` and its CMake.
-
-```sh
-export KOS_SDK=/opt/KasperskyOS-Community-Edition-1.1.1.40
-export PATH=$KOS_SDK/toolchain/bin:$PATH
-```
-
-### SDK 1.4.0.102: install
-
 ```sh
 cd /home
 wget -nc https://products.s.kaspersky-labs.com/special/KasperskyOSCommunityEdition/1.4.0.102/multilanguage-INT-1.4.0.102/fdbf0e5762204c3180f0eabca0423c55/KasperskyOS-Community-Edition-Qemu-1.4.0.102_en.deb
 gdebi -n KasperskyOS-Community-Edition-Qemu-1.4.0.102_en.deb
 ```
 
-### SDK 1.4.0.102: environment
+### Environment
 
 The SDK's `toolchain/bin` goes on `PATH` only after the host-side build in step 6: it holds `clang`
 and `clang-17` targeting KasperskyOS, and the .NET build takes the highest-versioned `clang-<N>` it
@@ -118,21 +70,9 @@ ICU 73.1 from [unicode-org-icu, branch `kos_changes`](https://github.com/caraion
 goes to `/opt/icu4c/kos`. The build always needs it (`System.Globalization.Native` compiles against
 its headers) and packs its libraries; they are linked only when `InvariantGlobalization` is false.
 
-### SDK 1.1.1.40: prebuilt ICU
+### Build ICU with clang
 
-`icu4c-kos.zip` is that ICU built with the 1.1.1.40 GCC.
-
-```sh
-mkdir -p /opt/icu4c
-cd /opt/icu4c
-wget -nc https://github.com/caraioniurie47/runtime-kos/releases/download/release_v01/icu4c-kos.zip
-unzip -o -q icu4c-kos.zip
-```
-
-### SDK 1.4.0.102: build ICU with clang
-
-The prebuilt GCC libraries need libstdc++, which the 1.4 sysroot does not have. A host build comes
-first; the cross build uses its tools.
+A host build comes first; the cross build uses its tools.
 
 ```sh
 cd /home
@@ -163,7 +103,7 @@ find /home/runtime-kos -name "*.sh" -exec chmod +x {} +
 
 ## 6. Build ilc-tools (host compiler)
 
-The sample's `IlcToolsPath` is `/home/ilc-tools-10`.
+The samples' `IlcToolsPath` is `/home/ilc-tools-10`.
 
 ```sh
 cd /home/runtime-kos
@@ -175,7 +115,7 @@ git clean -ffdx
 
 ## 7. Cross-build the runtime for KasperskyOS
 
-### SDK 1.4.0.102: toolchain on PATH
+### Toolchain on PATH
 
 Last on `PATH`, so the host's own `clang` and `cmake` keep precedence.
 
@@ -183,18 +123,9 @@ Last on `PATH`, so the host's own `clang` and `cmake` keep precedence.
 export PATH=$PATH:$KOS_SDK/toolchain/bin
 ```
 
-### SDK 1.1.1.40: cross builds with GCC
+### Cross builds with clang
 
-```sh
-cd /home/runtime-kos
-ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.nativeaotruntime+clr.nativeaotlibs -c release --cross --gcc --kos --arch arm64 --icudir /opt/icu4c/kos
-ROOTFS_DIR=$KOS_SDK ./build.sh -s libs -c release --cross --gcc --kos --arch arm64 --icudir /opt/icu4c/kos
-ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.aottools+packs.aot -c release --cross --gcc --kos --arch arm64 --icudir /opt/icu4c/kos
-```
-
-### SDK 1.4.0.102: cross builds with clang
-
-Without `--gcc`, the cross toolchain file picks `aarch64-kos-clang` when the SDK has it.
+The cross toolchain file picks `aarch64-kos-clang` from the SDK.
 
 ```sh
 cd /home/runtime-kos
@@ -205,7 +136,7 @@ ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.aottools+packs.aot -c release --cross --ko
 
 ### Copy the packages
 
-The packages go to the feed that the sample's `nuget.config` names:
+The packages go to the feed that the samples' `nuget.config` names:
 
 ```sh
 mkdir -p /home/kos-net-packages-10
@@ -214,8 +145,7 @@ cp -a /home/runtime-kos/artifacts/packages/Release/Shipping/. /home/kos-net-pack
 
 ## 8. Publish HelloWorld
 
-The sample links with `aarch64-kos-clang++` when the SDK next to `SysRoot` has it, otherwise with
-`aarch64-kos-g++`.
+The sample links with `aarch64-kos-clang++` from the SDK next to `SysRoot`.
 
 ```sh
 cp -a /home/runtime-kos/samples/helloworldapp-kos/. /home/helloworldapp-kos/
@@ -227,20 +157,10 @@ cd /home
 
 ## 9. Build the image and run it
 
+The image is a CMake project, built with the SDK's own CMake, which carries the `platform` modules.
 QEMU runs in the foreground and does not exit by itself; stop it with Ctrl+C.
 
-### Run on SDK 1.1.1.40
-
-`kos-image.sh` builds the image with the SDK's `einit` and `makeimg`, then starts QEMU.
-
-```sh
-bash /home/helloworldapp-kos/dist/kos-image.sh
-```
-
-### SDK 1.4.0.102: image
-
-SDK 1.4 has no `einit` or `makeimg`; the image is a CMake project, built with the SDK's own CMake,
-which carries the `platform` modules.
+### Image
 
 ```sh
 $KOS_SDK/toolchain/bin/cmake -S /home/helloworldapp-kos/kos-image -B /home/helloworldapp-kos-image \
@@ -249,27 +169,64 @@ $KOS_SDK/toolchain/bin/cmake -S /home/helloworldapp-kos/kos-image -B /home/hello
 $KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target kos-qemu-image
 ```
 
-### Run on SDK 1.4.0.102
+### Run HelloWorld
 
 ```sh
 $KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target sim
 ```
 
-## Output
-
 After the KasperskyOS boot log, the program prints:
 
 ```text
+[hello.Hello][14:14][CRT0] Initing main app: statically-linked, PIE.
+...
 Hello from .NET! Math.Min(4, 7)=4
 ```
 
-On SDK 1.4 it is preceded by `[hello.Hello][14:14][CRT0] Initing main app: statically-linked, PIE.`
+## 10. The showcase sample
+
+`samples/showcase-kos` runs a set of sections, each ending in `PASS`, `SKIP` or `FAIL`: runtime
+information, culture-aware formatting and sorting, a `Parallel.For` Mandelbrot, async/await with
+channels and timers, source-generated `System.Text.Json` and `Regex`, LINQ and generic math, the GC
+under allocation load, and exceptions with stack traces. It uses the HelloWorld image project.
+
+`InvariantGlobalization=false` links ICU, so the globalization section runs; the binary grows from
+about 15 MB to about 52 MB. Without it the section reports `SKIP`.
+
+### Publish the showcase
+
+```sh
+cp -a /home/runtime-kos/samples/showcase-kos/. /home/showcase-kos/
+cd /home
+/home/runtime-kos/.dotnet/dotnet publish showcase-kos -o showcase-kos/dist -c Release -r linux-arm64 --self-contained \
+    -p:PublishAot=true -p:StaticExecutable=true -p:StaticallyLinked=true -p:TargetsKOS=true \
+    -p:SysRoot=$KOS_SDK/sysroot-aarch64-kos -p:InvariantGlobalization=false --packages showcase-pkg-kos
+$KOS_SDK/toolchain/bin/cmake -S /home/runtime-kos/samples/helloworldapp-kos/kos-image -B /home/showcase-kos-image \
+    -D CMAKE_TOOLCHAIN_FILE=$KOS_SDK/toolchain/share/toolchain-aarch64-kos.cmake \
+    -D HELLO_BINARY=/home/showcase-kos/dist/showcase-kos
+$KOS_SDK/toolchain/bin/cmake --build /home/showcase-kos-image --target kos-qemu-image
+```
+
+### Run the showcase
+
+```sh
+$KOS_SDK/toolchain/bin/cmake --build /home/showcase-kos-image --target sim
+```
+
+The last line it prints is the summary, for example:
+
+```text
+SHOWCASE DONE: 9 passed, 0 skipped, 0 failed, 9261 ms
+```
 
 ## Limitations
 
 - **No hardware exceptions.** KasperskyOS delivers only `SIGTERM`, so the runtime registers no
   `SIGSEGV` or `SIGFPE` handler there, and a fault such as a null dereference does not become a
   managed exception.
-- **ICU adds about 37 MB to the unstripped binary.** The sample sets `InvariantGlobalization=true`; publish with
-  `-p:InvariantGlobalization=false` to link ICU and its data for culture-aware formatting.
+- **No file system, network or stdout in these images.** The program starts with "VFS filesystem and
+  network backends initialized with stub (related calls will return EIO)": only stderr reaches the
+  console, and writing to `Console.Out` throws `IOException`. A VFS component in the image is needed
+  for files and sockets; none was tried.
+- **ICU adds about 37 MB to the unstripped binary**; see step 10.
 - **No cryptography or `System.Net.Security` native libraries** are built or linked.

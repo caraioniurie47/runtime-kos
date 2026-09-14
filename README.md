@@ -1,7 +1,18 @@
-# KasperskyOS
+# .NET NativeAOT for KasperskyOS
 
-This is a fork customized to be used with KasperskyOS.
-- [How to build?](HOWTO-KOS.md)
+> **Unofficial community port, not affiliated with or endorsed by Microsoft or Kaspersky.**
+
+A fork of [dotnet/runtime](https://github.com/dotnet/runtime) that runs C# programs compiled with .NET 10
+NativeAOT on KasperskyOS Community Edition 1.4.0.102 (arm64, under QEMU).
+
+- [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt packages and a quick start
+- [HOWTO-KOS.md](HOWTO-KOS.md): build everything from source
+- Samples: [`samples/helloworldapp-kos`](samples/helloworldapp-kos) and [`samples/showcase-kos`](samples/showcase-kos)
+- KasperskyOS CE SDK 1.1.1.40 (GCC): the frozen branch
+  [`kos-sdk-1.1.1.40`](https://github.com/caraioniurie47/runtime-kos/tree/kos-sdk-1.1.1.40)
+
+Questions and problems with this port belong in this repository's issues, not in dotnet/runtime. The rest of
+this file is the upstream dotnet/runtime README.
 
 # .NET Runtime
 

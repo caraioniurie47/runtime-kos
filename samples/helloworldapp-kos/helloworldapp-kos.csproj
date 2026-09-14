@@ -11,7 +11,9 @@
     <IlcToolsPath>/home/ilc-tools-10</IlcToolsPath>
     <IlcHostPackagePath>TODO</IlcHostPackagePath>
     <IlcVerboseLogging>false</IlcVerboseLogging>
-    <CppCompilerAndLinker>aarch64-kos-g++</CppCompilerAndLinker>
+    <!-- KOS CE SDK 1.4 and later ship clang instead of GCC; SysRoot is <SDK>/sysroot-aarch64-kos. -->
+    <CppCompilerAndLinker Condition="'$(CppCompilerAndLinker)' == '' and Exists('$(SysRoot)/../toolchain/bin/aarch64-kos-clang++')">aarch64-kos-clang++</CppCompilerAndLinker>
+    <CppCompilerAndLinker Condition="'$(CppCompilerAndLinker)' == ''">aarch64-kos-g++</CppCompilerAndLinker>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 

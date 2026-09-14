@@ -104,9 +104,6 @@ if (CLR_CMAKE_TARGET_KOS)
         add_definitions(-D__aarch64__)
     endif(CLR_CMAKE_TARGET_ARCH_ARM64)
     include_directories (${CLR_SRC_NATIVE_DIR}/external/kos)
-    list (APPEND NATIVE_SOURCES
-        ${CLR_SRC_NATIVE_DIR}/external/kos/malloc.c
-    )
 endif (CLR_CMAKE_TARGET_KOS)
 
 include(${CMAKE_CURRENT_LIST_DIR}/extra_libs.cmake)

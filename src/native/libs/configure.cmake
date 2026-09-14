@@ -229,10 +229,15 @@ check_symbol_exists(
     fcntl.h
     HAVE_POSIX_ADVISE)
 
-check_symbol_exists(
-    fallocate
-    fcntl.h
-    HAVE_FALLOCATE)
+if (CLR_CMAKE_TARGET_KOS)
+    # SDK 1.4 declares fallocate() but none of the FALLOC_FL_* flags pal_io.c passes.
+    set(HAVE_FALLOCATE 0)
+else ()
+    check_symbol_exists(
+        fallocate
+        fcntl.h
+        HAVE_FALLOCATE)
+endif ()
 
 check_include_files(
     "sys/uio.h"
@@ -647,10 +652,12 @@ if (CLR_CMAKE_TARGET_LINUX)
 endif ()
 
 if(CLR_CMAKE_TARGET_KOS)
-    unset(HAVE_MALLOC_SIZE) # unsupported
-    set(HAVE_MALLOC_USABLE_SIZE 1) # added to malloc.h/malloc.c (external)
-    unset(HAVE_MALLOC_USABLE_SIZE_NP) # unsupported
-    unset(HAVE_POSIX_MEMALIGN) # supported, but disabled to use aligned_alloc instead
+    # KOS libc has no malloc size query; pal_memory.c's __KOS__ branch keeps sizes for the Aligned*
+    # exports itself and needs neither posix_memalign nor aligned_alloc.
+    unset(HAVE_MALLOC_SIZE)
+    unset(HAVE_MALLOC_USABLE_SIZE)
+    unset(HAVE_MALLOC_USABLE_SIZE_NP)
+    unset(HAVE_POSIX_MEMALIGN)
 else()
     check_symbol_exists(
         malloc_size
@@ -705,7 +712,7 @@ elseif(CLR_CMAKE_TARGET_BROWSER)
 else()
 
     if(CLR_CMAKE_TARGET_KOS)
-        set(HAVE_ALIGNED_ALLOC 1) # added to malloc.h/malloc.c (external)
+        unset(HAVE_ALIGNED_ALLOC) # SDK 1.1.1.40's libc has none; see the __KOS__ branch in pal_memory.c
     else()
         check_symbol_exists(
             aligned_alloc

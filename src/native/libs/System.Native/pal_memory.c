@@ -8,7 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if HAVE_MALLOC_SIZE
+#if defined(__KOS__)
+    // KOS libc has no malloc size query. Only AlignedRealloc needs one, and the Aligned* exports are
+    // only used with each other, so they keep the base pointer and the size in a header in front of
+    // the aligned block.
+    typedef struct
+    {
+        void* base;
+        uintptr_t size;
+    } KosAlignedHeader;
+    #define KOS_ALIGNED_HEADER(p) ((KosAlignedHeader*)((uintptr_t)(p) - sizeof(KosAlignedHeader)))
+    #define MALLOC_SIZE(s) ((s) == NULL ? 0 : KOS_ALIGNED_HEADER(s)->size)
+#elif HAVE_MALLOC_SIZE
     #include <malloc/malloc.h>
     #define MALLOC_SIZE(s) malloc_size(s)
 #elif HAVE_MALLOC_USABLE_SIZE
@@ -32,7 +43,24 @@
 
 void* SystemNative_AlignedAlloc(uintptr_t alignment, uintptr_t size)
 {
-#if HAVE_ALIGNED_ALLOC
+#if defined(__KOS__)
+    // alignment is a power of two (checked by NativeMemory.AlignedAlloc).
+    if (size > UINTPTR_MAX - alignment - sizeof(KosAlignedHeader))
+    {
+        return NULL;
+    }
+    void* base = malloc(size + alignment + sizeof(KosAlignedHeader));
+    if (base == NULL)
+    {
+        return NULL;
+    }
+    // At least sizeof(KosAlignedHeader) past base, so the header fits; the header is itself
+    // pointer-aligned because malloc's result and (for alignments of 8 and up) the block are.
+    uintptr_t aligned = ((uintptr_t)base + sizeof(KosAlignedHeader) + alignment - 1) & ~(alignment - 1);
+    KOS_ALIGNED_HEADER(aligned)->base = base;
+    KOS_ALIGNED_HEADER(aligned)->size = size;
+    return (void*)aligned;
+#elif HAVE_ALIGNED_ALLOC
     // We want to prefer the standardized aligned_alloc function.
     return aligned_alloc(alignment, size);
 #elif HAVE_POSIX_MEMALIGN
@@ -46,7 +74,14 @@ void* SystemNative_AlignedAlloc(uintptr_t alignment, uintptr_t size)
 
 void SystemNative_AlignedFree(void* ptr)
 {
+#if defined(__KOS__)
+    if (ptr != NULL)
+    {
+        free(KOS_ALIGNED_HEADER(ptr)->base);
+    }
+#else
     free(ptr);
+#endif
 }
 
 void* SystemNative_AlignedRealloc(void* ptr, uintptr_t alignment, uintptr_t new_size)

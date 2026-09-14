@@ -247,8 +247,14 @@ elseif(KOS)
     set(CMAKE_SYSROOT "${CROSS_ROOTFS}/sysroot-${CMAKE_SYSTEM_PROCESSOR}-kos")
     set(CMAKE_SYSTEM_PREFIX_PATH "${CROSS_ROOTFS}/toolchain")
 
-    locate_toolchain_exec(gcc CMAKE_C_COMPILER)
-    locate_toolchain_exec(g++ CMAKE_CXX_COMPILER)
+    if(EXISTS "${CROSS_ROOTFS}/toolchain/bin/${TOOLCHAIN}-clang")
+        # SDK 1.4 and later ship clang (with lld and libc++) instead of GCC.
+        locate_toolchain_exec(clang CMAKE_C_COMPILER)
+        locate_toolchain_exec(clang++ CMAKE_CXX_COMPILER)
+    else()
+        locate_toolchain_exec(gcc CMAKE_C_COMPILER)
+        locate_toolchain_exec(g++ CMAKE_CXX_COMPILER)
+    endif()
 else()
     set(CMAKE_SYSROOT "${CROSS_ROOTFS}")
 

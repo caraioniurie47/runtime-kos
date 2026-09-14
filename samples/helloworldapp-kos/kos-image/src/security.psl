@@ -1,0 +1,19 @@
+/* Security policy of the helloworldapp-kos image: as permissive as dist/security.psl. */
+
+use nk.base._
+
+use EDL Einit
+use EDL kl.core.Core
+use EDL hello.Hello
+
+use kl.core.DCM._
+
+execute: kl.core.Execute
+
+execute { grant () }
+
+request { grant () }
+
+response { grant () }
+
+error { grant () }

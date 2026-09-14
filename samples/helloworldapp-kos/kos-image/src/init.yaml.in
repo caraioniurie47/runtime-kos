@@ -1,0 +1,7 @@
+entities:
+
+- name: hello.Hello
+  path: @HELLO_BINARY_NAME@
+@INIT_Hello_ENTITY_CONNECTIONS@
+
+@INIT_EXTERNAL_ENTITIES@

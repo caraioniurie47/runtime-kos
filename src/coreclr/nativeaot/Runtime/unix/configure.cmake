@@ -86,6 +86,11 @@ check_symbol_exists(
     time.h
     HAVE_CLOCK_GETTIME_NSEC_NP)
 
-check_library_exists(c sched_getaffinity "" HAVE_SCHED_GETAFFINITY)
+if (CLR_CMAKE_TARGET_KOS)
+  # SDK 1.4's libc links sched_getaffinity, but its headers declare neither it nor cpu_set_t.
+  set(HAVE_SCHED_GETAFFINITY 0)
+else()
+  check_library_exists(c sched_getaffinity "" HAVE_SCHED_GETAFFINITY)
+endif()
 
 configure_file(${CMAKE_CURRENT_LIST_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)

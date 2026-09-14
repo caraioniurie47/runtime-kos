@@ -9,6 +9,9 @@ are supported. Each needs its own Linux host:
 | 1.1.1.40 | Debian 11 (bullseye) | GCC 9.2.1 | `dist/kos-image.sh` (`einit`, `makeimg`) |
 | 1.4.0.102 | Ubuntu 22.04 | clang 17.0.6 | the `kos-image/` CMake project |
 
+**This branch, `kos-sdk-1.1.1.40`, is frozen:** it stays on .NET 10 and receives no further changes.
+It is the last state verified on SDK 1.1.1.40. Work for SDK 1.4 and later continues on `kos_changes`.
+
 Every step below applies to both SDKs unless its heading names one. Commands run as `root` inside the
 WSL distro: `wsl --import` creates no other user. The environment variables set along the way are
 used by later steps, so run everything in one shell, or set them again in a new one.
@@ -157,7 +160,7 @@ mkdir -p /home/icu4c-build-kos && cd /home/icu4c-build-kos
 
 ```sh
 cd /home
-git clone --depth 1 --branch kos_changes https://github.com/caraioniurie47/runtime-kos.git
+git clone --depth 1 --branch kos-sdk-1.1.1.40 https://github.com/caraioniurie47/runtime-kos.git
 find /home/runtime-kos -name "*.sh" -exec chmod +x {} +
 ```
 

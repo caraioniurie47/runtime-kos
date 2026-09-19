@@ -21,7 +21,7 @@ if(CLR_CMAKE_TARGET_UNIX OR CLR_CMAKE_TARGET_WASI)
     # Workaround for https://unicode-org.atlassian.net/browse/ICU-20601
     add_compile_options(-Wno-extra-semi-stmt)
     add_compile_options(-Wno-unknown-warning-option)
-    
+
     if (CLR_CMAKE_TARGET_KOS)
         add_compile_options(-Wno-deprecated-declarations)
     endif()

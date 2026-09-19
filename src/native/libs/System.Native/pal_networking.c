@@ -3011,7 +3011,7 @@ int sockatmark_helper(int s)
     return sockatmark(s);
 #endif
 }
- 
+
 int32_t SystemNative_GetAtOutOfBandMark(intptr_t socket, int32_t* atMark)
 {
 #if defined(SIOCATMARK)

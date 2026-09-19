@@ -92,7 +92,7 @@
 
     <!-- KOS: the CoreCLR build adds src/native/libs, and System.Globalization.Native there finds
          ICU through CMAKE_ICU_DIR (build.sh -icudir). -->
-    <ItemGroup Condition="'$(TargetsKOS)' == 'true'">
+    <ItemGroup Condition="'$(TargetsKOS)' == 'true' and '$(_IcuDir)' != ''">
       <_CoreClrBuildArg Include="-cmakeargs -DCMAKE_ICU_DIR=&quot;$(_IcuDir)&quot;" />
     </ItemGroup>
 

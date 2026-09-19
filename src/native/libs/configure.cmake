@@ -669,9 +669,8 @@ elseif(CLR_CMAKE_TARGET_WASI)
 elseif(CLR_CMAKE_TARGET_BROWSER)
     set(HAVE_FORK 0)
 else()
-
     if(CLR_CMAKE_TARGET_KOS)
-        unset(HAVE_ALIGNED_ALLOC) # SDK 1.1.1.40's libc has none; see the __KOS__ branch in pal_memory.c
+        unset(HAVE_ALIGNED_ALLOC) # pal_memory.c's __KOS__ branch does not use it
     else()
         check_symbol_exists(
             aligned_alloc

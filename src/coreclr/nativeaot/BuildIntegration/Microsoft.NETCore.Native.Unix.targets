@@ -264,7 +264,8 @@ The .NET Foundation licenses this file to you under the MIT license.
       <LinkerArg Include="@(NativeLibrary)" />
       <LinkerArg Include="--sysroot=&quot;$(SysRoot)&quot;" Condition="'$(SysRoot)' != '' and '$(_IsApplePlatform)' != 'true'" Shim="true" />
       <LinkerArg Include="-isysroot &quot;$(SysRoot)&quot;" Condition="'$(SysRoot)' != '' and '$(_IsApplePlatform)' == 'true'" Shim="true" />
-      <!-- KOS links with aarch64-kos-g++, which does not accept clang's target triple option -->
+      <!-- KOS: TargetTriple names Linux (aarch64-linux-gnu), which switches aarch64-kos-clang++ from aarch64-unknown-kos
+           to a Linux target that finds no crt1.o, libc++ or builtins; aarch64-kos-g++ does not accept the option -->
       <LinkerArg Include="--target=$(TargetTriple)" Condition="'$(TargetTriple)' != '' and '$(TargetsKOS)' != 'true'" Shim="true" />
       <LinkerArg Include="-g" Condition="$(NativeDebugSymbols) == 'true'" Shim="true" />
       <LinkerArg Include="-Wl,--strip-debug" Condition="$(NativeDebugSymbols) != 'true' and '$(_IsApplePlatform)' != 'true'" />

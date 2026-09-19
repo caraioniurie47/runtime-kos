@@ -3,15 +3,22 @@
 > **Unofficial community port, not affiliated with or endorsed by Microsoft or Kaspersky.**
 
 A fork of [dotnet/runtime](https://github.com/dotnet/runtime) that runs C# programs compiled with
-NativeAOT on KasperskyOS Community Edition 1.4.0.102 (arm64, under QEMU). This branch, `kos-main`, tracks
-dotnet/runtime `main`; the .NET 10 port is on
-[`kos_changes`](https://github.com/caraioniurie47/runtime-kos/tree/kos_changes).
+NativeAOT on KasperskyOS Community Edition 1.4.0.102 (arm64, under QEMU). The default branch, `kos-main`,
+carries the port on dotnet/runtime `main`.
 
-- [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt .NET 10 packages and a quick start
+What works: a single statically linked executable per program, with files and stdout (a RAM file system at
+`/tmp`), TCP sockets, `HttpListener`, ICU globalization, and the base class libraries the samples exercise.
+The limits are listed at the end of [HOWTO-KOS.md](HOWTO-KOS.md#limitations).
+
+- [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt packages and a quick start;
+  [`release_v03`](https://github.com/caraioniurie47/runtime-kos/releases/tag/release_v03) is built from
+  `kos-main`
 - [HOWTO-KOS.md](HOWTO-KOS.md): build everything from source
 - Samples: [`samples/helloworldapp-kos`](samples/helloworldapp-kos), [`samples/showcase-kos`](samples/showcase-kos)
   and [`samples/webserver-kos`](samples/webserver-kos)
-- KasperskyOS CE SDK 1.1.1.40 (GCC): the frozen branch
+- Other branches: the .NET 10 port on
+  [`kos_changes`](https://github.com/caraioniurie47/runtime-kos/tree/kos_changes) (`release_v02`), and
+  KasperskyOS CE SDK 1.1.1.40 (GCC) on the frozen
   [`kos-sdk-1.1.1.40`](https://github.com/caraioniurie47/runtime-kos/tree/kos-sdk-1.1.1.40)
 
 Questions and problems with this port belong in this repository's issues, not in dotnet/runtime. The rest of

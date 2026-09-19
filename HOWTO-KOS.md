@@ -266,6 +266,11 @@ SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 16421 ms
 - **No hardware exceptions.** KasperskyOS delivers only `SIGTERM`, so the runtime registers no
   `SIGSEGV` or `SIGFPE` handler there, and a fault such as a null dereference does not become a
   managed exception.
+- **A loop that makes no calls holds up the GC.** Without signals the runtime cannot interrupt a
+  thread running managed code, so a garbage collection waits until each such thread checks for a
+  pending suspension: at a GC poll or on return from a P/Invoke. A thread spinning on a flag with no
+  calls in its loop held a `GC.Collect` on another thread for 15 s, until the loop ended; an endless
+  loop of that kind would hang the program at the next collection.
 - **Files live in RAM.** `VfsRamFs` mounts a RAM file system at `/tmp`, emptied at every boot; the
   showcase uses only `/tmp`, so other paths are untried.
 - **Sockets: TCP over IP addresses is what was tried.** KasperskyOS has neither epoll nor kqueue, so

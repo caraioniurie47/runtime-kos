@@ -1154,6 +1154,13 @@ HijackFunc* PalGetHijackTarget(HijackFunc* defaultHijackTarget)
 
 void PalHijack(Thread* pThreadToHijack)
 {
+#if defined(__KOS__)
+    // KasperskyOS sends processes only SIGTERM: pthread_kill with the activation signal fails, and the abort below
+    // ended processes when a background GC suspended a thread running managed code (SDK 1.4.0.102). Without the
+    // signal, a thread is suspended when it next checks RhpTrapThreads, in RhpGcPoll or on return from a P/Invoke,
+    // so a managed loop that makes no calls holds up a GC until it ends (measured).
+    (void)pThreadToHijack;
+#else
     if (pThreadToHijack->IsActivationPending())
     {
         return;
@@ -1189,6 +1196,7 @@ void PalHijack(Thread* pThreadToHijack)
         // if the thread doesn't exist anymore.
         abort();
     }
+#endif // __KOS__
 }
 #endif // FEATURE_HIJACK
 

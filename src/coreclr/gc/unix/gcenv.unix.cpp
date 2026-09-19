@@ -412,6 +412,11 @@ static void* VirtualReserveInner(size_t size, size_t alignment, uint32_t flags, 
 
     size_t alignedSize = size + (alignment - OS_PAGE_SIZE);
     int mmapFlags = MAP_ANON | MAP_PRIVATE | hugePagesFlag;
+#if defined(__KOS__)
+    // KasperskyOS backs a plain anonymous mapping with physical memory at once, even with PROT_NONE (SDK 1.4.0.102:
+    // 512 MiB took 28 s under QEMU and 513 MiB of free memory); MAP_NORESERVE maps pages on first write.
+    mmapFlags |= MAP_NORESERVE;
+#endif
     void * pRetVal = mmap(nullptr, alignedSize, PROT_NONE, mmapFlags, -1, 0);
 
     if (pRetVal != MAP_FAILED)
@@ -561,8 +566,25 @@ bool GCToOSInterface::VirtualDecommit(void* address, size_t size)
     // that much more clear to the operating system that we no
     // longer need these pages. Also, GC depends on re-committed pages to
     // be zeroed-out.
+#if defined(__KOS__)
+    // KasperskyOS fails MAP_FIXED over an existing mapping with ENOSYS, and neither MADV_DONTNEED nor MADV_FREE
+    // frees pages (SDK 1.4.0.102), so unmap the range and reserve it again at the same address, which returns the
+    // pages and gives zeroed ones when it is committed again. MAP_FIXED_NOREPLACE keeps the reservation contiguous:
+    // without it a remap elsewhere would leave this range unmapped, and a later commit would fault (measured).
+    bool bRetVal = false;
+    if (munmap(address, size) == 0)
+    {
+        void* pRemapped = mmap(address, size, PROT_NONE, MAP_FIXED_NOREPLACE | MAP_ANON | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
+        bRetVal = pRemapped == address;
+        if (!bRetVal && pRemapped != MAP_FAILED)
+        {
+            munmap(pRemapped, size);
+        }
+    }
+#else
     int mmapFlags = MAP_FIXED | MAP_ANON | MAP_PRIVATE;
     bool bRetVal = mmap(address, size, PROT_NONE, mmapFlags, -1, 0) != MAP_FAILED;
+#endif
 
 #if defined(MADV_DONTDUMP)
     if (bRetVal)

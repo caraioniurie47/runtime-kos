@@ -378,9 +378,7 @@ DumpWriter::WriteThread(const ThreadInfo& thread)
         siginfo = m_crashInfo.SigInfo();
         pr.pr_info.si_signo = siginfo->si_signo;
         pr.pr_info.si_code = siginfo->si_code;
-#if HAVE_SIGINFO_T_ERRORNO // TODO-KOS: si_errno is not defined
         pr.pr_info.si_errno = siginfo->si_errno;
-#endif
         pr.pr_cursig = siginfo->si_signo;
     }
     pr.pr_pid = thread.Tid();
@@ -438,13 +436,7 @@ DumpWriter::WriteThread(const ThreadInfo& thread)
     if (siginfo != nullptr)
     {
         TRACE("Writing NT_SIGINFO tid %04x signo %d (%04x) code %04x errno %04x addr %p\n",
-            thread.Tid(), siginfo->si_signo, siginfo->si_signo, siginfo->si_code, 
-#if HAVE_SIGINFO_T_ERRORNO // TODO-KOS: si_errno is not defined
-            siginfo->si_errno,
-#else
-            0,
-#endif
-            siginfo->si_addr);
+            thread.Tid(), siginfo->si_signo, siginfo->si_signo, siginfo->si_code, siginfo->si_errno, siginfo->si_addr);
 
         nhdr.n_namesz = 5;
         nhdr.n_descsz = sizeof(siginfo_t);

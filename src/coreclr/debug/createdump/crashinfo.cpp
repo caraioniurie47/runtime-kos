@@ -40,9 +40,7 @@ CrashInfo::CrashInfo(const CreateDumpOptions& options) :
     memset(&m_siginfo, 0, sizeof(m_siginfo));
     m_siginfo.si_signo = options.Signal;
     m_siginfo.si_code = options.SignalCode;
-#if HAVE_SIGINFO_T_ERRORNO // TODO-KOS: si_errno is not defined
     m_siginfo.si_errno = options.SignalErrno;
-#endif
     m_siginfo.si_addr = (void*)options.SignalAddress;
 }
 

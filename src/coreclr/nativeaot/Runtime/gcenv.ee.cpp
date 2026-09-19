@@ -269,6 +269,7 @@ void GCToEEInterface::DiagGCEnd(size_t index, int gen, int reason, bool fConcurr
     UNREFERENCED_PARAMETER(index);
     UNREFERENCED_PARAMETER(gen);
     UNREFERENCED_PARAMETER(reason);
+
 #ifdef FEATURE_EVENT_TRACE
     if (!fConcurrent)
     {

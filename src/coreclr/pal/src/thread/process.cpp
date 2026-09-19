@@ -48,7 +48,7 @@ SET_DEFAULT_DEBUG_CHANNEL(PROCESS); // some headers have code with asserts, so d
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <signal.h>
-#if defined(HAVE_PRCTL_H) && HAVE_SYS_SYSCALL_H
+#if HAVE_PRCTL_H
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #endif
@@ -2014,9 +2014,7 @@ PROCCreateCrashDumpIfEnabled(int signal, siginfo_t* siginfo, void* context, Cras
                     argv[argc++] = "--code";
                     argv[argc++] = signalCodeArg;
                 }
-#if HAVE_SIGINFO_T_ERRORNO // TODO-KOS: si_errno is not defined
                 signalErrnoArg = PROCFormatInt(siginfo->si_errno);
-#endif
                 if (signalErrnoArg != nullptr)
                 {
                     argv[argc++] = "--errno";

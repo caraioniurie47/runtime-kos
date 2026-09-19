@@ -16,14 +16,24 @@
     <CppCompilerAndLinker Condition="'$(CppCompilerAndLinker)' == '' and Exists('$(SysRoot)/../toolchain/bin/aarch64-kos-clang++')">aarch64-kos-clang++</CppCompilerAndLinker>
     <CppCompilerAndLinker Condition="'$(CppCompilerAndLinker)' == ''">aarch64-kos-g++</CppCompilerAndLinker>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The explicit ILCompiler reference below is how docs/workflow/building/coreclr/nativeaot.md uses a locally
+         built compiler package; the ILCompiler targets offer this switch for the warning it raises. -->
+    <SuppressGenerateILCompilerExplicitPackageReferenceWarning>true</SuppressGenerateILCompilerExplicitPackageReferenceWarning>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.DotNet.ILCompiler; runtime.linux-arm64.Microsoft.DotNet.ILCompiler" Version="$(KosNetVersion)" />
-    <!-- The NativeAOT runtime (runtime libraries, framework) ships in this pack. The SDK would pick its own shipped
-         version of it, so restore the local one explicitly and point ILC at it below. -->
-    <PackageDownload Include="Microsoft.NETCore.App.Runtime.NativeAOT.linux-arm64" Version="[$(KosNetVersion)]" />
   </ItemGroup>
+
+  <!-- The NativeAOT runtime (runtime libraries, framework) ships in this pack. ProcessFrameworkReferences asks to
+       download the SDK's own version of it; download the local one instead and point ILC at it below. -->
+  <Target Name="_KosDownloadLocalNativeAotRuntimePack" AfterTargets="ProcessFrameworkReferences">
+    <ItemGroup>
+      <PackageDownload Condition="'%(Identity)' == 'Microsoft.NETCore.App.Runtime.NativeAOT.linux-arm64'">
+        <Version>[$(KosNetVersion)]</Version>
+      </PackageDownload>
+    </ItemGroup>
+  </Target>
 
   <PropertyGroup>
     <_KosNativeAotRuntimePack>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))microsoft.netcore.app.runtime.nativeaot.linux-arm64/$(KosNetVersion)/runtimes/linux-arm64/</_KosNativeAotRuntimePack>

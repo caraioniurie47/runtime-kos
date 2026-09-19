@@ -3,7 +3,7 @@
 # Modeled on the SDK's examples/hello. Build (QEMU) with the SDK's own cmake, which carries the
 # `platform` modules:
 #   $SDK/toolchain/bin/cmake -B build -D CMAKE_TOOLCHAIN_FILE=$SDK/toolchain/share/toolchain-aarch64-kos.cmake \
-#         -D HELLO_BINARY=<publish dir>/helloworldapp-kos [-D HOST_TCP_PORT=5047]
+#         -D HELLO_BINARY=<publish dir>/helloworldapp-kos [-D HOST_TCP_PORT=5047] [-D HOST_HTTP_PORT=8080]
 #   $SDK/toolchain/bin/cmake --build build --target kos-qemu-image   # or: sim, which also starts QEMU
 
 cmake_minimum_required (VERSION 3.25)
@@ -23,18 +23,27 @@ endif ()
 # The ROMFS entry keeps the file name; init.yaml.in's `path:` points Einit at it.
 get_filename_component (HELLO_BINARY_NAME "${HELLO_BINARY}" NAME)
 
-# Optional: forward this TCP port from the host (QEMU user networking) to the same port of the program, and
-# tell the program in HOST_TCP_PORT. The showcase then waits for one client from the host.
-set (HOST_TCP_PORT "" CACHE STRING "TCP port forwarded from the host to the program; empty: none")
-set (HOST_TCP_PORT_ENV "")
-set (HOST_TCP_PORT_QEMU "")
-if (HOST_TCP_PORT)
-    if (NOT HOST_TCP_PORT MATCHES "^[0-9]+$")
-        message (FATAL_ERROR "HOST_TCP_PORT must be a port number (got '${HOST_TCP_PORT}')")
+# Optional: forward a TCP port from the host (QEMU user networking) to the same port of the program, and tell
+# the program in an environment variable of the option's name. HOST_TCP_PORT: the showcase waits for one client
+# from the host. HOST_HTTP_PORT: webserver-kos serves HTTP on it.
+set (HOST_TCP_PORT "" CACHE STRING "TCP port forwarded from the host to the program for the showcase; empty: none")
+set (HOST_HTTP_PORT "" CACHE STRING "TCP port forwarded from the host to the program for webserver-kos; empty: none")
+set (HOST_PORTS_ENV "")
+set (HOST_PORTS_FWD "")
+foreach (option HOST_TCP_PORT HOST_HTTP_PORT)
+    if (${option})
+        if (NOT ${option} MATCHES "^[0-9]+$")
+            message (FATAL_ERROR "${option} must be a port number (got '${${option}}')")
+        endif ()
+        string (APPEND HOST_PORTS_ENV "\n    ${option}: \"${${option}}\"")
+        list (APPEND HOST_PORTS_FWD "hostfwd=tcp::${${option}}-:${${option}}")
     endif ()
-    set (HOST_TCP_PORT_ENV "HOST_TCP_PORT: \"${HOST_TCP_PORT}\"")
-    # Appended to the SDK's default `-nic user`.
-    set (HOST_TCP_PORT_QEMU QEMU_USER_NETWORK_FLAGS "hostfwd=tcp::${HOST_TCP_PORT}-:${HOST_TCP_PORT}")
+endforeach ()
+set (HOST_PORTS_QEMU "")
+if (HOST_PORTS_FWD)
+    # The SDK inserts this after its default `-nic user,`; several hostfwd rules are separated by commas.
+    list (JOIN HOST_PORTS_FWD "," HOST_PORTS_FWD)
+    set (HOST_PORTS_QEMU QEMU_USER_NETWORK_FLAGS "${HOST_PORTS_FWD}")
 endif ()
 
 # The SDK's prebuilt VFS programs serve files, stdout and sockets to the program over IPC; the program links the
@@ -72,7 +81,7 @@ build_kos_qemu_image (kos-qemu-image
                       EINIT_ENTITY EinitQemu
                       CONNECTIONS_CFG "src/init.yaml.in"
                       SECURITY_PSL "src/security.psl"
-                      ${HOST_TCP_PORT_QEMU}
+                      ${HOST_PORTS_QEMU}
                       IMAGE_FILES Hello NetInit precompiled_vfs::VfsRamFs precompiled_vfs::VfsNet)
 # An IMPORTED target cannot carry the dependency, so attach it to the image targets.
 add_dependencies (kos-qemu-image hello_edl_files)

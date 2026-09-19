@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A web server on KasperskyOS: System.Net.HttpListener serves a status page and a JSON endpoint. Published and
+       imaged like helloworldapp-kos; configure the image with -D HOST_HTTP_PORT=8080 to reach it from the host
+       (see HOWTO-KOS.md). -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net11.0: the ILCompiler targets built from main need the ILLink pack of this TFM. -->
+    <TargetFramework>net11.0</TargetFramework>
+    <!-- Version of the locally built packages in nuget.config's "local" feed. -->
+    <KosNetVersion>12.0.0-dev</KosNetVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StripSymbols>false</StripSymbols>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IlcToolsPath>/home/ilc-tools-main</IlcToolsPath>
+    <!-- The compiler comes from IlcToolsPath, not a host ILCompiler package; a cross-compile still needs this set
+         (Microsoft.NETCore.Native.Publish.targets), and it is otherwise read only for static ICU or OpenSSL linking. -->
+    <IlcHostPackagePath>$(IlcToolsPath)</IlcHostPackagePath>
+    <IlcVerboseLogging>false</IlcVerboseLogging>
+    <!-- KOS CE SDK 1.4 and later ship clang instead of GCC; SysRoot is <SDK>/sysroot-aarch64-kos. -->
+    <CppCompilerAndLinker Condition="'$(CppCompilerAndLinker)' == '' and Exists('$(SysRoot)/../toolchain/bin/aarch64-kos-clang++')">aarch64-kos-clang++</CppCompilerAndLinker>
+    <CppCompilerAndLinker Condition="'$(CppCompilerAndLinker)' == ''">aarch64-kos-g++</CppCompilerAndLinker>
+    <!-- The explicit ILCompiler reference below is how docs/workflow/building/coreclr/nativeaot.md uses a locally
+         built compiler package; the ILCompiler targets offer this switch for the warning it raises. -->
+    <SuppressGenerateILCompilerExplicitPackageReferenceWarning>true</SuppressGenerateILCompilerExplicitPackageReferenceWarning>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.DotNet.ILCompiler; runtime.linux-arm64.Microsoft.DotNet.ILCompiler" Version="$(KosNetVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The SDK's VFS client (libvfs_remote.a): sockets, files and stdout go to the VFS programs over IPC. Whole
+         archive, as the SDK's vfs::client target links it: it registers itself. Pair it with an image that has the
+         VFS programs, as kos-image/ does: without one, startup waits about 11 s for a VFS server before falling back
+         to the stub. -->
+    <LinkerArg Include="-Wl,--whole-archive,-lvfs_remote,--no-whole-archive" />
+  </ItemGroup>
+
+  <!-- The NativeAOT runtime (runtime libraries, framework) ships in this pack. ProcessFrameworkReferences asks to
+       download the SDK's own version of it; download the local one instead and point ILC at it below. -->
+  <Target Name="_KosDownloadLocalNativeAotRuntimePack" AfterTargets="ProcessFrameworkReferences">
+    <ItemGroup>
+      <PackageDownload Condition="'%(Identity)' == 'Microsoft.NETCore.App.Runtime.NativeAOT.linux-arm64'">
+        <Version>[$(KosNetVersion)]</Version>
+      </PackageDownload>
+    </ItemGroup>
+  </Target>
+
+  <PropertyGroup>
+    <_KosNativeAotRuntimePack>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))microsoft.netcore.app.runtime.nativeaot.linux-arm64/$(KosNetVersion)/runtimes/linux-arm64/</_KosNativeAotRuntimePack>
+    <IlcFrameworkPath>$(_KosNativeAotRuntimePack)lib/</IlcFrameworkPath>
+    <IlcFrameworkNativePath>$(_KosNativeAotRuntimePack)native/</IlcFrameworkNativePath>
+    <IlcSdkPath>$(IlcFrameworkNativePath)</IlcSdkPath>
+  </PropertyGroup>
+
+</Project>

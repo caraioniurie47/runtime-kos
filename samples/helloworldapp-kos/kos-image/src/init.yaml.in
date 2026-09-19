@@ -4,8 +4,7 @@ entities:
   path: @HELLO_BINARY_NAME@
   env:
     VFS_FILESYSTEM_BACKEND: client:kl.VfsRamFs
-    VFS_NETWORK_BACKEND: client:kl.VfsNet
-    @HOST_TCP_PORT_ENV@
+    VFS_NETWORK_BACKEND: client:kl.VfsNet@HOST_PORTS_ENV@
   connections:
   - target: kl.VfsRamFs
     id: kl.VfsRamFs

@@ -1,8 +1,8 @@
 # .NET NativeAOT on KasperskyOS: build and run the samples
 
 This branch ports the NativeAOT runtime of dotnet/runtime `main` to KasperskyOS Community Edition
-1.4.0.102 on arm64, and boots two C# samples under QEMU: `samples/helloworldapp-kos` and
-`samples/showcase-kos`. The build produces packages versioned `12.0.0-dev`; the samples target
+1.4.0.102 on arm64, and boots three C# samples under QEMU: `samples/helloworldapp-kos`,
+`samples/showcase-kos` and `samples/webserver-kos`. The build produces packages versioned `12.0.0-dev`; the samples target
 `net11.0`. The .NET 10 port (based on `release/10.0`) is on the branch `kos_changes`.
 
 | KasperskyOS CE SDK | Host | KasperskyOS compiler | Image built by |
@@ -261,6 +261,43 @@ The last line it prints is the summary, for example:
 SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 16421 ms
 ```
 
+## 11. The web server sample
+
+`samples/webserver-kos` serves a status page at `/` and the same figures as JSON at `/api/status`, with
+`System.Net.HttpListener`; the page refreshes its figures from the JSON every two seconds. It runs until QEMU is
+stopped. It uses the HelloWorld image project with `-D HOST_HTTP_PORT=8080`, which forwards that TCP port from
+the host (QEMU `hostfwd`) and tells the program to listen on it.
+
+### Publish the web server
+
+```sh
+cp -a /home/runtime-kos/samples/webserver-kos/. /home/webserver-kos/
+cd /home
+/home/runtime-kos/.dotnet/dotnet publish webserver-kos -o webserver-kos/dist -c Release -r linux-arm64 --self-contained \
+    -p:PublishAot=true -p:StaticExecutable=true -p:StaticallyLinked=true -p:TargetsKOS=true \
+    -p:SysRoot=$KOS_SDK/sysroot-aarch64-kos --packages webserver-pkg-kos
+$KOS_SDK/toolchain/bin/cmake -S /home/runtime-kos/samples/helloworldapp-kos/kos-image -B /home/webserver-kos-image \
+    -D CMAKE_TOOLCHAIN_FILE=$KOS_SDK/toolchain/share/toolchain-aarch64-kos.cmake \
+    -D HELLO_BINARY=/home/webserver-kos/dist/webserver-kos -D HOST_HTTP_PORT=8080
+$KOS_SDK/toolchain/bin/cmake --build /home/webserver-kos-image --target kos-qemu-image
+```
+
+### Run the web server
+
+```sh
+$KOS_SDK/toolchain/bin/cmake --build /home/webserver-kos-image --target sim
+```
+
+Once it prints
+
+```text
+webserver-kos: ready, open http://localhost:8080/ on the host
+```
+
+open `http://localhost:8080/` in a browser on Windows: WSL forwards the port to Windows' `localhost`. From a
+second WSL terminal, `curl http://localhost:8080/api/status` prints the JSON. Each request is logged on the
+KasperskyOS console.
+
 ## Limitations
 
 - **No hardware exceptions.** KasperskyOS delivers only `SIGTERM`, so the runtime registers no
@@ -278,7 +315,7 @@ SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 16421 ms
   socket event thread wakes at least every 10 ms, and a socket registered meanwhile is polled up to
   10 ms later. That `poll()` takes at most 512 descriptors per call; the port polls more in chunks,
   which nothing has exercised yet. The showcase runs `Socket`, `TcpListener`, `TcpClient` and `NetworkStream`, blocking and
-  `*Async`; UDP, and what is built on top such as `HttpClient`, were not tried. The image has no DNS or
+  `*Async`, and the web server sample runs `HttpListener`; UDP, and `HttpClient`, were not tried. The image has no DNS or
   `/etc/hosts`. On SDK 1.4.0.102 `recv()` fails with `EINVAL` for an 81920-byte buffer and works with
   65536 bytes, so System.Native asks for at most 65536 bytes per read. In an
   image with `VfsRamFs` but no `VfsNet`, the socket calls go to libc's stub: creating a socket throws

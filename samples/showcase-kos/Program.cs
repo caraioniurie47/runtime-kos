@@ -15,8 +15,11 @@ using System.Threading.Channels;
 // line, so one missing platform feature does not hide the rest. Output goes to stderr, which the
 // KasperskyOS console shows without a VFS program in the image; stdout and files need one.
 
+// First, for boot timelines: the KasperskyOS log's timestamps are UTC with milliseconds too.
+DateTime mainStarted = DateTime.UtcNow;
 TextWriter o = Console.Error;
 var total = Stopwatch.StartNew();
+o.WriteLine($"Main started {mainStarted:yyyy-MM-ddTHH:mm:ss.fff} UTC");
 int passed = 0, skipped = 0, failed = 0;
 bool invariantGlobalization = AppContext.TryGetSwitch("System.Globalization.Invariant", out bool invariant) && invariant;
 

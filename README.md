@@ -9,7 +9,8 @@ dotnet/runtime `main`; the .NET 10 port is on
 
 - [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt .NET 10 packages and a quick start
 - [HOWTO-KOS.md](HOWTO-KOS.md): build everything from source
-- Samples: [`samples/helloworldapp-kos`](samples/helloworldapp-kos) and [`samples/showcase-kos`](samples/showcase-kos)
+- Samples: [`samples/helloworldapp-kos`](samples/helloworldapp-kos), [`samples/showcase-kos`](samples/showcase-kos)
+  and [`samples/webserver-kos`](samples/webserver-kos)
 - KasperskyOS CE SDK 1.1.1.40 (GCC): the frozen branch
   [`kos-sdk-1.1.1.40`](https://github.com/caraioniurie47/runtime-kos/tree/kos-sdk-1.1.1.40)
 

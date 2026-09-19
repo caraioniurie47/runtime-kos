@@ -25,7 +25,9 @@
 #include "dbginterface.h"
 #include "argdestination.h"
 
-extern "C" void QCALLTYPE RuntimeFieldHandle_GetValue(FieldDesc* fieldDesc, QCall::ObjectHandleOnStack instance, QCall::TypeHandle fieldType, QCall::TypeHandle declaringType, BOOL* pIsClassInitialized, QCall::ObjectHandleOnStack result)
+#include "interpexec.h"
+
+extern "C" void QCALLTYPE RuntimeFieldHandle_GetValue(FieldDesc* fieldDesc, QCall::ObjectHandleOnStack instance, QCall::TypeHandle fieldType, QCall::TypeHandle declaringType, BOOL* pIsClassInitialized, QCall::ObjectHandleOnStack result, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -43,7 +45,7 @@ extern "C" void QCALLTYPE RuntimeFieldHandle_GetValue(FieldDesc* fieldDesc, QCal
     END_QCALL;
 }
 
-extern "C" void QCALLTYPE RuntimeFieldHandle_SetValue(FieldDesc* fieldDesc, QCall::ObjectHandleOnStack instance, QCall::ObjectHandleOnStack value, QCall::TypeHandle fieldType, QCall::TypeHandle declaringType, BOOL* pIsClassInitialized)
+extern "C" void QCALLTYPE RuntimeFieldHandle_SetValue(FieldDesc* fieldDesc, QCall::ObjectHandleOnStack instance, QCall::ObjectHandleOnStack value, QCall::TypeHandle fieldType, QCall::TypeHandle declaringType, BOOL* pIsClassInitialized, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -61,7 +63,7 @@ extern "C" void QCALLTYPE RuntimeFieldHandle_SetValue(FieldDesc* fieldDesc, QCal
     GCPROTECT_BEGIN(gc);
 
     TypeHandle fieldTypeHandle = fieldType.AsTypeHandle();
-    InvokeUtil::SetValidField(fieldTypeHandle.GetVerifierCorElementType(), fieldTypeHandle, fieldDesc, &gc.target, &gc.value, declaringType.AsTypeHandle(), pIsClassInitialized);
+    InvokeUtil::SetValidField(fieldTypeHandle.GetInternalCorElementType(), fieldTypeHandle, fieldDesc, &gc.target, &gc.value, declaringType.AsTypeHandle(), pIsClassInitialized);
 
     GCPROTECT_END();
     END_QCALL;
@@ -71,7 +73,8 @@ extern "C" void QCALLTYPE RuntimeTypeHandle_CreateInstanceForAnotherGenericParam
     QCall::TypeHandle pTypeHandle,
     TypeHandle* pInstArray,
     INT32 cInstArray,
-    QCall::ObjectHandleOnStack pInstantiatedObject
+    QCall::ObjectHandleOnStack pInstantiatedObject,
+    QCallExceptionStatus* qcallError
 )
 {
     CONTRACTL
@@ -116,7 +119,7 @@ extern "C" void QCALLTYPE RuntimeTypeHandle_CreateInstanceForAnotherGenericParam
     END_QCALL;
 }
 
-extern "C" void QCALLTYPE RuntimeTypeHandle_InternalAlloc(MethodTable* pMT, QCall::ObjectHandleOnStack allocated)
+extern "C" void QCALLTYPE RuntimeTypeHandle_InternalAlloc(MethodTable* pMT, QCall::ObjectHandleOnStack allocated, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -131,7 +134,7 @@ extern "C" void QCALLTYPE RuntimeTypeHandle_InternalAlloc(MethodTable* pMT, QCal
     END_QCALL;
 }
 
-extern "C" void QCALLTYPE RuntimeTypeHandle_InternalAllocNoChecks(MethodTable* pMT, QCall::ObjectHandleOnStack allocated)
+extern "C" void QCALLTYPE RuntimeTypeHandle_InternalAllocNoChecks(MethodTable* pMT, QCall::ObjectHandleOnStack allocated, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -206,11 +209,13 @@ protected:
     SIGNATURENATIVEREF * m_ppNativeSig;
     bool m_fHasThis;
 
+public:
     FORCEINLINE CorElementType GetReturnType(TypeHandle * pthValueType)
     {
         WRAPPER_NO_CONTRACT;
         return (*pthValueType = (*m_ppNativeSig)->GetReturnTypeHandle()).GetInternalCorElementType();
     }
+protected:
 
     FORCEINLINE CorElementType GetNextArgumentType(DWORD iArg, TypeHandle * pthValueType)
     {
@@ -223,12 +228,24 @@ protected:
         LIMITED_METHOD_CONTRACT;
     }
 
-    FORCEINLINE BOOL IsRegPassedStruct(MethodTable* pMT)
+    FORCEINLINE BOOL IsRegPassedStruct(TypeHandle th)
     {
-        return pMT->IsRegPassedStruct();
+        return th.AsMethodTable()->IsRegPassedStruct();
     }
 
+#if defined(UNIX_AMD64_ABI)
+    FORCEINLINE SystemVEightByteRegistersInfo GetEightByteRegistersInfo(TypeHandle th)
+    {
+        return th.AsMethodTable()->GetClass()->GetEightByteRegistersInfo();
+    }
+#endif // defined(UNIX_AMD64_ABI)
+
 public:
+    FORCEINLINE BOOL IsRetBuffPassedAsFirstArg()
+    {
+        return ::IsRetBuffPassedAsFirstArg();
+    }
+
     BOOL HasThis()
     {
         LIMITED_METHOD_CONTRACT;
@@ -313,12 +330,14 @@ extern "C" void QCALLTYPE RuntimeMethodHandle_InvokeMethod(
     PVOID* args, // An array of byrefs
     QCall::ObjectHandleOnStack pSig,
     BOOL fConstructor,
-    QCall::ObjectHandleOnStack result)
+    QCall::ObjectHandleOnStack result,
+    QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
     BEGIN_QCALL;
 
+    Thread * pThread = GetThread();
     GCX_COOP();
 
     struct
@@ -340,11 +359,6 @@ extern "C" void QCALLTYPE RuntimeMethodHandle_InvokeMethod(
     if (ownerType.IsSharedByGenericInstantiations())
     {
         COMPlusThrow(kNotSupportedException, W("NotSupported_Type"));
-    }
-
-    if (pMeth->IsAsyncMethod())
-    {
-        COMPlusThrow(kNotSupportedException, W("NotSupported_Async"));
     }
 
 #ifdef _DEBUG
@@ -387,8 +401,6 @@ extern "C" void QCALLTYPE RuntimeMethodHandle_InvokeMethod(
     // Note that SizeOfFrameArgumentArray does overflow checks with sufficient margin to prevent overflows here
     SIZE_T nAllocaSize = TransitionBlock::GetNegSpaceSize() + sizeof(TransitionBlock) + nStackBytes;
 
-    Thread * pThread = GET_THREAD();
-
     LPBYTE pAlloc = (LPBYTE)_alloca(nAllocaSize);
 
     LPBYTE pTransitionBlock = pAlloc + TransitionBlock::GetNegSpaceSize();
@@ -396,8 +408,7 @@ extern "C" void QCALLTYPE RuntimeMethodHandle_InvokeMethod(
     CallDescrData callDescrData;
 
     callDescrData.pSrc = pTransitionBlock + sizeof(TransitionBlock);
-    _ASSERTE((nStackBytes % TARGET_POINTER_SIZE) == 0);
-    callDescrData.numStackSlots = nStackBytes / TARGET_POINTER_SIZE;
+    callDescrData.numStackSlots = ALIGN_UP(nStackBytes, TARGET_REGISTER_SIZE) / TARGET_REGISTER_SIZE;
 #ifdef CALLDESCR_ARGREGS
     callDescrData.pArgumentRegisters = (ArgumentRegisters*)(pTransitionBlock + TransitionBlock::GetOffsetOfArgumentRegisters());
 #endif
@@ -411,16 +422,40 @@ extern "C" void QCALLTYPE RuntimeMethodHandle_InvokeMethod(
     callDescrData.dwRegTypeMap = 0;
 #endif
     callDescrData.fpReturnSize = argit.GetFPReturnSize();
+#ifdef TARGET_WASM
+    // WASM-TODO: this is now called from the interpreter, so the arguments layout is OK. reconsider with codegen
+    callDescrData.nArgsSize = nStackBytes;
+    callDescrData.hasThis = argit.HasThis();
+
+    TypeHandle thValueType;
+    CorElementType type = argit.GetReturnType(&thValueType);
+    DWORD retSize = 0;
+    if (type == ELEMENT_TYPE_TYPEDBYREF)
+    {
+        retSize = sizeof(TypedByRef);
+    }
+    else if (type == ELEMENT_TYPE_VALUETYPE)
+    {
+        retSize = thValueType.GetSize();
+    }
+
+    callDescrData.hasRetBuff = retSize > sizeof(callDescrData.returnValue);
+#endif // TARGET_WASM
 
     // This is duplicated logic from MethodDesc::GetCallTarget
     PCODE pTarget;
-    if (pMeth->IsVtableMethod())
     {
-        pTarget = pMeth->GetSingleCallableAddrOfVirtualizedCode(&gc.target, ownerType);
-    }
-    else
-    {
-        pTarget = pMeth->GetSingleCallableAddrOfCode();
+        if (pMeth->IsVtableMethod())
+        {
+            MethodTable *pMT = gc.target->GetMethodTable();
+            GCX_PREEMP();
+            pTarget = pMeth->GetSingleCallableAddrOfVirtualizedCode(&gc.target, pMT, ownerType);
+        }
+        else
+        {
+            GCX_PREEMP();
+            pTarget = pMeth->GetSingleCallableAddrOfCode();
+        }
     }
     callDescrData.pTarget = pTarget;
 
@@ -439,7 +474,11 @@ extern "C" void QCALLTYPE RuntimeMethodHandle_InvokeMethod(
     TypeHandle retTH = gc.pSig->GetReturnTypeHandle();
 
     TypeHandle refReturnTargetTH;  // Valid only if retType == ELEMENT_TYPE_BYREF. Caches the TypeHandle of the byref target.
+#ifdef TARGET_WASM
+    BOOL fHasRetBuffArg = callDescrData.hasRetBuff;
+#else
     BOOL fHasRetBuffArg = argit.HasRetBuffArg();
+#endif
     CorElementType retType = retTH.GetSignatureCorElementType();
     BOOL hasValueTypeReturn = retTH.IsValueType() && retType != ELEMENT_TYPE_VOID;
     _ASSERTE(hasValueTypeReturn || !fHasRetBuffArg); // only valuetypes are returned via a return buffer.
@@ -524,7 +563,11 @@ extern "C" void QCALLTYPE RuntimeMethodHandle_InvokeMethod(
         // buffer which will be copied to gc.retVal later.
         pLocalRetBuf = _alloca(localRetBufSize);
         ZeroMemory(pLocalRetBuf, localRetBufSize);
+#ifdef TARGET_WASM
+        callDescrData.pRetBuffArg = reinterpret_cast<decltype(callDescrData.pRetBuffArg)>(pLocalRetBuf);
+#else
         *((LPVOID*) (pTransitionBlock + argit.GetRetBuffArgOffset())) = pLocalRetBuf;
+#endif
         if (pMT->ContainsGCPointers())
         {
             pValueClasses = new (_alloca(sizeof(ValueClassInfo))) ValueClassInfo(pLocalRetBuf, pMT, pValueClasses);
@@ -693,8 +736,28 @@ Done:
 }
 
 struct SkipStruct {
-    StackCrawlMark* pStackMark;
-    MethodDesc*     pMeth;
+    SkipStruct(StackCrawlMark* mark, PTR_Thread thread) :
+        pStackMark(mark)
+#ifdef FEATURE_INTERPRETER
+        // Since the interpreter has its own stack, we need to get a pointer which can be compared on the real
+        // stack so that IsInCalleesFrames can work correctly.
+        , stackMarkOnOSStack(ConvertStackMarkToPointerOnOSStack(thread, mark))
+#endif
+    {
+    }
+    StackCrawlMark* const pStackMark;
+#ifdef FEATURE_INTERPRETER
+    PTR_VOID const stackMarkOnOSStack;
+#endif
+    PTR_VOID GetStackMarkPointerToCheckAgainstStack()
+    {
+#ifdef FEATURE_INTERPRETER
+        return stackMarkOnOSStack;
+#else
+        return (PTR_VOID)pStackMark;
+#endif
+    }
+    MethodDesc*     pMeth = NULL;
 };
 
 // This method is called by the GetMethod function and will crawl backward
@@ -722,7 +785,7 @@ static StackWalkAction SkipMethods(CrawlFrame* frame, VOID* data) {
     // which frame the stack mark was in one frame later. This is
     // fine since we only implement LookForMyCaller.
     _ASSERTE(*pSkip->pStackMark == LookForMyCaller);
-    if (!frame->IsInCalleesFrames(pSkip->pStackMark))
+    if (!frame->IsInCalleesFrames(pSkip->GetStackMarkPointerToCheckAgainstStack()))
         return SWA_CONTINUE;
 
     pSkip->pMeth = pFunc;
@@ -730,7 +793,7 @@ static StackWalkAction SkipMethods(CrawlFrame* frame, VOID* data) {
 }
 
 // Return the MethodInfo that represents the current method (two above this one)
-extern "C" MethodDesc* QCALLTYPE MethodBase_GetCurrentMethod(QCall::StackCrawlMarkHandle stackMark) {
+extern "C" MethodDesc* QCALLTYPE MethodBase_GetCurrentMethod(QCall::StackCrawlMarkHandle stackMark, QCallExceptionStatus* qcallError) {
 
     QCALL_CONTRACT;
 
@@ -738,10 +801,9 @@ extern "C" MethodDesc* QCALLTYPE MethodBase_GetCurrentMethod(QCall::StackCrawlMa
 
     BEGIN_QCALL;
 
-    SkipStruct skip;
-    skip.pStackMark = stackMark;
-    skip.pMeth = 0;
-    GetThread()->StackWalkFrames(SkipMethods, &skip, FUNCTIONSONLY | LIGHTUNWIND);
+    PTR_Thread pThread = GetThread();
+    SkipStruct skip(stackMark, pThread);
+    pThread->StackWalkFrames(SkipMethods, &skip, FUNCTIONSONLY | LIGHTUNWIND);
 
     // If C<Foo>.m<Bar> was called, the stack walker returns C<__Canon>.m<__Canon>. We cannot
     // get know that the instantiation used Foo or Bar at that point. So the next best thing
@@ -780,7 +842,7 @@ static OBJECTREF DirectObjectFieldGet(FieldDesc *pField, TypeHandle fieldType, T
     return refRet;
 }
 
-extern "C" void QCALLTYPE RuntimeFieldHandle_GetValueDirect(FieldDesc* fieldDesc, TypedByRef *pTarget, QCall::TypeHandle fieldTypeHandle, QCall::TypeHandle declaringTypeHandle, QCall::ObjectHandleOnStack result)
+extern "C" void QCALLTYPE RuntimeFieldHandle_GetValueDirect(FieldDesc* fieldDesc, TypedByRef *pTarget, QCall::TypeHandle fieldTypeHandle, QCall::TypeHandle declaringTypeHandle, QCall::ObjectHandleOnStack result, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -885,7 +947,7 @@ static void DirectObjectFieldSet(FieldDesc *pField, TypeHandle fieldType, TypeHa
     GCPROTECT_END();
 }
 
-extern "C" void QCALLTYPE RuntimeFieldHandle_SetValueDirect(FieldDesc* fieldDesc, TypedByRef *pTarget, QCall::ObjectHandleOnStack newValue, QCall::TypeHandle fieldTypeHandle, QCall::TypeHandle declaringType)
+extern "C" void QCALLTYPE RuntimeFieldHandle_SetValueDirect(FieldDesc* fieldDesc, TypedByRef *pTarget, QCall::ObjectHandleOnStack newValue, QCall::TypeHandle fieldTypeHandle, QCall::TypeHandle declaringType, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -1129,7 +1191,7 @@ FCIMPLEND
 
 // Returns the address of the EnC instance field in the object (This is an interior
 // pointer and the caller has to use it appropriately) or an EnC static field.
-extern "C" void* QCALLTYPE RuntimeFieldHandle_GetEnCFieldAddr(QCall::ObjectHandleOnStack target, FieldDesc* pFD)
+extern "C" void* QCALLTYPE RuntimeFieldHandle_GetEnCFieldAddr(QCall::ObjectHandleOnStack target, FieldDesc* pFD, QCallExceptionStatus* qcallError)
 {
     CONTRACTL
     {
@@ -1156,7 +1218,7 @@ extern "C" void* QCALLTYPE RuntimeFieldHandle_GetEnCFieldAddr(QCall::ObjectHandl
     return ret;
 }
 
-extern "C" BOOL QCALLTYPE RuntimeFieldHandle_GetRVAFieldInfo(FieldDesc* pField, void** address, UINT* size)
+extern "C" BOOL QCALLTYPE RuntimeFieldHandle_GetRVAFieldInfo(FieldDesc* pField, void** address, UINT* size, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -1176,7 +1238,7 @@ extern "C" BOOL QCALLTYPE RuntimeFieldHandle_GetRVAFieldInfo(FieldDesc* pField, 
     return ret;
 }
 
-extern "C" void QCALLTYPE RuntimeFieldHandle_GetFieldDataReference(FieldDesc* pField, QCall::ObjectHandleOnStack instance, QCall::ByteRefOnStack fieldDataRef)
+extern "C" void QCALLTYPE RuntimeFieldHandle_GetFieldDataReference(FieldDesc* pField, QCall::ObjectHandleOnStack instance, QCall::ByteRefOnStack fieldDataRef, QCallExceptionStatus* qcallError)
 {
     CONTRACTL
     {
@@ -1195,15 +1257,18 @@ extern "C" void QCALLTYPE RuntimeFieldHandle_GetFieldDataReference(FieldDesc* pF
     END_QCALL;
 }
 
-extern "C" void QCALLTYPE ReflectionInvocation_CompileMethod(MethodDesc * pMD)
+extern "C" void QCALLTYPE ReflectionInvocation_CompileMethod(MethodDesc * pMD, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
     // Argument is checked on the managed side
     PRECONDITION(pMD != NULL);
 
-    if (!pMD->IsPointingToPrestub())
+    if (!pMD->ShouldCallPrestub())
+    {
+        *qcallError = 0;
         return;
+    }
 
     BEGIN_QCALL;
     pMD->DoPrestub(NULL);
@@ -1211,18 +1276,24 @@ extern "C" void QCALLTYPE ReflectionInvocation_CompileMethod(MethodDesc * pMD)
 }
 
 // This method triggers the class constructor for a give type
-extern "C" void QCALLTYPE ReflectionInvocation_RunClassConstructor(QCall::TypeHandle pType)
+extern "C" void QCALLTYPE ReflectionInvocation_RunClassConstructor(QCall::TypeHandle pType, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
     TypeHandle typeHnd = pType.AsTypeHandle();
     if (typeHnd.IsTypeDesc())
+    {
+        *qcallError = 0;
         return;
+    }
 
     MethodTable *pMT = typeHnd.AsMethodTable();
     // The ContainsGenericVariables check is to preserve back-compat where we assume the generic type is already initialized
     if (pMT->IsClassInited() || pMT->ContainsGenericVariables())
+    {
+        *qcallError = 0;
         return;
+    }
 
     BEGIN_QCALL;
     pMT->CheckRestore();
@@ -1232,13 +1303,16 @@ extern "C" void QCALLTYPE ReflectionInvocation_RunClassConstructor(QCall::TypeHa
 }
 
 // This method triggers the module constructor for a given module
-extern "C" void QCALLTYPE ReflectionInvocation_RunModuleConstructor(QCall::ModuleHandle pModule)
+extern "C" void QCALLTYPE ReflectionInvocation_RunModuleConstructor(QCall::ModuleHandle pModule, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
     Assembly *pAssembly = pModule->GetAssembly();
     if (pAssembly != NULL && pAssembly->IsActive())
+    {
+        *qcallError = 0;
         return;
+    }
 
     BEGIN_QCALL;
     pAssembly->EnsureActive();
@@ -1249,22 +1323,36 @@ static void PrepareMethodHelper(MethodDesc * pMD)
 {
     STANDARD_VM_CONTRACT;
 
-    pMD->EnsureActive();
+    // If a MethodImpl (.override) has remapped this method's vtable slot to a
+    // different method, prepare the method that actually owns the slot's code
+    // (the impl), not the decl. This mirrors getFunctionEntryPoint, which resolves
+    // direct calls the same way.
+    if (pMD->IsVtableSlot())
+        pMD = MethodTable::MapMethodDeclToMethodImpl(pMD);
 
-    if (pMD->IsPointingToPrestub())
-        pMD->DoPrestub(NULL);
+    pMD->EnsureActive();
 
     if (pMD->IsWrapperStub())
     {
-        pMD = pMD->GetWrappedMethodDesc();
-        if (pMD->IsPointingToPrestub())
+        if (pMD->ShouldCallPrestub())
             pMD->DoPrestub(NULL);
+        pMD = pMD->GetWrappedMethodDesc();
     }
+
+    if (pMD->IsAsyncThunkMethod())
+    {
+        if (pMD->ShouldCallPrestub())
+            pMD->DoPrestub(NULL);
+        pMD = pMD->GetAsyncVariant();
+    }
+
+    if (pMD->ShouldCallPrestub())
+        pMD->DoPrestub(NULL);
 }
 
 // This method triggers a given method to be jitted. CoreCLR implementation of this method triggers jiting of the given method only.
 // It does not walk a subset of callgraph to provide CER guarantees.
-extern "C" void QCALLTYPE ReflectionInvocation_PrepareMethod(MethodDesc *pMD, TypeHandle *pInstantiation, UINT32 cInstantiation)
+extern "C" void QCALLTYPE ReflectionInvocation_PrepareMethod(MethodDesc *pMD, TypeHandle *pInstantiation, UINT32 cInstantiation, QCallExceptionStatus* qcallError)
 {
     CONTRACTL
     {
@@ -1317,7 +1405,7 @@ extern "C" void QCALLTYPE ReflectionInvocation_PrepareMethod(MethodDesc *pMD, Ty
 // This method triggers target of a given method to be jitted.
 // In the case of a multi-cast delegate, we rely on the fact that each individual component
 // was prepared prior to the Combine.
-extern "C" void QCALLTYPE ReflectionInvocation_PrepareDelegate(QCall::ObjectHandleOnStack delegate)
+extern "C" void QCALLTYPE ReflectionInvocation_PrepareDelegate(QCall::ObjectHandleOnStack delegate, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -1348,6 +1436,23 @@ FCIMPL0(FC_BOOL_RET, ReflectionInvocation::TryEnsureSufficientExecutionStack)
 	UINT_PTR current = reinterpret_cast<UINT_PTR>(&pThread);
 	UINT_PTR limit = pThread->GetCachedStackSufficientExecutionLimit();
 
+#ifdef FEATURE_INTERPRETER
+    InterpThreadContext* pInterpThreadContext = pThread->GetInterpThreadContext();
+    if (pInterpThreadContext != nullptr)
+    {
+        // The interpreter has its own stack, so we need to check against that too.
+#ifdef HOST_64BIT
+        const UINT_PTR MinExecutionStackSize = 128 * 1024;
+#else // !HOST_64BIT
+        const UINT_PTR MinExecutionStackSize = 64 * 1024;
+#endif // HOST_64BIT
+        if (pInterpThreadContext->pStackPointer >= pInterpThreadContext->pStackEnd - MinExecutionStackSize)
+        {
+            FC_RETURN_BOOL(FALSE);
+        }
+    }
+#endif // FEATURE_INTERPRETER
+
 	FC_RETURN_BOOL(current >= limit);
 }
 FCIMPLEND
@@ -1362,7 +1467,8 @@ extern "C" void QCALLTYPE ReflectionInvocation_InvokeDispMethod(
     QCall::ObjectHandleOnStack byrefModifiers,
     LCID lcid,
     QCall::ObjectHandleOnStack namedParameters,
-    QCall::ObjectHandleOnStack result)
+    QCall::ObjectHandleOnStack result,
+    QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -1423,7 +1529,7 @@ extern "C" void QCALLTYPE ReflectionInvocation_InvokeDispMethod(
     END_QCALL;
 }
 
-extern "C" void QCALLTYPE ReflectionInvocation_GetComObjectGuid(QCall::ObjectHandleOnStack type, GUID* result)
+extern "C" void QCALLTYPE ReflectionInvocation_GetComObjectGuid(QCall::ObjectHandleOnStack type, GUID* result, QCallExceptionStatus* qcallError)
 {
     CONTRACTL
     {
@@ -1456,7 +1562,7 @@ extern "C" void QCALLTYPE ReflectionInvocation_GetComObjectGuid(QCall::ObjectHan
 }
 #endif // FEATURE_COMINTEROP
 
-extern "C" void QCALLTYPE ReflectionInvocation_GetGuid(MethodTable* pMT, GUID* result)
+extern "C" void QCALLTYPE ReflectionInvocation_GetGuid(MethodTable* pMT, GUID* result, QCallExceptionStatus* qcallError)
 {
     CONTRACTL
     {
@@ -1568,7 +1674,8 @@ extern "C" void QCALLTYPE RuntimeTypeHandle_GetActivationInfo(
     void** pvAllocatorFirstArg,
     PCODE* ppfnRefCtor,
     PCODE* ppfnValueCtor,
-    BOOL* pfCtorIsPublic
+    BOOL* pfCtorIsPublic,
+    QCallExceptionStatus* qcallError
 )
 {
     CONTRACTL
@@ -1705,7 +1812,7 @@ extern "C" void QCALLTYPE RuntimeTypeHandle_GetActivationInfo(
  * Given a ComClassFactory*, calls the COM allocator
  * and returns a RCW.
  */
-extern "C" void QCALLTYPE RuntimeTypeHandle_AllocateComObject(void* pClassFactory, QCall::ObjectHandleOnStack result)
+extern "C" void QCALLTYPE RuntimeTypeHandle_AllocateComObject(void* pClassFactory, QCall::ObjectHandleOnStack result, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -1737,7 +1844,8 @@ extern "C" void QCALLTYPE RuntimeTypeHandle_AllocateComObject(void* pClassFactor
 extern "C" void QCALLTYPE ReflectionSerialization_GetCreateUninitializedObjectInfo(
     QCall::TypeHandle pType,
     PCODE* ppfnAllocator,
-    void** pvAllocatorFirstArg)
+    void** pvAllocatorFirstArg,
+    QCallExceptionStatus* qcallError)
 {
     CONTRACTL
     {
@@ -1789,7 +1897,7 @@ struct TempEnumValue
     UINT64 value;
 };
 
-extern "C" void QCALLTYPE Enum_GetValuesAndNames(QCall::TypeHandle pEnumType, QCall::ObjectHandleOnStack pReturnValues, QCall::ObjectHandleOnStack pReturnNames, BOOL fGetNames)
+extern "C" void QCALLTYPE Enum_GetValuesAndNames(QCall::TypeHandle pEnumType, QCall::ObjectHandleOnStack pReturnValues, QCall::ObjectHandleOnStack pReturnNames, BOOL fGetNames, QCallExceptionStatus* qcallError)
 {
     QCALL_CONTRACT;
 
@@ -1840,8 +1948,8 @@ extern "C" void QCALLTYPE Enum_GetValuesAndNames(QCall::TypeHandle pEnumType, QC
         _ASSERTE(defaultValue.m_bType != ELEMENT_TYPE_STRING); // Strings in metadata are little-endian.
 
         // The following code assumes that the address of all union members is the same.
-        static_assert_no_msg(offsetof(MDDefaultValue, m_byteValue) == offsetof(MDDefaultValue, m_usValue));
-        static_assert_no_msg(offsetof(MDDefaultValue, m_ulValue) == offsetof(MDDefaultValue, m_ullValue));
+        static_assert(offsetof(MDDefaultValue, m_byteValue) == offsetof(MDDefaultValue, m_usValue));
+        static_assert(offsetof(MDDefaultValue, m_ulValue) == offsetof(MDDefaultValue, m_ullValue));
         temp.value = defaultValue.m_ullValue;
 
         temps.Append(temp);
@@ -1911,7 +2019,8 @@ extern "C" void QCALLTYPE ReflectionInvocation_GetBoxInfo(
     PCODE* ppfnAllocator,
     void** pvAllocatorFirstArg,
     int32_t* pValueOffset,
-    uint32_t* pValueSize)
+    uint32_t* pValueSize,
+    QCallExceptionStatus* qcallError)
 {
     CONTRACTL
     {
@@ -1932,7 +2041,7 @@ extern "C" void QCALLTYPE ReflectionInvocation_GetBoxInfo(
 
     MethodTable* pMT = type.AsMethodTable();
 
-    _ASSERTE(pMT->IsValueType() || pMT->IsNullable() || pMT->IsEnum() || pMT->IsTruePrimitive());
+    _ASSERTE(pMT->IsValueType());
 
     *pValueOffset = 0;
 

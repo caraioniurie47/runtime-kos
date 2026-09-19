@@ -10,6 +10,7 @@ using System.Reflection.Runtime.General;
 using System.Reflection.Runtime.ParameterInfos;
 using System.Reflection.Runtime.TypeInfos;
 
+using Internal.Metadata.NativeFormat;
 using Internal.Reflection.Core.Execution;
 
 namespace System.Reflection.Runtime.MethodInfos
@@ -41,13 +42,9 @@ namespace System.Reflection.Runtime.MethodInfos
             }
         }
 
-        public sealed override IEnumerable<CustomAttributeData> CustomAttributes
-        {
-            get
-            {
-                return _genericMethodDefinition.CustomAttributes;
-            }
-        }
+        internal sealed override MetadataReader? GetMetadataReader() => _genericMethodDefinition.GetMetadataReader();
+
+        internal sealed override CustomAttributeHandleCollection GetCustomAttributeHandles() => _genericMethodDefinition.GetCustomAttributeHandles();
 
         public sealed override bool HasSameMetadataDefinitionAs(MemberInfo other)
         {
@@ -72,7 +69,17 @@ namespace System.Reflection.Runtime.MethodInfos
 
         public sealed override int GetHashCode()
         {
-            return _genericMethodDefinition.GetHashCode();
+            var hashcode = default(HashCode);
+
+            hashcode.Add(_genericMethodDefinition);
+            hashcode.Add(_genericTypeArguments.Length);
+
+            for (int i = 0; i < _genericTypeArguments.Length; i++)
+            {
+                hashcode.Add(_genericTypeArguments[i]);
+            }
+
+            return hashcode.ToHashCode();
         }
 
         internal sealed override int GenericParameterCount => _genericMethodDefinition.GenericParameterCount;

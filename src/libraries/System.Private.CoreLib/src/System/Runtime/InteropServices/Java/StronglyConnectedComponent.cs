@@ -5,6 +5,10 @@ using System.Runtime.Versioning;
 
 namespace System.Runtime.InteropServices.Java
 {
+    /// <summary>
+    /// Represents a strongly connected component of managed objects
+    /// referenced for cross-reference processing.
+    /// </summary>
     [CLSCompliant(false)]
     [SupportedOSPlatform("android")]
     [StructLayout(LayoutKind.Sequential)]
@@ -19,6 +23,7 @@ namespace System.Runtime.InteropServices.Java
         /// Contains pointers to context passed during
         /// creation of each GCHandle.
         /// </summary>
+        /// <safety>Reading or writing this field only copies a pointer value; it never dereferences the pointed-to memory. The sequential-layout struct overlaps no managed reference, and the field holds caller-supplied context pointers rather than any runtime-internal structure.</safety>
         public void** Contexts;
     }
 }

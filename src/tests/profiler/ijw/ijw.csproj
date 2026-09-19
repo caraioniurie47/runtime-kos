@@ -4,8 +4,8 @@
     <OutputType>exe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CrossGenTest>false</CrossGenTest>
-    <!-- IJW / C++/CLI tests are Windows-only and aren't enabled on ARM64 in .NET 10 -->
-    <CLRTestTargetUnsupported Condition="'$(TargetsWindows)' != 'true' or '$(TargetArchitecture)' == 'arm64'">true</CLRTestTargetUnsupported>
+    <!-- IJW / C++/CLI is Windows-only -->
+    <CLRTestTargetUnsupported Condition="'$(TargetsWindows)' != 'true'">true</CLRTestTargetUnsupported>
     <!-- IJW assemblies contain native code that cannot be round-tripped through ilasm -->
     <IlasmRoundTripIncompatible>true</IlasmRoundTripIncompatible>
     <!-- The test launches a secondary process; loading IJW assemblies into an

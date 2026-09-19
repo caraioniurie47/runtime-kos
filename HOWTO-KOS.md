@@ -1,8 +1,9 @@
 # .NET NativeAOT on KasperskyOS: build and run the samples
 
-This branch ports the .NET 10 NativeAOT runtime (based on `release/10.0`) to KasperskyOS Community
-Edition 1.4.0.102 on arm64, and boots two C# samples under QEMU: `samples/helloworldapp-kos` and
-`samples/showcase-kos`.
+This branch ports the NativeAOT runtime of dotnet/runtime `main` to KasperskyOS Community Edition
+1.4.0.102 on arm64, and boots two C# samples under QEMU: `samples/helloworldapp-kos` and
+`samples/showcase-kos`. The build produces packages versioned `12.0.0-dev`; the samples target
+`net11.0`. The .NET 10 port (based on `release/10.0`) is on the branch `kos_changes`.
 
 | KasperskyOS CE SDK | Host | KasperskyOS compiler | Image built by |
 | --- | --- | --- | --- |
@@ -32,7 +33,21 @@ wsl -d UbuntuKOS -u root
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
-apt-get install -y --no-install-recommends build-essential clang llvm lld lldb cmake python-is-python3 curl wget git gdebi-core unzip file ca-certificates libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev zlib1g-dev ninja-build cpio pigz
+apt-get install -y --no-install-recommends build-essential clang llvm lld lldb python-is-python3 curl wget git gdebi-core unzip file ca-certificates libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev zlib1g-dev ninja-build cpio pigz
+```
+
+### CMake
+
+`main` needs CMake 3.26 or later; Ubuntu 22.04's `apt` has 3.22. Kitware's portable build goes to
+`/opt`, linked from `/usr/local/bin`, which comes before `/usr/bin` on `PATH`.
+
+```sh
+cd /home
+wget -nc https://github.com/Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-linux-x86_64.tar.gz
+tar -xzf cmake-3.31.12-linux-x86_64.tar.gz -C /opt
+for t in cmake ctest cpack; do ln -sf /opt/cmake-3.31.12-linux-x86_64/bin/$t /usr/local/bin/$t; done
+hash -r
+cmake --version
 ```
 
 ## 3. Install the KasperskyOS CE SDK
@@ -55,9 +70,9 @@ export KOS_SDK=/opt/KasperskyOS-Community-Edition-Qemu-1.4.0.102
 
 ## 4. Build environment
 
-`NuGetAudit=false`: `release/10.0` pins `Microsoft.DiaSymReader.Native` 17.12.0-beta1.24603.5, which
-NuGet's vulnerability audit now fails as an error during restore. The package only carries Windows
-DLLs.
+`NuGetAudit=false`: on `release/10.0`, NuGet's vulnerability audit failed restore with an error on the
+pinned `Microsoft.DiaSymReader.Native` beta, a package carrying only Windows DLLs. The `main` builds
+kept the setting and were not tried without it.
 
 ```sh
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
@@ -97,19 +112,19 @@ mkdir -p /home/icu4c-build-kos && cd /home/icu4c-build-kos
 
 ```sh
 cd /home
-git clone --depth 1 --branch kos_changes https://github.com/caraioniurie47/runtime-kos.git
+git clone --depth 1 --branch kos-main https://github.com/caraioniurie47/runtime-kos.git
 find /home/runtime-kos -name "*.sh" -exec chmod +x {} +
 ```
 
 ## 6. Build ilc-tools (host compiler)
 
-The samples' `IlcToolsPath` is `/home/ilc-tools-10`.
+The samples' `IlcToolsPath` is `/home/ilc-tools-main`.
 
 ```sh
 cd /home/runtime-kos
 ./build.sh -s clr.alljits+clr.tools -c Release
-mkdir -p /home/ilc-tools-10
-cp -a artifacts/bin/coreclr/linux.x64.Release/ilc-published/. /home/ilc-tools-10/
+mkdir -p /home/ilc-tools-main
+cp -a artifacts/bin/coreclr/linux.x64.Release/ilc-published/. /home/ilc-tools-main/
 git clean -ffdx
 ```
 
@@ -139,13 +154,15 @@ ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.aottools+packs.aot -c release --cross --ko
 The packages go to the feed that the samples' `nuget.config` names:
 
 ```sh
-mkdir -p /home/kos-net-packages-10
-cp -a /home/runtime-kos/artifacts/packages/Release/Shipping/. /home/kos-net-packages-10/
+mkdir -p /home/kos-net-packages-main
+cp -a /home/runtime-kos/artifacts/packages/Release/Shipping/. /home/kos-net-packages-main/
 ```
 
 ## 8. Publish HelloWorld
 
-The sample links with `aarch64-kos-clang++` from the SDK next to `SysRoot`.
+The sample links with `aarch64-kos-clang++` from the SDK next to `SysRoot`. Besides the local feed and
+nuget.org, its `nuget.config` lists the `dotnet11` feed: the repo's SDK restores runtime and
+ILCompiler packs of its own build, which nuget.org does not carry.
 
 ```sh
 cp -a /home/runtime-kos/samples/helloworldapp-kos/. /home/helloworldapp-kos/

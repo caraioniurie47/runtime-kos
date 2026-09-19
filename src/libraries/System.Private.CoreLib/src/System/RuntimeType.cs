@@ -90,7 +90,7 @@ namespace System
                 members = GetMember(defaultMemberName);
             }
 
-            return members ?? Array.Empty<MemberInfo>();
+            return members ?? [];
         }
 
         private static bool IsFullNameRoundtripCompatible(RuntimeType runtimeType)
@@ -682,11 +682,11 @@ namespace System
                 }
 
                 finalists ??= [finalist];
-                providedArgs ??= Array.Empty<object>();
+                providedArgs ??= [];
                 object? state = null;
                 MethodBase? invokeMethod = null;
 
-                try { invokeMethod = binder.BindToMethod(bindingFlags, finalists, ref providedArgs!, modifiers, culture, namedParams, out state); }
+                try { invokeMethod = binder.BindToMethod(bindingFlags, finalists, ref providedArgs, modifiers, culture, namedParams, out state); }
                 catch (MissingMethodException) { }
 
                 if (invokeMethod == null)

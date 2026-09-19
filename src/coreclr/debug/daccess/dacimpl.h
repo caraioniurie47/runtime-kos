@@ -16,8 +16,6 @@
 #include <minipal/mutex.h>
 #include "gcinterface.dac.h"
 //---------------------------------------------------------------------------------------
-// Setting DAC_HASHTABLE tells the DAC to use the hand rolled hashtable for
-// storing code:DAC_INSTANCE .  Otherwise, the DAC uses SHash.
 extern minipal_mutex g_dacMutex;
 
 // Convert between CLRDATA_ADDRESS and TADDR.
@@ -48,7 +46,7 @@ inline TADDR CLRDATA_ADDRESS_TO_TADDR(CLRDATA_ADDRESS cdAddr)
 {
     SUPPORTS_DAC;
 #ifndef HOST_64BIT
-    static_assert_no_msg(sizeof(TADDR)==sizeof(UINT));
+    static_assert(sizeof(TADDR)==sizeof(UINT));
     INT64 iSignedAddr = (INT64)cdAddr;
     if (iSignedAddr > INT_MAX || iSignedAddr < INT_MIN)
     {
@@ -65,7 +63,7 @@ inline HRESULT TRY_CLRDATA_ADDRESS_TO_TADDR(CLRDATA_ADDRESS cdAddr, TADDR* pOutT
 {
     SUPPORTS_DAC;
 #ifndef HOST_64BIT
-    static_assert_no_msg(sizeof(TADDR)==sizeof(UINT));
+    static_assert(sizeof(TADDR)==sizeof(UINT));
     INT64 iSignedAddr = (INT64)cdAddr;
     if (iSignedAddr > INT_MAX || iSignedAddr < INT_MIN)
     {
@@ -82,7 +80,7 @@ inline TADDR CORDB_ADDRESS_TO_TADDR(CORDB_ADDRESS cdbAddr)
 {
     SUPPORTS_DAC;
 #ifndef HOST_64BIT
-    static_assert_no_msg(sizeof(TADDR)==sizeof(UINT));
+    static_assert(sizeof(TADDR)==sizeof(UINT));
     if (cdbAddr > UINT_MAX)
     {
         _ASSERTE_MSG(false, "CORDB_ADDRESS out of range for this platform");
@@ -615,13 +613,7 @@ struct DAC_INSTANCE_PUSH
 // Not all the way down to the LSB, though, as there generally
 // won't be individual accesses at the byte level.  Assume that
 // most accesses will be natural-word aligned.
-#define DAC_INSTANCE_HASH_BITS 10
 #define DAC_INSTANCE_HASH_SHIFT 2
-
-#define DAC_INSTANCE_HASH(addr) \
-    (((ULONG32)(ULONG_PTR)(addr) >> DAC_INSTANCE_HASH_SHIFT) & \
-     ((1 << DAC_INSTANCE_HASH_BITS) - 1))
-#define DAC_INSTANCE_HASH_SIZE (1 << DAC_INSTANCE_HASH_BITS)
 
 
 struct DumpMemoryReportStatics
@@ -674,50 +666,15 @@ private:
         m_blockMemUsage = 0;
         m_numInst = 0;
         m_instMemUsage = 0;
-#ifdef DAC_HASHTABLE
-        ZeroMemory(m_hash, sizeof(m_hash));
-#endif
         m_superseded = NULL;
         m_instPushed = NULL;
     }
-
-#if defined(DAC_HASHTABLE)
-
-    typedef struct _HashInstanceKey {
-        TADDR addr;
-        DAC_INSTANCE* instance;
-    } HashInstanceKey;
-
-    typedef struct _HashInstanceKeyBlock {
-        // Blocks are chained in reverse order of allocation so that the most recently allocated
-        // block is searched first.
-        _HashInstanceKeyBlock* next;
-
-        // Entries to a block are added from the max index on down so that recently added
-        // entries are at the start of the block.
-        DWORD firstElement;
-        HashInstanceKey instanceKeys[] ;
-    } HashInstanceKeyBlock;
-
-// The hashing function does a good job of distributing the entries across buckets. To handle a
-// SO on x86, we have under 250 entries in a bucket. A 4K block size allows 511 entries on x86 and
-// about half that on x64. On x64, the number of entries added to the hash table is significantly
-// smaller than on x86 (and the max recursion depth for default stack sizes is also far less), so
-// 4K is generally adequate.
-
-#define HASH_INSTANCE_BLOCK_ALLOC_SIZE (4 * 1024)
-#define HASH_INSTANCE_BLOCK_NUM_ELEMENTS ((HASH_INSTANCE_BLOCK_ALLOC_SIZE - offsetof(_HashInstanceKeyBlock, instanceKeys))/sizeof(HashInstanceKey))
-#endif // #if defined(DAC_HASHTABLE)
 
     DAC_INSTANCE_BLOCK* m_blocks;
     DAC_INSTANCE_BLOCK* m_unusedBlock;
     ULONG64 m_blockMemUsage;
     ULONG32 m_numInst;
     ULONG64 m_instMemUsage;
-
-#if defined(DAC_HASHTABLE)
-    HashInstanceKeyBlock* m_hash[DAC_INSTANCE_HASH_SIZE];
-#else //DAC_HASHTABLE
 
     // SHash-based hash table for DAC instances, keyed by target address.
     // The custom hash function avoids pseudo-randomizing in favor of a simple
@@ -742,7 +699,6 @@ private:
     typedef SHash<DacInstanceSHashTraits> DacInstanceHash;
     typedef DacInstanceHash::Iterator DacInstanceHashIterator;
     DacInstanceHash m_hash;
-#endif //DAC_HASHTABLE
 
     DAC_INSTANCE* m_superseded;
     DAC_INSTANCE_PUSH* m_instPushed;
@@ -1249,8 +1205,7 @@ public:
     Thread* FindClrThreadByTaskId(ULONG64 taskId);
     HRESULT IsPossibleCodeAddress(IN TADDR address);
 
-    PCSTR GetJitHelperName(IN TADDR address,
-                           IN bool dynamicHelpersOnly = false);
+    PCSTR GetJitHelperName(IN TADDR address);
     HRESULT GetFullMethodName(IN MethodDesc* methodDesc,
                               IN ULONG32 symbolChars,
                               IN ULONG32* symbolLen,
@@ -1344,6 +1299,9 @@ public:
     HRESULT EnumMemDumpAppDomainInfo(CLRDataEnumMemoryFlags flags);
     HRESULT EnumMemDumpAllThreadsStack(CLRDataEnumMemoryFlags flags);
     HRESULT EnumMemCLRMainModuleInfo();
+    HRESULT EnumMemDataDescriptors(CLRDataEnumMemoryFlags flags);
+
+    void EnumDataDescriptorHelper(TADDR dataDescriptorAddr);
 
     bool ReportMem(TADDR addr, TSIZE_T size, bool fExpectSuccess = true);
     bool DacUpdateMemoryRegion(TADDR addr, TSIZE_T bufferSize, BYTE* buffer);
@@ -1363,7 +1321,6 @@ public:
 
     void ClearDumpStats();
     JITNotification* GetHostJitNotificationTable();
-    GcNotification*  GetHostGcNotificationTable();
 
     void* GetMetaDataFromHost(PEAssembly* pPEAssembly);
 
@@ -1460,9 +1417,6 @@ private:
     // Read the DAC table and initialize m_dacGlobals
     HRESULT GetDacGlobalValues();
 
-    // Verify the target mscorwks.dll matches the version expected
-    HRESULT VerifyDlls();
-
     // Check whether a region of memory is fully readable.
     bool IsFullyReadable(TADDR addr, TSIZE_T size);
 
@@ -1480,19 +1434,11 @@ private:
     ICLRDataLoggingCallback* m_logMessageCb;
     CLRDataEnumMemoryFlags m_enumMemFlags;
     JITNotification* m_jitNotificationTable;
-    GcNotification*  m_gcNotificationTable;
     TSIZE_T m_cbMemoryReported;
     DumpMemoryReportStatics m_dumpStats;
 
     // If true, inconsistencies in the target will cause ASSERTs to be raised in DEBUG builds
     bool m_fEnableTargetConsistencyAsserts;
-
-#ifdef _DEBUG
-protected:
-    // If true, a mscorwks/mscordacwks mismatch will trigger a nice assert dialog
-    bool m_fEnableDllVerificationAsserts;
-private:
-#endif
 
 protected:
     // Populates a DacpJitCodeHeapInfo with proper information about the
@@ -1531,6 +1477,14 @@ public:
                                               DWORD &dwRvaHint,
                                               _Out_writes_(cchFilePath) LPWSTR wszFilePath,
                                               DWORD cchFilePath);
+
+    static bool GetMetaDataFileInfoFromModule(Module *pModule,
+                                              DWORD &dwTimeStamp,
+                                              DWORD &dwSize,
+                                              DWORD &dwDataSize,
+                                              DWORD &dwRvaHint,
+                                              _Out_writes_(cchFilePath) LPWSTR wszFilePath,
+                                              const DWORD cchFilePath);
 };
 
 extern ClrDataAccess* g_dacImpl;
@@ -1582,7 +1536,7 @@ public:
 
     ULONG STDMETHODCALLTYPE Release()
     {
-        ULONG res = mRef--;
+        ULONG res = --mRef;
         if (res == 0)
             delete this;
         return res;
@@ -1765,9 +1719,6 @@ DWORD DacGetNumHeaps();
  *   the event that we find heap corruption on a segment, or if the background
  *   GC is modifying a segment, the remainder of that segment will be skipped
  *   by design.
- * - The GC heap must be in a walkable state before you attempt to use this
- *   class on it.  The IDacDbiInterface::AreGCStructuresValid function will
- *   tell you whether it is safe to walk the heap or not.
  */
 class DacHeapWalker
 {
@@ -1812,8 +1763,6 @@ public:
     HRESULT ListNearObjects(CORDB_ADDRESS obj, CORDB_ADDRESS *pPrev, CORDB_ADDRESS *pContaining, CORDB_ADDRESS *pNext);
 
 private:
-    HRESULT MoveToNextObject();
-
     bool GetSize(TADDR tMT, size_t &size);
 
     inline static size_t Align(size_t size)
@@ -1842,11 +1791,11 @@ private:
         return count;
     }
 
-    HRESULT NextSegment();
+    HRESULT AdvanceToNextValidSegment();
     void CheckAllocAndSegmentRange();
 
 private:
-    int mThreadCount;
+    int mAllocContextCount;
     AllocInfo *mAllocInfo;
 
     size_t mHeapCount;

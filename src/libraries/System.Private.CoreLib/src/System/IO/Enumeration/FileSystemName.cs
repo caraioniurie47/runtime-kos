@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -13,7 +13,7 @@ namespace System.IO.Enumeration
         /// <param name="expression">The expression to translate.</param>
         /// <returns>A string with the translated Win32 expression.</returns>
         /// <remarks>For compatibility, Windows changes some wildcards to provide a closer match to historical DOS 8.3 filename matching.</remarks>
-        public static string TranslateWin32Expression(string? expression)
+        public static unsafe string TranslateWin32Expression(string? expression)
         {
             if (string.IsNullOrEmpty(expression) || expression == "*" || expression == "*.*")
                 return "*";
@@ -138,7 +138,7 @@ namespace System.IO.Enumeration
         //           set of contiguous DOS_QMs.
         //       DOS_DOT matches either a . or zero characters beyond name string.
 
-        private static bool MatchPattern(ReadOnlySpan<char> expression, ReadOnlySpan<char> name, bool ignoreCase, bool useExtendedWildcards)
+        private static unsafe bool MatchPattern(ReadOnlySpan<char> expression, ReadOnlySpan<char> name, bool ignoreCase, bool useExtendedWildcards)
         {
             // The idea behind the algorithm is pretty simple. We keep track of all possible locations
             // in the regular expression that are matching the name. When the name has been exhausted,
@@ -274,18 +274,11 @@ namespace System.IO.Enumeration
                             // If we are at a period, determine if we are allowed to
                             // consume it, i.e. make sure it is not the last one.
 
-                            bool notLastPeriod = false;
-                            if (!nameFinished && nameChar == '.')
-                            {
-                                for (int offset = nameOffset; offset < name.Length; offset++)
-                                {
-                                    if (name[offset] == '.')
-                                    {
-                                        notLastPeriod = true;
-                                        break;
-                                    }
-                                }
-                            }
+                            // Check if there's another period after this one (not the last period)
+                            bool notLastPeriod =
+                                !nameFinished &&
+                                nameChar == '.' &&
+                                name.Slice(nameOffset).Contains('.');
 
                             if (nameFinished || nameChar != '.' || notLastPeriod)
                             {
@@ -418,7 +411,7 @@ namespace System.IO.Enumeration
         /// Escapes the given expression so that only '*' and '?' are treated as wildcards, and
         /// '\' isn't treated as an escape character.
         /// </summary>
-        internal static string EscapeExpression(string expression)
+        internal static unsafe string EscapeExpression(string expression)
         {
             ReadOnlySpan<char> span = expression;
             ReadOnlySpan<char> charsToEscape = ['\\', '"', '<', '>'];

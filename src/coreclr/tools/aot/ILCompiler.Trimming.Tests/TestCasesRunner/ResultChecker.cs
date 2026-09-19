@@ -1,6 +1,18 @@
 // Copyright (c) .NET Foundation and contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+#if ILTRIM
+extern alias TypeSystem;
+using TypeSystemEntity = TypeSystem::Internal.TypeSystem.TypeSystemEntity;
+using TypeDesc = TypeSystem::Internal.TypeSystem.TypeDesc;
+using DefType = TypeSystem::Internal.TypeSystem.DefType;
+using MethodDesc = TypeSystem::Internal.TypeSystem.MethodDesc;
+using FieldDesc = TypeSystem::Internal.TypeSystem.FieldDesc;
+using IAssemblyDesc = TypeSystem::Internal.TypeSystem.IAssemblyDesc;
+#else
+using Internal.TypeSystem;
+#endif
+
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -8,11 +20,9 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ILCompiler;
 using ILCompiler.Logging;
-using Internal.TypeSystem;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Mono.Linker.Tests.Cases.Expectations.Assertions;
@@ -21,8 +31,9 @@ using Xunit;
 
 namespace Mono.Linker.Tests.TestCasesRunner
 {
-    public class ResultChecker
+    public partial class ResultChecker
     {
+#if !ILTRIM
         private readonly BaseAssemblyResolver _originalsResolver;
         private readonly ReaderParameters _originalReaderParameters;
         private readonly ReaderParameters _linkedReaderParameters;
@@ -198,6 +209,7 @@ namespace Mono.Linker.Tests.TestCasesRunner
         {
             // PE verifier is done here in ILLinker, but that's not possible with NativeAOT
         }
+#endif
 
         private void VerifyLoggedMessages(AssemblyDefinition original, TrimmingTestLogger logger, bool checkRemainingErrors)
         {
@@ -225,7 +237,11 @@ namespace Mono.Linker.Tests.TestCasesRunner
 
                 foreach (var attr in attrProvider.CustomAttributes)
                 {
+#if ILTRIM
+                    if (!IsProducedByLinker(attr))
+#else
                     if (!IsProducedByNativeAOT(attr))
+#endif
                         continue;
 
                     switch (attr.AttributeType.Name)
@@ -477,8 +493,9 @@ namespace Mono.Linker.Tests.TestCasesRunner
             {
                 missingMessageWarnings.Add("Unmatched Messages:" + Environment.NewLine);
                 missingMessageWarnings.AddRange(unmatchedMessages.Select(m => m.ToString()));
-                missingMessageWarnings.Add(Environment.NewLine + "All Messages:" + Environment.NewLine);
-                missingMessageWarnings.AddRange(allMessages.Select(m => m.ToString()));
+                // Uncomment to show all messages when diagnosing test infrastructure issues
+                // missingMessageWarnings.Add(Environment.NewLine + "All Messages:" + Environment.NewLine);
+                // missingMessageWarnings.AddRange(allMessages.Select(m => m.ToString()));
                 Assert.Fail(string.Join(Environment.NewLine, missingMessageWarnings));
             }
 
@@ -531,9 +548,9 @@ namespace Mono.Linker.Tests.TestCasesRunner
 
             static string? GetMemberName(TypeSystemEntity? entity) => entity switch
             {
-                DefType defType => defType.Name,
-                MethodDesc method => method.Name,
-                FieldDesc field => field.Name,
+                DefType defType => defType.GetName(),
+                MethodDesc method => method.GetName(),
+                FieldDesc field => field.GetName(),
                 PropertyPseudoDesc property => property.Name,
                 _ => null
             };
@@ -548,6 +565,7 @@ namespace Mono.Linker.Tests.TestCasesRunner
             }
         }
 
+#if !ILTRIM
         private static bool HasAttribute(ICustomAttributeProvider caProvider, string attributeName)
         {
             return TryGetCustomAttribute(caProvider, attributeName, out var _);
@@ -586,5 +604,6 @@ namespace Mono.Linker.Tests.TestCasesRunner
             return Enumerable.Empty<CustomAttribute>();
         }
 #nullable restore
+#endif
     }
 }

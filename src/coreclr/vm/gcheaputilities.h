@@ -59,16 +59,22 @@ struct ee_alloc_context
         return m_CombinedLimit;
     }
 
-    static size_t getAllocPtrFieldOffset()
+    uint8_t* getAllocPtr()
     {
         LIMITED_METHOD_CONTRACT;
-        return offsetof(ee_alloc_context, m_GCAllocContext) + offsetof(gc_alloc_context, alloc_ptr);
+        return m_GCAllocContext.alloc_ptr;
     }
 
-    static size_t getCombinedLimitFieldOffset()
+    void setAllocPtr(uint8_t* ptr)
     {
         LIMITED_METHOD_CONTRACT;
-        return offsetof(ee_alloc_context, m_CombinedLimit);
+        m_GCAllocContext.alloc_ptr = ptr;
+    }
+
+    uint8_t* getAllocLimit()
+    {
+        LIMITED_METHOD_CONTRACT;
+        return m_GCAllocContext.alloc_limit;
     }
 
     // Regenerate the randomized sampling limit and update the m_CombinedLimit field.
@@ -141,10 +147,7 @@ GPTR_DECL(uint8_t,g_highest_address);
 GPTR_DECL(uint32_t,g_card_table);
 GVAL_DECL(GCHeapType, g_heap_type);
 
-// For single-proc machines, the EE will use a single, shared alloc context
-// for all allocations. In order to avoid extra indirections in assembly
-// allocation helpers, the EE owns the global allocation context and the
-// GC will update it when it needs to.
+// Unused - kept for GC data contract c1 compatibility, see datadescriptor/datadescriptor.inc.
 GVAL_DECL(ee_alloc_context, g_global_alloc_context);
 
 #ifndef DACCESS_COMPILE
@@ -248,15 +251,6 @@ public:
 #endif // FEATURE_SVR_GC
     }
 
-    static bool UseThreadAllocationContexts()
-    {
-#if (defined(TARGET_X86) || defined(TARGET_AMD64)) && !defined(TARGET_UNIX)
-        return s_useThreadAllocationContexts;
-#else
-        return true;
-#endif
-    }
-
 #ifdef FEATURE_USE_SOFTWARE_WRITE_WATCH_FOR_GC_HEAP
 
     // Returns True if software write watch is currently enabled for the GC Heap,
@@ -338,8 +332,6 @@ public:
 private:
     // This class should never be instantiated.
     GCHeapUtilities() = delete;
-
-    static bool s_useThreadAllocationContexts;
 };
 
 #endif // _GCHEAPUTILITIES_H_

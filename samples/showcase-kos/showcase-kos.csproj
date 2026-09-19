@@ -6,13 +6,14 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- net11.0: the ILCompiler targets built from main need the ILLink pack of this TFM. -->
+    <TargetFramework>net11.0</TargetFramework>
     <!-- Version of the locally built packages in nuget.config's "local" feed. -->
-    <KosNetVersion>10.0.13-dev</KosNetVersion>
+    <KosNetVersion>12.0.0-dev</KosNetVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <StripSymbols>false</StripSymbols>
     <Nullable>enable</Nullable>
-    <IlcToolsPath>/home/ilc-tools-10</IlcToolsPath>
+    <IlcToolsPath>/home/ilc-tools-main</IlcToolsPath>
     <IlcHostPackagePath>TODO</IlcHostPackagePath>
     <IlcVerboseLogging>false</IlcVerboseLogging>
     <!-- KOS CE SDK 1.4 and later ship clang instead of GCC; SysRoot is <SDK>/sysroot-aarch64-kos. -->

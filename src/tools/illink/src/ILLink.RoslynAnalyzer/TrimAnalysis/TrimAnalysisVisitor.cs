@@ -44,6 +44,7 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
         private FeatureChecksVisitor _featureChecksVisitor;
 
         readonly TypeNameResolver _typeNameResolver;
+        readonly RequiresUnreferencedCodeAnalyzer? _trimAnalyzer;
 
         public TrimAnalysisVisitor(
             Compilation compilation,
@@ -60,6 +61,7 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
             TrimAnalysisPatterns = trimAnalysisPatterns;
             _featureChecksVisitor = new FeatureChecksVisitor(dataFlowAnalyzerContext);
             _typeNameResolver = new TypeNameResolver(compilation);
+            _trimAnalyzer = dataFlowAnalyzerContext.TrimAnalyzer;
         }
 
         public override FeatureChecksValue GetConditionValue(IOperation branchValueOperation, StateValue state)
@@ -127,7 +129,7 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
             var value = base.VisitConversion(operation, state);
 
             if (operation.OperatorMethod is IMethodSymbol method)
-                return method.ReturnType.IsTypeInterestingForDataflow(isByRef: method.ReturnsByRef) ? new MethodReturnValue(method, isNewObj: false) : value;
+                return GetConversionValue(method, value);
 
             // TODO - is it possible to have annotation on the operator method parameters?
             // if so, will these be checked here?
@@ -159,6 +161,11 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
 
         public override MultiValue VisitFieldReference(IFieldReferenceOperation fieldRef, StateValue state)
         {
+            // Visit the instance to ensure that method calls or other operations
+            // used as the instance are properly analyzed for diagnostics.
+            // For example: someMethod().Field should analyze someMethod().
+            Visit(fieldRef.Instance, state);
+
             var field = fieldRef.Field;
             switch (field.Name)
             {
@@ -253,6 +260,17 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
             return new FieldValue(property);
         }
 
+        public override MultiValue GetTupleElementValue(IFieldSymbol tupleElement)
+        {
+            return new FieldValue(tupleElement);
+        }
+
+        public override MultiValue GetConversionValue(IMethodSymbol conversionOperator, MultiValue operandValue)
+        {
+            return conversionOperator.ReturnType.IsTypeInterestingForDataflow(isByRef: conversionOperator.ReturnsByRef)
+                ? new MethodReturnValue(conversionOperator, isNewObj: false)
+                : operandValue;
+        }
 
         public override MultiValue GetParameterTargetValue(IParameterSymbol parameter)
         {
@@ -347,7 +365,7 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
             //   Especially with DAM on type, this can lead to incorrectly analyzed code (as in unknown type which leads
             //   to noise). ILLink has the same problem currently: https://github.com/dotnet/linker/issues/1952
 
-            HandleCall(_typeNameResolver, operation, OwningSymbol, calledMethod, instance, arguments, Location.None, null, _multiValueLattice, out MultiValue methodReturnValue);
+            HandleCall(_trimAnalyzer, FeatureContext.None, _typeNameResolver, operation, OwningSymbol, calledMethod, instance, arguments, Location.None, null, _multiValueLattice, out MultiValue methodReturnValue);
 
             // This will copy the values if necessary
             TrimAnalysisPatterns.Add(new TrimAnalysisMethodCallPattern(
@@ -375,6 +393,8 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
         }
 
         internal static void HandleCall(
+            RequiresUnreferencedCodeAnalyzer? trimAnalyzer,
+            FeatureContext featureContext,
             TypeNameResolver typeNameResolver,
             IOperation operation,
             ISymbol owningSymbol,
@@ -386,7 +406,7 @@ namespace ILLink.RoslynAnalyzer.TrimAnalysis
             ValueSetLattice<SingleValue> multiValueLattice,
             out MultiValue methodReturnValue)
         {
-            var handleCallAction = new HandleCallAction(typeNameResolver, location, owningSymbol, operation, multiValueLattice, reportDiagnostic);
+            var handleCallAction = new HandleCallAction(trimAnalyzer, featureContext, typeNameResolver, location, owningSymbol, operation, multiValueLattice, reportDiagnostic);
             MethodProxy method = new(calledMethod);
             var intrinsicId = Intrinsics.GetIntrinsicIdForMethod(method);
             if (!handleCallAction.Invoke(method, instance, arguments, intrinsicId, out methodReturnValue))

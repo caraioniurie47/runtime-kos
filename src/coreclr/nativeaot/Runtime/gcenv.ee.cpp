@@ -52,7 +52,7 @@ void GCToEEInterface::SuspendEE(SUSPEND_REASON reason)
     FireEtwGCSuspendEEEnd_V1(GetClrInstanceId());
 }
 
-void GCToEEInterface::RestartEE(bool /*bFinishedGC*/)
+void GCToEEInterface::RestartEE(bool /* bUnused */)
 {
     FireEtwGCRestartEEBegin_V1(GetClrInstanceId());
 
@@ -63,7 +63,7 @@ void GCToEEInterface::RestartEE(bool /*bFinishedGC*/)
     // This is needed to synchronize threads that were running in preemptive mode while
     // the runtime was suspended and that will return to cooperative mode after the runtime
     // is restarted.
-    PalFlushProcessWriteBuffers();
+    minipal_memory_barrier_process_wide();
 #endif // !defined(TARGET_X86) && !defined(TARGET_AMD64)
 
     SyncClean::CleanUp();
@@ -403,7 +403,7 @@ void GCToEEInterface::StompWriteBarrier(WriteBarrierParameters* args)
         {
             // If runtime is not suspended, force all threads to see the changed table before seeing updated heap boundaries.
             // See: http://vstfdevdiv:8080/DevDiv2/DevDiv/_workitems/edit/346765
-            PalFlushProcessWriteBuffers();
+            minipal_memory_barrier_process_wide();
         }
 #endif
 
@@ -414,7 +414,7 @@ void GCToEEInterface::StompWriteBarrier(WriteBarrierParameters* args)
         if (!is_runtime_suspended)
         {
             // If runtime is not suspended, force all threads to see the changed state before observing future allocations.
-            PalFlushProcessWriteBuffers();
+            minipal_memory_barrier_process_wide();
         }
 #endif
         return;
@@ -567,7 +567,9 @@ static bool CreateNonSuspendableThread(void (*threadStart)(void*), void* arg, co
             delete threadStubArgs;
             return false;
         }
-        strcpy(name_copy, name);
+
+        memcpy(name_copy, name, name_length);
+        name_copy[name_length] = '\0';
         threadStubArgs->m_name = name_copy;
     }
 
@@ -581,6 +583,8 @@ static bool CreateNonSuspendableThread(void (*threadStart)(void*), void* arg, co
             PalSetCurrentThreadName(pStartContext->m_name);
             auto realStartRoutine = pStartContext->m_pRealStartRoutine;
             void* realContext = pStartContext->m_pRealContext;
+
+            delete[] pStartContext->m_name;
             delete pStartContext;
 
             STRESS_LOG_RESERVE_MEM(GC_STRESSLOG_MULTIPLY);
@@ -791,7 +795,7 @@ void GCToEEInterface::LogErrorToHost(const char *message)
 
 uint64_t GCToEEInterface::GetThreadOSThreadId(Thread* thread)
 {
-    return (uint64_t)thread->GetPalThreadIdForLogging();
+    return (uint64_t)thread->GetOSThreadId();
 }
 
 bool GCToEEInterface::GetStringConfigValue(const char* privateKey, const char* publicKey, const char** value)
@@ -818,6 +822,15 @@ void GCToEEInterface::TriggerClientBridgeProcessing(MarkCrossReferencesArgs* arg
 {
 #ifdef FEATURE_JAVAMARSHAL
     JavaMarshalNative::TriggerClientBridgeProcessing(args);
+#endif
+}
+
+bool GCToEEInterface::IsClientBridgeProcessingActive()
+{
+#ifdef FEATURE_JAVAMARSHAL
+    return JavaMarshalNative::IsGCBridgeActive();
+#else
+    return false;
 #endif
 }
 

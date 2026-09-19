@@ -10,11 +10,11 @@ Module Name:
 Abstract:
     Read cpu limits for the current process
 --*/
-#ifdef __FreeBSD__
-#define _WITH_GETLINE
-#endif
-
 #include <cstdint>
+#include "cgroupcpu.h"
+
+#if defined(TARGET_LINUX) && !defined(__KOS__) // KOS: no cgroups; the stubs below report no limit
+
 #include <cstddef>
 #include <cassert>
 #include <unistd.h>
@@ -22,23 +22,11 @@ Abstract:
 #include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/vfs.h>
 #include <errno.h>
 #include <limits>
 
 #include "config.gc.h"
-
-#if HAVE_NON_LEGACY_STATFS // after including config.gc.h
-#if HAVE_STATFS_STRUCT_MOUNT_H // BSD, Apple
-#include <sys/param.h>
-#include <sys/mount.h>
-#elif HAVE_STATFS_STRUCT_VFS_H // Linux
-#include <sys/vfs.h>
-#elif HAVE_STATFS_STRUCT_STATFS_H
-#include <sys/statfs.h>
-#endif
-#endif
-
-#include "cgroupcpu.h"
 
 #define CGROUP2_SUPER_MAGIC 0x63677270
 
@@ -95,10 +83,6 @@ private:
         // modes because both of those involve cgroup v1 controllers managing
         // resources.
 
-#if !HAVE_NON_LEGACY_STATFS
-        return 0;
-#else
-
         struct statfs stats;
         int result = statfs("/sys/fs/cgroup", &stats);
         if (result != 0)
@@ -115,7 +99,6 @@ private:
             // been seen in the wild.
             return 1;
         }
-#endif
     }
 
     static bool IsCGroup1CpuSubsystem(const char *strTok){
@@ -515,3 +498,16 @@ bool GetCpuLimit(uint32_t* val)
 
     return CGroup::GetCpuLimit(val);
 }
+
+#else // !TARGET_LINUX
+
+void InitializeCpuCGroup()
+{
+}
+
+bool GetCpuLimit(uint32_t* val)
+{
+    return false;
+}
+
+#endif // TARGET_LINUX

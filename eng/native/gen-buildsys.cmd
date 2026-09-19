@@ -2,26 +2,44 @@
 rem
 rem This file invokes cmake and generates the build system for windows.
 
-setlocal
+set __argCount=0
+for %%x in (%*) do set /A __argCount+=1
 
-set argC=0
-for %%x in (%*) do Set /A argC+=1
+if %__argCount% lss 4 goto :USAGE
+if %1=="/?" goto :USAGE
 
-if %argC% lss 4 GOTO :USAGE
-if %1=="/?" GOTO :USAGE
-
-setlocal enabledelayedexpansion
+set __Os=%5
 set "__repoRoot=%~dp0..\.."
 :: normalize
 for %%i in ("%__repoRoot%") do set "__repoRoot=%%~fi"
+
+:: Set up the EMSDK environment before setlocal so that it propagates to the caller.
+:: Written without a parenthesized block so that %WASM_TOOL_CACHE_RESULT% expands without
+:: delayed expansion, which cannot be enabled here without discarding emsdk_env's variables.
+if /i not "%__Os%" == "browser" goto :AfterEmsdkEnv
+if not "%EMSDK_PATH%" == "" goto :CallEmsdkEnv
+
+call "%__repoRoot%\eng\wasm\wasm-tool-cache.cmd" emscripten "%__repoRoot%\src\mono\browser\emscripten-version.txt" "%__repoRoot%"
+if "%WASM_TOOL_CACHE_RESULT%" == "" (
+    echo Error: Should set EMSDK_PATH environment variable pointing to emsdk root.
+    exit /B 1
+)
+set "EMSDK_PATH=%WASM_TOOL_CACHE_RESULT%"
+
+:CallEmsdkEnv
+set "EMSDK_QUIET=1"
+call "%EMSDK_PATH%\emsdk_env.cmd"
+
+:AfterEmsdkEnv
+
+setlocal enabledelayedexpansion
 
 set __SourceDir=%1
 set __IntermediatesDir=%2
 set __VSVersion=%3
 set __Arch=%4
-set __Os=%5
 set __CmakeGenerator=Visual Studio
-set __UseEmcmake=0
+set __ExtraCmakeParams=
 if /i "%__Ninja%" == "1" (
     set __CmakeGenerator=Ninja
 ) else (
@@ -39,35 +57,26 @@ if /i "%__Ninja%" == "1" (
 )
 
 if /i "%__Arch%" == "wasm" (
-
     if "%__Os%" == "" (
         echo Error: Please add target OS parameter
         exit /B 1
     )
     if /i "%__Os%" == "browser" (
-        if "%EMSDK_PATH%" == "" (
-            echo Error: Should set EMSDK_PATH environment variable pointing to emsdk root.
-            exit /B 1
-        )
-
         set CMakeToolPrefix=emcmake
+        rem Use WASM-specific tryrun cache to speed up CMake configure
+        set __ExtraCmakeParams="-C %__repoRoot%/eng/native/tryrun.browser.cmake" !__ExtraCmakeParams!
     )
     if /i "%__Os%" == "wasi" (
-        set "__repoRoot=!__repoRoot:\=/!"
-        if not "!__repoRoot:~-1!" == "/" set "__repoRoot=!__repoRoot!/"
         if "%WASI_SDK_PATH%" == "" (
-            if not exist "%__repoRoot%\src\mono\wasi\wasi-sdk" (
+            call "%__repoRoot%\eng\wasm\wasm-tool-cache.cmd" wasi-sdk "%__repoRoot%\eng\wasm\wasi-sdk-version.txt" "%__repoRoot%"
+            if "!WASM_TOOL_CACHE_RESULT!" == "" (
                 echo Error: Should set WASI_SDK_PATH environment variable pointing to WASI SDK root.
                 exit /B 1
             )
-
-            set "WASI_SDK_PATH=%__repoRoot%\src\mono\wasi\wasi-sdk"
+            set "WASI_SDK_PATH=!WASM_TOOL_CACHE_RESULT!"
         )
-        :: replace backslash with forward slash and append last slash
-        set "WASI_SDK_PATH=!WASI_SDK_PATH:\=/!"
-        if not "!WASI_SDK_PATH:~-1!" == "/" set "WASI_SDK_PATH=!WASI_SDK_PATH!/"
         set __CmakeGenerator=Ninja
-        set __ExtraCmakeParams=%__ExtraCmakeParams% -DCLR_CMAKE_TARGET_OS=wasi -DCLR_CMAKE_TARGET_ARCH=wasm "-DWASI_SDK_PREFIX=!WASI_SDK_PATH!" "-DCMAKE_TOOLCHAIN_FILE=!WASI_SDK_PATH!/share/cmake/wasi-sdk-p2.cmake" "-DCMAKE_SYSROOT=!WASI_SDK_PATH!share/wasi-sysroot" "-DCMAKE_CROSSCOMPILING_EMULATOR=node --experimental-wasm-bigint --experimental-wasi-unstable-preview1"
+        set __ExtraCmakeParams=%__ExtraCmakeParams% -DCLR_CMAKE_TARGET_OS=wasi "-DCMAKE_TOOLCHAIN_FILE=!WASI_SDK_PATH!/share/cmake/wasi-sdk-p2.cmake"
     )
 ) else (
     set __ExtraCmakeParams=%__ExtraCmakeParams%  "-DCMAKE_SYSTEM_VERSION=10.0"
@@ -75,7 +84,7 @@ if /i "%__Arch%" == "wasm" (
 
 if /i "%__Os%" == "android" (
     :: Keep in sync with $(AndroidApiLevelMin) in Directory.Build.props in the repository rooot
-    set __ANDROID_API_LEVEL=21
+    set __ANDROID_API_LEVEL=24
     if "%ANDROID_NDK_ROOT%" == "" (
         echo Error: You need to set the ANDROID_NDK_ROOT environment variable pointing to the Android NDK root.
         exit /B 1
@@ -141,6 +150,6 @@ exit /B %errorlevel%
 :USAGE
   echo "Usage..."
   echo "gen-buildsys.cmd <path to top level CMakeLists.txt> <path to location for intermediate files> <VSVersion> <arch> <os>"
-  echo "Specify the path to the top level CMake file - <ProjectK>/src/NDP"
-  echo "Specify the VSVersion to be used - VS2017 or VS2019"
+  echo "Specify the path to the top level CMake file"
+  echo "Specify the VSVersion to be used, e. g. 17.0 for VS2022"
   EXIT /B 1

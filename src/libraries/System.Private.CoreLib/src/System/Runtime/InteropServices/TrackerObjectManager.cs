@@ -73,7 +73,7 @@ namespace System.Runtime.InteropServices
             {
                 foreach (GCHandle weakNativeObjectWrapperHandle in s_referenceTrackerNativeObjectWrapperCache)
                 {
-                    ReferenceTrackerNativeObjectWrapper? nativeObjectWrapper = Unsafe.As<ReferenceTrackerNativeObjectWrapper?>(weakNativeObjectWrapperHandle.Target);
+                    ReferenceTrackerNativeObjectWrapper? nativeObjectWrapper = Unsafe.As<ReferenceTrackerNativeObjectWrapper>(weakNativeObjectWrapperHandle.Target);
                     if (nativeObjectWrapper != null &&
                         nativeObjectWrapper._contextToken == contextToken)
                     {
@@ -86,8 +86,7 @@ namespace System.Runtime.InteropServices
                         {
                             wrappersToRemove.Add(nativeObjectWrapper);
 
-                            object? target = nativeObjectWrapper.ProxyHandle.Target;
-                            if (target != null)
+                            if (nativeObjectWrapper.ProxyHandle.TryGetTarget(out object? target))
                             {
                                 objects.Add(target);
                             }

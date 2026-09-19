@@ -37,8 +37,11 @@
         '$(Scenario)' == 'gcstress0xc_jitstress1' or
         '$(Scenario)' == 'gcstress0xc_jitstress2' or
         '$(Scenario)' == 'gcstress0xc_jitminopts_heapverify1'">06:00:00</_workItemTimeout>
+    <_workItemTimeout Condition="'$(_workItemTimeout)' == '' and '$(Scenario)' == 'interpmode1'">01:00:00</_workItemTimeout>
     <_workItemTimeout Condition="'$(_workItemTimeout)' == '' and '$(TargetsAppleMobile)' == 'true'">01:15:00</_workItemTimeout>
     <_workItemTimeout Condition="'$(_workItemTimeout)' == '' and '$(TargetOS)' == 'android'">00:30:00</_workItemTimeout>
+    <_workItemTimeout Condition="'$(_workItemTimeout)' == '' and '$(TargetOS)' == 'browser' and '$(RuntimeFlavor)' == 'CoreCLR' and ('$(TestScope)' == 'outerloop' or '$(TestScope)' == 'all')">04:30:00</_workItemTimeout>
+    <_workItemTimeout Condition="'$(_workItemTimeout)' == '' and '$(TargetOS)' == 'browser' and '$(RuntimeFlavor)' == 'CoreCLR'">01:30:00</_workItemTimeout>
     <_workItemTimeout Condition="'$(_workItemTimeout)' == '' and '$(TargetOS)' == 'browser'">00:30:00</_workItemTimeout>
     <_workItemTimeout Condition="'$(_workItemTimeout)' == '' and '$(TargetOS)' == 'wasi'">00:30:00</_workItemTimeout>
     <_workItemTimeout Condition="'$(Scenario)' == '' and '$(_workItemTimeout)' == '' and ('$(TargetArchitecture)' == 'arm64' or '$(TargetArchitecture)' == 'arm')">00:45:00</_workItemTimeout>
@@ -108,11 +111,6 @@
     <TestEnvFileName Condition=" '$(Scenario)' != '' and '$(TargetOS)' != 'windows' and '$(TargetOS)' != 'browser' and '$(TargetOS)' != 'wasi'">SetStressModes_$(Scenario).sh</TestEnvFileName>
   </PropertyGroup>
 
-  <ItemGroup>
-    <__HelixDependenciesToStageThatDontExist Include="@(HelixDependenciesToStage)" />
-    <__HelixDependenciesToStageThatDontExist Remove="@(HelixDependenciesToStage->Exists())" />
-  </ItemGroup>
-
   <!-- HelixPreCommands is a set of commands run before the work item command. We use it here to inject
        setting up the per-scenario environment.
   -->
@@ -178,14 +176,7 @@
   <ItemGroup>
     <HelixProperties Condition="'$(RuntimeFlavor)' != ''" Include="runtimeFlavor" Value="$(RuntimeFlavor)" />
     <HelixProperties Condition="'$(Scenario)' != ''" Include="scenario" Value="$(Scenario)" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(RunGrpcTestsOnly)' == 'true' and '$(BuildGrpcServerDockerImage)' == 'true'">
-    <HelixCorrelationPayload Include="$(GrpcServerDockerImageDir)" Destination="grpcserver" />
-    <HelixPreCommand Include="docker load -i $HELIX_CORRELATION_PAYLOAD/grpcserver/grpcserver.tar" />
-    <HelixPreCommand Include="docker run --name grpc-server -d -p 50052:50052 -p 80:80 grpc-server:latest" />
-    <HelixPostCommand Include="docker stop grpc-server" />
-    <HelixPostCommand Include="docker rmi -f grpc-server:latest" />
+    <HelixProperties Condition="'$(WorkItemPrefix)' != ''" Include="jobName" Value="$(WorkItemPrefix.TrimEnd('-'))" />
   </ItemGroup>
 
   <!-- Ensure that all HelixPreCommand items are ready before this -->
@@ -281,7 +272,7 @@
         $(HelixPostCommands);
         %HELIX_PYTHONPATH% %HELIX_CORRELATION_PAYLOAD%\gen-debug-dump-docs.py -buildid $(BUILD_BUILDID) -workitem %HELIX_WORKITEM_FRIENDLYNAME% -jobid %HELIX_CORRELATION_ID% -outdir %HELIX_WORKITEM_UPLOAD_ROOT% -templatedir %HELIX_CORRELATION_PAYLOAD% -dumpdir %HELIX_DUMP_FOLDER% -productver $(ProductVersion)
       </HelixPostCommands>
-      <HelixPostCommands Condition="'$(TargetOS)' != 'windows'">
+      <HelixPostCommands Condition="'$(TargetOS)' != 'windows' and '$(TargetOS)' != 'browser' and '$(TargetOS)' != 'wasi'">
         $(HelixPostCommands);
         $HELIX_PYTHONPATH $HELIX_CORRELATION_PAYLOAD/gen-debug-dump-docs.py -buildid $(BUILD_BUILDID) -workitem $HELIX_WORKITEM_FRIENDLYNAME -jobid $HELIX_CORRELATION_ID -outdir $HELIX_WORKITEM_UPLOAD_ROOT -templatedir $HELIX_CORRELATION_PAYLOAD -dumpdir $HELIX_DUMP_FOLDER -productver $(ProductVersion)
       </HelixPostCommands>
@@ -356,18 +347,35 @@
     <Message Importance="High" Text="Build TargetFramework: $(BuildTargetFramework)" />
   </Target>
 
+  <Target Name="SetHelixJobName" BeforeTargets="CoreTest">
+    <PropertyGroup>
+      <HelixJobName Condition="'$(WorkItemPrefix)' != ''">$(WorkItemPrefix.TrimEnd('-'))</HelixJobName>
+    </PropertyGroup>
+  </Target>
+
   <!--
       Helix tasks will attempt to write a .payload file to the payload directory. But if the
       directory is not writable, for example when it is a system installed dependency like
         `WASI_SDK_PATH=/usr/local/wasi-sdk`
       .. then we need to stage that before passing the path to helix like under `artifacts/obj/helix-staging`
   -->
-  <Target Name="StageDependenciesForHelix" Condition="@(__HelixDependenciesToStageThatDontExist->Count()) > 0">
+  <Target Name="StageDependenciesForHelix"
+          Condition="'@(HelixDependenciesToStage->Exists())' != '@(HelixDependenciesToStage)'">
+    <ItemGroup>
+      <__HelixDependenciesToStageThatDontExist Include="@(HelixDependenciesToStage)" Condition="!Exists('%(Identity)')" />
+    </ItemGroup>
+
     <Error Condition="'%(__HelixDependenciesToStageThatDontExist.SourcePath)' == '' or !Exists(%(__HelixDependenciesToStageThatDontExist.SourcePath))"
            Text="Could not find %(__HelixDependenciesToStageThatDontExist.Name) at %(__HelixDependenciesToStageThatDontExist.SourcePath), needed to provision for running tests on helix" />
 
     <ItemGroup>
-      <__HelixDependenciesToStageThatDontExist Name="%(FileName)" />
+      <!-- The staging destination below is $(HelixDependenciesStagingPath)\%(Name), so Name must be
+           the full directory name from Include, not just %(Filename): a version-keyed name such as
+           'chrome-150.0.7871.129-1639810' would otherwise be truncated at the last '.' and the
+           files would be copied somewhere other than the directory created (and later uploaded) as
+           %(Identity), leaving an empty correlation payload. %(Extension) is empty for names
+           without a '.', so this is a no-op for existing callers. -->
+      <__HelixDependenciesToStageThatDontExist Name="%(Filename)%(Extension)" />
     </ItemGroup>
 
     <Message Importance="High" Text="Using %(__HelixDependenciesToStageThatDontExist.Name): %(__HelixDependenciesToStageThatDontExist.SourcePath)" />
@@ -383,21 +391,5 @@
     <Copy SourceFiles="@(_FilesToStage)"
           DestinationFiles="@(_FilesToStage -> '$(HelixDependenciesStagingPath)\%(DirName)\%(RecursiveDir)%(FileName)%(Extension)')"
           SkipUnchangedFiles="true" />
-  </Target>
-
-  <!--
-    When a build sets FailOnWorkItemFailure/FailOnTestFailure to false (e.g. scheduled outerloop runs,
-    which must end up 'succeeded' so AzDO's always:false scheduler doesn't keep re-queueing the same
-    commit) the Helix SDK's CheckHelixJobStatus no longer reports failed work items, which hides them
-    from the build. Setting WarnOnHelixTestFailure=true surfaces each failed work item as a build
-    warning instead, keeping the failures visible in the Azure DevOps timeline without failing the
-    build. The "Send to Helix" step disables warnaserror (see _warnAsErrorParamHelixOverride), so
-    these warnings are not promoted back into build-failing errors.
-  -->
-  <Target Name="WarnOnHelixWorkItemFailure"
-          AfterTargets="CheckHelixJobStatus"
-          Condition="'$(WarnOnHelixTestFailure)' == 'true' and '$(WaitForWorkItemCompletion)' == 'true'">
-    <Warning Condition="'%(CompletedWorkItem.Failed)' == 'true'"
-             Text="Work item %(CompletedWorkItem.WorkItemName) in job %(CompletedWorkItem.JobName) has failed. Failure log: %(CompletedWorkItem.ConsoleOutputUri)" />
   </Target>
 </Project>

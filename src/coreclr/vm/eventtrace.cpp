@@ -50,11 +50,16 @@ DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context = {
 DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_DOTNET_Context = { &MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_Context, MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_EVENTPIPE_Context };
 DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_DOTNET_Context = { &MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_Context, MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_EVENTPIPE_Context };
 DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_DOTNET_Context = { &MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_Context, MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_EVENTPIPE_Context };
-#else
+#elif defined(FEATURE_EVENTSOURCE_XPLAT)
 DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_EVENTPIPE_Context, &MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_LTTNG_Context };
 DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_EVENTPIPE_Context, &MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_LTTNG_Context };
 DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_EVENTPIPE_Context, &MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_LTTNG_Context };
 DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_EVENTPIPE_Context, &MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_LTTNG_Context };
+#else
+DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_EVENTPIPE_Context };
+DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_EVENTPIPE_Context };
+DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_RUNDOWN_PROVIDER_EVENTPIPE_Context };
+DOTNET_TRACE_CONTEXT MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_DOTNET_Context = { MICROSOFT_WINDOWS_DOTNETRUNTIME_STRESS_PROVIDER_EVENTPIPE_Context };
 #endif // HOST_UNIX
 
 #ifdef FEATURE_NATIVEAOT
@@ -783,12 +788,9 @@ HRESULT ETW::TypeSystemLog::PreRegistrationInit()
 {
     LIMITED_METHOD_CONTRACT;
 
-    if (!AllLoggedTypes::s_cs.InitNoThrow(
+    AllLoggedTypes::s_cs.Init(
         CrstEtwTypeLogHash,
-        CRST_UNSAFE_ANYMODE))       // This lock is taken during a GC while walking the heap
-    {
-        return E_FAIL;
-    }
+        CRST_UNSAFE_ANYMODE);
 
     return S_OK;
 }
@@ -1925,10 +1927,12 @@ VOID ETW::EnumerationLog::SendOneTimeRundownEvents()
     // Fire the runtime information event
     ETW::InfoLog::RuntimeInformation(ETW::InfoLog::InfoStructs::Callback);
 
+#if defined(FEATURE_TIERED_COMPILATION)
     if (ETW::CompilationLog::TieredCompilation::Rundown::IsEnabled() && g_pConfig->TieredCompilation())
     {
         ETW::CompilationLog::TieredCompilation::Rundown::SendSettings();
     }
+#endif // FEATURE_TIERED_COMPILATION
 }
 
 
@@ -2275,9 +2279,9 @@ void InitializeEventTracing()
     // providers can do so now
     ETW::TypeSystemLog::PostRegistrationInit();
 
-#if defined(HOST_UNIX) && defined (FEATURE_PERFTRACING)
+#if defined(FEATURE_EVENTSOURCE_XPLAT)
     XplatEventLogger::InitializeLogger();
-#endif // HOST_UNIX && FEATURE_PERFTRACING
+#endif // FEATURE_EVENTSOURCE_XPLAT
 }
 
 // Plumbing to funnel event pipe callbacks and ETW callbacks together into a single common
@@ -2671,7 +2675,6 @@ extern "C"
             if(g_fEEStarted) {GC_TRIGGERS;} else {DISABLED(GC_NOTRIGGER);};
             MODE_ANY;
             CAN_TAKE_LOCK;
-            STATIC_CONTRACT_FAULT;
         } CONTRACTL_END;
 
         // Mark that we are the special ETWRundown thread.  Currently all this does
@@ -2849,7 +2852,12 @@ VOID ETW::ExceptionLog::ExceptionThrown(CrawlFrame  *pCf, BOOL bIsReThrownExcept
         // This check has been copied from StackTraceInfo::AppendElement
         if (!(pCf->HasFaulted() || pCf->IsIPadjusted()) && exceptionEIP != 0)
         {
-            exceptionEIP = (PVOID)((UINT_PTR)exceptionEIP - 1);
+#ifdef TARGET_WASM
+            if (!ExecutionManager::IsVirtualIP((PCODE)exceptionEIP))
+#endif
+            {
+                exceptionEIP = (PVOID)((UINT_PTR)exceptionEIP - 1);
+            }
         }
 
         gc.exceptionMessageRef =  ((EXCEPTIONREF)gc.exceptionObj)->GetMessage();
@@ -3531,6 +3539,20 @@ VOID ETW::MethodLog::MethodJitted(MethodDesc *pMethodDesc, SString *namespaceOrC
 
     EX_TRY
     {
+        // Only ReJIT versions are reported with a non-zero IL code version id; EnC (and the
+        // default version) report 0. This retains compatibility with how EnC updates were
+        // reported before EnC edits were modeled as IL code versions - historically they were
+        // not given unique IL code version IDs in these events. We aren't aware of
+        // any specific scenario that relies on the ENC ids reporting zero or a design
+        // goal that it needs to remain this way.
+        ReJITID ilCodeVersionId = 0;
+#ifdef FEATURE_CODE_VERSIONING
+        if (pConfig->GetCodeVersion().GetILCodeVersion().GetSource() == CodeVersionSource::kReJIT)
+        {
+            ilCodeVersionId = pConfig->GetCodeVersion().GetILCodeVersionId();
+        }
+#endif // FEATURE_CODE_VERSIONING
+
         if(ETW_TRACING_CATEGORY_ENABLED(MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context,
                                         TRACE_LEVEL_INFORMATION,
                                         CLR_JIT_KEYWORD))
@@ -3546,12 +3568,12 @@ VOID ETW::MethodLog::MethodJitted(MethodDesc *pMethodDesc, SString *namespaceOrC
                                                          ETW::EnumerationLog::EnumerationStructs::JitMethodILToNativeMap,
                                                          pNativeCodeStartAddress,
                                                          pConfig->GetCodeVersion().GetVersionId(),
-                                                         pConfig->GetCodeVersion().GetILCodeVersionId());
+                                                         ilCodeVersionId);
         }
 
         if (ETW_EVENT_ENABLED(MICROSOFT_WINDOWS_DOTNETRUNTIME_PRIVATE_PROVIDER_DOTNET_Context, JittedMethodRichDebugInfo))
         {
-            ETW::MethodLog::SendMethodRichDebugInfo(pMethodDesc, pNativeCodeStartAddress, pConfig->GetCodeVersion().GetVersionId(), pConfig->GetCodeVersion().GetILCodeVersionId(), NULL);
+            ETW::MethodLog::SendMethodRichDebugInfo(pMethodDesc, pNativeCodeStartAddress, pConfig->GetCodeVersion().GetVersionId(), ilCodeVersionId, NULL);
         }
 
     } EX_CATCH { } EX_END_CATCH
@@ -3581,26 +3603,68 @@ VOID ETW::MethodLog::MethodJitting(MethodDesc *pMethodDesc, COR_ILMETHOD_DECODER
 }
 
 /**********************************************************************/
-/* This is called by the runtime when a single jit helper method with stub is initialized */
+/* This is called by the runtime when a helper is initialized */
 /**********************************************************************/
-VOID ETW::MethodLog::StubInitialized(ULONGLONG ullHelperStartAddress, LPCWSTR pHelperName)
+VOID ETW::MethodLog::HelperInitialized(ULONGLONG ullHelperStartAddress, ULONG ulHelperSize, LPCWSTR pHelperName)
 {
     CONTRACTL {
         NOTHROW;
-        GC_TRIGGERS;
+        GC_NOTRIGGER;
         PRECONDITION(ullHelperStartAddress != 0);
+        PRECONDITION(ulHelperSize != 0);
+        PRECONDITION(pHelperName != nullptr);
     } CONTRACTL_END;
 
     EX_TRY
     {
-        if(ETW_TRACING_CATEGORY_ENABLED(MICROSOFT_WINDOWS_DOTNETRUNTIME_PROVIDER_DOTNET_Context,
-                                        TRACE_LEVEL_INFORMATION,
-                                        CLR_JIT_KEYWORD))
-        {
-            DWORD dwHelperSize=0;
-            Stub::RecoverStubAndSize((TADDR)ullHelperStartAddress, &dwHelperSize);
-            ETW::MethodLog::SendHelperEvent(ullHelperStartAddress, dwHelperSize, pHelperName);
-        }
+        SendHelperEvent(
+            ullHelperStartAddress,
+            ulHelperSize,
+            pHelperName,
+            ETW::EnumerationLog::EnumerationStructs::JitMethodLoad);
+    } EX_CATCH { } EX_END_CATCH
+}
+
+/**********************************************************************/
+/* This is called by the runtime when a helper is destroyed */
+/**********************************************************************/
+VOID ETW::MethodLog::HelperDestroyed(ULONGLONG ullHelperStartAddress, ULONG ulHelperSize, LPCWSTR pHelperName)
+{
+    CONTRACTL {
+        NOTHROW;
+        GC_NOTRIGGER;
+        PRECONDITION(ullHelperStartAddress != 0);
+        PRECONDITION(ulHelperSize != 0);
+        PRECONDITION(pHelperName != nullptr);
+    } CONTRACTL_END;
+
+    EX_TRY
+    {
+        SendHelperEvent(
+            ullHelperStartAddress,
+            ulHelperSize,
+            pHelperName,
+            ETW::EnumerationLog::EnumerationStructs::JitMethodUnload);
+    } EX_CATCH { } EX_END_CATCH
+}
+
+VOID ETW::MethodLog::SendCopiedWriteBarrierEvent(
+    ULONGLONG ullHelperStartAddress,
+    ULONG ulHelperSize,
+    LPCWSTR pHelperName,
+    DWORD dwEventOptions)
+{
+    CONTRACTL {
+        NOTHROW;
+        GC_NOTRIGGER;
+        PRECONDITION(ullHelperStartAddress != 0);
+        PRECONDITION(ulHelperSize != 0);
+        PRECONDITION(pHelperName != nullptr);
+    } CONTRACTL_END;
+
+    EX_TRY
+    {
+        SendHelperEvent(ullHelperStartAddress, ulHelperSize, pHelperName, dwEventOptions);
     } EX_CATCH { } EX_END_CATCH
 }
 
@@ -3987,9 +4051,9 @@ static void GetCodeViewInfo(Module * pModule, CV_INFO_PDB70 * pCvInfoIL, CV_INFO
         return;
     }
 
-    if (!pLayout->HasNTHeaders())
+    if (!pLayout->HasHeaders())
     {
-        // Without NT headers, we'll have a tough time finding the debug directory
+        // Without headers, we'll have a tough time finding the debug directory
         // entries. This can happen for nlp files.
         return;
     }
@@ -4409,27 +4473,13 @@ TADDR MethodAndStartAddressToEECodeInfoPointer(MethodDesc *pMethodDesc, PCODE pN
     } CONTRACTL_END;
 
     // MethodDesc ==> Code Address ==>JitManager
-    TADDR start = PCODEToPINSTR(pNativeCodeStartAddress ? pNativeCodeStartAddress : pMethodDesc->GetNativeCode());
+    TADDR start = pNativeCodeStartAddress ? pNativeCodeStartAddress : pMethodDesc->GetNativeCode();
     if(start == 0) {
         // this method hasn't been jitted
         return 0;
     }
 
-#ifdef FEATURE_INTERPRETER
-    RangeSection * pRS = ExecutionManager::FindCodeRange(PINSTRToPCODE(start), ExecutionManager::GetScanFlags());
-    if (pRS != NULL && pRS->_flags & RangeSection::RANGE_SECTION_RANGELIST)
-    {
-        if (pRS->_pRangeList->GetCodeBlockKind() == STUB_CODE_BLOCK_STUBPRECODE)
-        {
-            if (((StubPrecode*)start)->GetType() == PRECODE_INTERPRETER)
-            {
-                start = ((InterpreterPrecode*)start)->GetData()->ByteCodeAddr;
-            }
-        }
-    }
-#endif // FEATURE_INTERPRETER
-
-    return start;
+    return GetInterpreterCodeFromEntryPointIfPresent(start);
 }
 
 /****************************************************************************/
@@ -4506,7 +4556,7 @@ VOID ETW::MethodLog::SendMethodEvent(MethodDesc *pMethodDesc, DWORD dwEventOptio
     }
 
     unsigned int jitOptimizationTier = (unsigned int)PrepareCodeConfig::GetJitOptimizationTier(pConfig, pMethodDesc);
-    static_assert_no_msg((unsigned int)PrepareCodeConfig::JitOptimizationTier::Count - 1 <= MethodFlagsJitOptimizationTierLowMask);
+    static_assert((unsigned int)PrepareCodeConfig::JitOptimizationTier::Count - 1 <= MethodFlagsJitOptimizationTierLowMask);
     _ASSERTE(jitOptimizationTier <= MethodFlagsJitOptimizationTierLowMask);
     _ASSERTE(((ulMethodFlags >> MethodFlagsJitOptimizationTierShift) & MethodFlagsJitOptimizationTierLowMask) == 0);
     ulMethodFlags |= jitOptimizationTier << MethodFlagsJitOptimizationTierShift;
@@ -4525,6 +4575,11 @@ VOID ETW::MethodLog::SendMethodEvent(MethodDesc *pMethodDesc, DWORD dwEventOptio
     // EECodeInfo is technically initialized by a "PCODE", but it can also be initialized
     // by a TADDR (i.e., w/out thumb bit set on ARM)
     EECodeInfo codeInfo(start);
+    if (!codeInfo.IsValid())
+    {
+        // The address doesn't map to a registered JIT manager, so there is no region info to report.
+        return;
+    }
 
     // MethodToken ==> MethodRegionInfo
     IJitManager::MethodRegionInfo methodRegionInfo;
@@ -4749,6 +4804,11 @@ VOID ETW::MethodLog::SendMethodILToNativeMapEvent(MethodDesc * pMethodDesc, DWOR
     // EECodeInfo is technically initialized by a "PCODE", but it can also be initialized
     // by a TADDR (i.e., w/out thumb bit set on ARM)
     EECodeInfo codeInfo(start);
+    if (!codeInfo.IsValid())
+    {
+        return;
+    }
+
     TADDR startAddress = codeInfo.GetStartAddress();
     DebugInfoRequest request;
     request.InitFromStartingAddr(codeInfo.GetMethodDesc(), startAddress);
@@ -4830,14 +4890,14 @@ VOID ETW::MethodLog::SendMethodRichDebugInfo(MethodDesc* pMethodDesc, PCODE pNat
     ULONG32 numMappings = 0;
     if (DebugInfoManager::GetRichDebugInfo(request, fpNew, NULL, &inlineTree, &numInlineTree, &mappings, &numMappings))
     {
-        static_assert_no_msg((std::is_same<decltype(inlineTree->Method), CORINFO_METHOD_HANDLE>::value));
-        static_assert_no_msg((std::is_same<decltype(inlineTree->ILOffset), uint32_t>::value));
-        static_assert_no_msg((std::is_same<decltype(inlineTree->Child), uint32_t>::value));
-        static_assert_no_msg((std::is_same<decltype(inlineTree->Sibling), uint32_t>::value));
+        static_assert((std::is_same<decltype(inlineTree->Method), CORINFO_METHOD_HANDLE>::value));
+        static_assert((std::is_same<decltype(inlineTree->ILOffset), uint32_t>::value));
+        static_assert((std::is_same<decltype(inlineTree->Child), uint32_t>::value));
+        static_assert((std::is_same<decltype(inlineTree->Sibling), uint32_t>::value));
 
-        static_assert_no_msg((std::is_same<decltype(mappings->ILOffset), uint32_t>::value));
-        static_assert_no_msg((std::is_same<decltype(mappings->Inlinee), uint32_t>::value));
-        static_assert_no_msg((std::is_same<decltype(mappings->NativeOffset), uint32_t>::value));
+        static_assert((std::is_same<decltype(mappings->ILOffset), uint32_t>::value));
+        static_assert((std::is_same<decltype(mappings->Inlinee), uint32_t>::value));
+        static_assert((std::is_same<decltype(mappings->NativeOffset), uint32_t>::value));
 
         const uint32_t inlineTreeNodeDataSize =
             sizeof(CORINFO_METHOD_HANDLE) +
@@ -4909,23 +4969,76 @@ VOID ETW::MethodLog::SendMethodRichDebugInfo(MethodDesc* pMethodDesc, PCODE pNat
     delete[] (BYTE*)mappings;
 }
 
-VOID ETW::MethodLog::SendHelperEvent(ULONGLONG ullHelperStartAddress, ULONG ulHelperSize, LPCWSTR pHelperName)
+// Do not explicitly check CLR_JIT_KEYWORD here. These events can be enabled by multiple
+// keywords, and copied write barriers and stubs should be reported when any of them is enabled.
+VOID ETW::MethodLog::SendHelperEvent(
+    ULONGLONG ullHelperStartAddress,
+    ULONG ulHelperSize,
+    LPCWSTR pHelperName,
+    DWORD dwEventOptions)
 {
     WRAPPER_NO_CONTRACT;
-    if(pHelperName)
+
+    if (pHelperName == nullptr || ulHelperSize == 0)
     {
-         PCWSTR szDtraceOutput1=W("");
-         ULONG methodFlags = ETW::MethodLog::MethodStructs::JitHelperMethod; // helper flag set
-         FireEtwMethodLoadVerbose_V1(ullHelperStartAddress,
-                                     0,
-                                     ullHelperStartAddress,
-                                     ulHelperSize,
-                                     0,
-                                     methodFlags,
-                                     NULL,
-                                     pHelperName,
-                                     NULL,
-                                     GetClrInstanceId());
+        return;
+    }
+
+    if (dwEventOptions & ETW::EnumerationLog::EnumerationStructs::JitMethodLoad)
+    {
+        FireEtwMethodLoadVerbose_V1(
+            ullHelperStartAddress,
+            0,
+            ullHelperStartAddress,
+            ulHelperSize,
+            0,
+            MethodStructs::JitHelperMethod,
+            nullptr,
+            pHelperName,
+            nullptr,
+            GetClrInstanceId());
+    }
+    else if (dwEventOptions & ETW::EnumerationLog::EnumerationStructs::JitMethodUnload)
+    {
+        FireEtwMethodUnloadVerbose_V1(
+            ullHelperStartAddress,
+            0,
+            ullHelperStartAddress,
+            ulHelperSize,
+            0,
+            MethodStructs::JitHelperMethod,
+            nullptr,
+            pHelperName,
+            nullptr,
+            GetClrInstanceId());
+    }
+    else if (dwEventOptions & ETW::EnumerationLog::EnumerationStructs::JitMethodDCStart)
+    {
+        FireEtwMethodDCStartVerbose_V1(
+            ullHelperStartAddress,
+            0,
+            ullHelperStartAddress,
+            ulHelperSize,
+            0,
+            MethodStructs::JitHelperMethod,
+            nullptr,
+            pHelperName,
+            nullptr,
+            GetClrInstanceId());
+    }
+    else if (dwEventOptions & ETW::EnumerationLog::EnumerationStructs::JitMethodDCEnd)
+    {
+        FireEtwMethodDCEndVerbose_V1(
+            ullHelperStartAddress,
+            0,
+            ullHelperStartAddress,
+            ulHelperSize,
+            0,
+            MethodStructs::JitHelperMethod,
+            nullptr,
+            pHelperName,
+            nullptr,
+            GetClrInstanceId());
     }
 }
 
@@ -4974,13 +5087,49 @@ VOID ETW::MethodLog::SendEventsForJitMethodsHelper(LoaderAllocator *pLoaderAlloc
                                                    BOOL fSendRichDebugInfoEvent,
                                                    BOOL fGetCodeIds)
 {
+    _ASSERTE(pLoaderAllocatorFilter == nullptr || pLoaderAllocatorFilter->IsCollectible());
+    _ASSERTE(pLoaderAllocatorFilter == nullptr || !fGetCodeIds);
+
+#ifdef FEATURE_DYNAMIC_CODE_COMPILED
+    SendEventsForJitMethodsHelper2(
+        ExecutionManager::GetEEJitManager()->GetCodeHeapIterator(pLoaderAllocatorFilter),
+        dwEventOptions,
+        fLoadOrDCStart,
+        fUnloadOrDCEnd,
+        fSendMethodEvent,
+        fSendILToNativeMapEvent,
+        fSendRichDebugInfoEvent,
+        fGetCodeIds);
+#endif // FEATURE_DYNAMIC_CODE_COMPILED
+
+#ifdef FEATURE_INTERPRETER
+    SendEventsForJitMethodsHelper2(
+        ExecutionManager::GetInterpreterJitManager()->GetCodeHeapIterator(pLoaderAllocatorFilter),
+        dwEventOptions,
+        fLoadOrDCStart,
+        fUnloadOrDCEnd,
+        fSendMethodEvent,
+        fSendILToNativeMapEvent,
+        fSendRichDebugInfoEvent,
+        fGetCodeIds);
+#endif // FEATURE_INTERPRETER
+}
+// Called by ETW::MethodLog::SendEventsForJitMethodsHelper
+// Sends the ETW events for methods in the supplied code heap.
+VOID ETW::MethodLog::SendEventsForJitMethodsHelper2(
+                                                   CodeHeapIterator heapIterator,
+                                                   DWORD dwEventOptions,
+                                                   BOOL fLoadOrDCStart,
+                                                   BOOL fUnloadOrDCEnd,
+                                                   BOOL fSendMethodEvent,
+                                                   BOOL fSendILToNativeMapEvent,
+                                                   BOOL fSendRichDebugInfoEvent,
+                                                   BOOL fGetCodeIds)
+{
     CONTRACTL{
         THROWS;
         GC_NOTRIGGER;
     } CONTRACTL_END;
-
-    _ASSERTE(pLoaderAllocatorFilter == nullptr || pLoaderAllocatorFilter->IsCollectible());
-    _ASSERTE(pLoaderAllocatorFilter == nullptr || !fGetCodeIds);
 
     // Set of methods for which we already have sent a MethodDetails event.
     // Only used when sending rich debug info that would otherwise send a lot
@@ -4988,22 +5137,23 @@ VOID ETW::MethodLog::SendEventsForJitMethodsHelper(LoaderAllocator *pLoaderAlloc
     MethodDescSet sentMethodDetailsSet;
     MethodDescSet* pSentMethodDetailsSet = fSendRichDebugInfoEvent ? &sentMethodDetailsSet : NULL;
 
-    CodeHeapIterator heapIterator = ExecutionManager::GetEEJitManager()->GetCodeHeapIterator(pLoaderAllocatorFilter);
     while (heapIterator.Next())
     {
         MethodDesc * pMD = heapIterator.GetMethod();
         if (pMD == NULL)
+        {
+            if (fSendMethodEvent && heapIterator.GetStubCodeBlockKind() != STUB_CODE_BLOCK_UNKNOWN)
+            {
+                ETW::MethodLog::SendHelperEvent(
+                    heapIterator.GetMethodCode(),
+                    heapIterator.GetCodeSize(),
+                    GetStubCodeBlockKindStringW(heapIterator.GetStubCodeBlockKind()),
+                    dwEventOptions);
+            }
             continue;
+        }
 
         PCODE codeStart = PINSTRToPCODE(heapIterator.GetMethodCode());
-
-#ifdef FEATURE_INTERPRETER
-        // Interpreter-TODO - If the code for this was generated by the interpreter, the native
-        // code start which will match up with the NativeCodeVersion/GetNativeCode result is the
-        // IntepreterPrecode, which is not what is found in the NativeCode portion of the MethodDesc
-        // or in the NativeCodeVersion. So we should build out the ability to get the right result
-        // as otherwise we will continue through the loop and skip all the interpreter data.
-#endif // FEATURE_INTERPRETER
 
         // Get info relevant to the native code version. In some cases, such as collectible loader
         // allocators, we don't support code versioning so we need to short circuit the call.
@@ -5018,10 +5168,14 @@ VOID ETW::MethodLog::SendEventsForJitMethodsHelper(LoaderAllocator *pLoaderAlloc
             {
                 // The code version state may be published concurrently with rundown.
 #ifndef DACCESS_COMPILE
-                if (codeStart != pMD->GetNativeCodeVolatile())
+                PCODE nativeCode = pMD->GetNativeCodeVolatile();
 #else
-                if (codeStart != pMD->GetNativeCode())
+                PCODE nativeCode = pMD->GetNativeCode();
 #endif
+                TADDR mappedNativeCode = nativeCode != (PCODE)NULL
+                    ? MethodAndStartAddressToEECodeInfoPointer(pMD, nativeCode)
+                    : (TADDR)NULL;
+                if (codeStart != mappedNativeCode)
                 {
                     continue;
                 }
@@ -5029,12 +5183,12 @@ VOID ETW::MethodLog::SendEventsForJitMethodsHelper(LoaderAllocator *pLoaderAlloc
             else
             {
                 nativeCodeVersionId = nativeCodeVersion.GetVersionId();
-                ilCodeId = nativeCodeVersion.GetILCodeVersionId();
+                ilCodeId = nativeCodeVersion.GetILCodeVersion().GetSource() == CodeVersionSource::kReJIT ? nativeCodeVersion.GetILCodeVersionId() : 0;
             }
         }
         else
 #endif // FEATURE_CODE_VERSIONING
-        if (codeStart != pMD->GetNativeCode())
+        if (codeStart != MethodAndStartAddressToEECodeInfoPointer(pMD, (PCODE)NULL))
         {
             continue;
         }
@@ -5151,6 +5305,13 @@ VOID ETW::MethodLog::SendEventsForJitMethods(BOOL getCodeVersionIds, LoaderAlloc
                 fSendRichDebugInfoEvent,
                 FALSE);
         }
+
+#ifndef FEATURE_PORTABLE_HELPERS
+        if (pLoaderAllocatorFilter == nullptr && fSendMethodEvent)
+        {
+            ReportCopiedWriteBarriersToEventTracing(dwEventOptions);
+        }
+#endif // !FEATURE_PORTABLE_HELPERS
     } EX_CATCH{} EX_END_CATCH
 #endif // !DACCESS_COMPILE
 }
@@ -5258,13 +5419,13 @@ VOID ETW::EnumerationLog::IterateCollectibleLoaderAllocator(AssemblyLoaderAlloca
             ETW::MethodLog::SendEventsForJitMethods(FALSE /*getCodeVersionIds*/, pLoaderAllocator, enumerationOptions);
         }
 
-        // Iterate on all DomainAssembly loaded from the same AssemblyLoaderAllocator
-        DomainAssemblyIterator domainAssemblyIt = pLoaderAllocator->Id()->GetDomainAssemblyIterator();
-        while (!domainAssemblyIt.end())
+        // Iterate on all Assemblies loaded from the same AssemblyLoaderAllocator
+        AssemblyIterator assemblyIt = pLoaderAllocator->Id()->GetAssemblyIterator();
+        while (!assemblyIt.end())
         {
-            Assembly *pAssembly = domainAssemblyIt->GetAssembly(); // TODO: handle iterator
+            Assembly *pAssembly = assemblyIt;
 
-            Module* pModule = domainAssemblyIt->GetAssembly()->GetModule();
+            Module* pModule = pAssembly->GetModule();
             ETW::EnumerationLog::IterateModule(pModule, enumerationOptions);
 
             if (enumerationOptions & ETW::EnumerationLog::EnumerationStructs::DomainAssemblyModuleUnload)
@@ -5272,7 +5433,7 @@ VOID ETW::EnumerationLog::IterateCollectibleLoaderAllocator(AssemblyLoaderAlloca
                 ETW::EnumerationLog::IterateAssembly(pAssembly, enumerationOptions);
             }
 
-            domainAssemblyIt++;
+            assemblyIt++;
         }
 
         // Load Jit Method events
@@ -5425,6 +5586,7 @@ VOID ETW::EnumerationLog::EnumerationHelper(Module *moduleFilter, DWORD enumerat
     }
 }
 
+#if defined(FEATURE_TIERED_COMPILATION)
 void ETW::CompilationLog::TieredCompilation::GetSettings(UINT32 *flagsRef)
 {
     CONTRACTL {
@@ -5466,7 +5628,6 @@ void ETW::CompilationLog::TieredCompilation::GetSettings(UINT32 *flagsRef)
 #endif
     *flagsRef = flags;
 }
-
 void ETW::CompilationLog::TieredCompilation::Runtime::SendSettings()
 {
     CONTRACTL {
@@ -5538,6 +5699,7 @@ void ETW::CompilationLog::TieredCompilation::Runtime::SendBackgroundJitStop(UINT
 
     FireEtwTieredCompilationBackgroundJitStop(GetClrInstanceId(), pendingMethodCount, jittedMethodCount);
 }
+#endif // FEATURE_TIERED_COMPILATION
 
 #endif // !FEATURE_NATIVEAOT
 
@@ -5571,36 +5733,12 @@ bool EventPipeHelper::IsEnabled(DOTNET_TRACE_CONTEXT Context, UCHAR Level, ULONG
 
     return false;
 }
-
-#ifdef TARGET_LINUX
-#include "user_events.h"
-bool UserEventsHelper::Enabled()
-{
-    return IsUserEventsEnabled();
-}
-
-bool UserEventsHelper::IsEnabled(DOTNET_TRACE_CONTEXT Context, UCHAR Level, ULONGLONG Keyword)
-{
-    return IsUserEventsEnabledByKeyword(Context.UserEventsProvider.id, Level, Keyword);
-}
-#else // TARGET_LINUX
-bool UserEventsHelper::Enabled()
-{
-    return false;
-}
-
-bool UserEventsHelper::IsEnabled(DOTNET_TRACE_CONTEXT Context, UCHAR Level, ULONGLONG Keyword)
-{
-    return false;
-}
-#endif // TARGET_LINUX
-
 #endif // FEATURE_PERFTRACING
 
-#if defined(HOST_UNIX)  && defined(FEATURE_PERFTRACING)
+#if defined(FEATURE_EVENTSOURCE_XPLAT)
 // This is a wrapper method for LTTng. See https://github.com/dotnet/coreclr/pull/27273 for details.
 extern "C" bool XplatEventLoggerIsEnabled()
 {
     return XplatEventLogger::IsEventLoggingEnabled();
 }
-#endif // HOST_UNIX && FEATURE_PERFTRACING
+#endif // FEATURE_EVENTSOURCE_XPLAT

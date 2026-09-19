@@ -13,7 +13,18 @@ public class DllImportSearchPathsTest
 {
     private static string Subdirectory => Path.Combine(NativeLibraryToLoad.GetDirectory(), "subdirectory");
 
-    [Fact]
+    // The build moves these native libraries into a subdirectory so the tests below can check that
+    // they are not picked up from the assembly directory. WebAssembly has no run-time library
+    // loading: a test's native code reaches it only by being linked into the test-specific corerun
+    // from the test's own output directory, so a library parked in a subdirectory is never linked
+    // and no lookup can ever find it. The "not found" assertions would then hold for that reason
+    // alone, testing nothing about search paths, so skip them rather than pass them vacuously.
+    public static bool CanLoadLibraryInSubdirectory =>
+        !OperatingSystem.IsBrowser() &&
+        !OperatingSystem.IsWasi();
+
+    [ActiveIssue("https://github.com/dotnet/runtime/issues/82859", typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsMonoMiniJIT), nameof(TestLibrary.PlatformDetection.IsArm64Process))]
+    [ConditionalFact(typeof(DllImportSearchPathsTest), nameof(CanLoadLibraryInSubdirectory))]
     public static void AssemblyDirectory_NotFound()
     {
         // Library should not be found in the assembly directory
@@ -29,7 +40,7 @@ public class DllImportSearchPathsTest
         !OperatingSystem.IsBrowser() &&
         !OperatingSystem.IsWasi();
 
-    [ConditionalFact(nameof(CanLoadAssemblyInSubdirectory))]
+    [ConditionalFact(typeof(DllImportSearchPathsTest), nameof(CanLoadAssemblyInSubdirectory))]
     public static void AssemblyDirectory_InMemory_NotFound()
     {
         byte[] bytes = File.ReadAllBytes(Path.Combine(Subdirectory, $"{nameof(DllImportSearchPathsTest)}.dll"));
@@ -41,7 +52,7 @@ public class DllImportSearchPathsTest
         Assert.Equal(typeof(DllNotFoundException), ex.InnerException.GetType());
     }
 
-    [ConditionalFact(nameof(CanLoadAssemblyInSubdirectory))]
+    [ConditionalFact(typeof(DllImportSearchPathsTest), nameof(CanLoadAssemblyInSubdirectory))]
     public static void AssemblyDirectory_Found()
     {
         // Library should be found in the assembly directory
@@ -110,7 +121,7 @@ public class DllImportSearchPathsTest
         }
     }
 
-    [Fact]
+    [ConditionalFact(typeof(DllImportSearchPathsTest), nameof(CanLoadLibraryInSubdirectory))]
     public static void System32_NotFound()
     {
         string currentDirectory = Environment.CurrentDirectory;
@@ -127,7 +138,7 @@ public class DllImportSearchPathsTest
         }
     }
 
-    [ConditionalFact(nameof(CanLoadAssemblyInSubdirectory))]
+    [ConditionalFact(typeof(DllImportSearchPathsTest), nameof(CanLoadAssemblyInSubdirectory))]
     [PlatformSpecific(TestPlatforms.Windows)]
     public static void AssemblyDirectory_SearchFlags_WithDependency_Found()
     {

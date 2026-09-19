@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the stress test using docker-compose
+# Runs the stress test using docker compose
 
 # Stop script if unbound variable found (use ${var:-} if intentional)
 set -u
@@ -41,7 +41,7 @@ fi
 
 dumpssharepath="$projectdir/dumps"
 
-while [[ $# > 0 ]]; do
+while [[ $# -gt 0 ]]; do
   opt="$(printf "%s" "${1/#--/-}" | tr "[:upper:]" "[:lower:]")"
   case "$opt" in
     -dumpssharepath|-d)

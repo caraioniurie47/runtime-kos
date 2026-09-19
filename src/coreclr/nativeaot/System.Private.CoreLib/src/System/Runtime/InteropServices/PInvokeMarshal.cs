@@ -499,14 +499,9 @@ namespace System.Runtime.InteropServices
         }
 
         // c# string (UTF-16) to UTF-8 encoded byte array
-        // If specified, nativeByteLength represents the length of the output buffer and this function
-        // will not write more than that many bytes. If negative, this function writes as many bytes
-        // as needed to encode the string.
         internal static unsafe byte* StringToAnsiString(char* pManaged, int lenUnicode, byte* pNative, bool terminateWithNull,
-            bool bestFit, bool throwOnUnmappableChar, int nativeByteLength = -1)
+            bool bestFit, bool throwOnUnmappableChar)
         {
-            Debug.Assert(pNative != null || nativeByteLength == -1, "Native buffer should not be null when nativeByteLength is specified.");
-
             bool allAscii = Ascii.IsValid(new ReadOnlySpan<char>(pManaged, lenUnicode));
             int length;
 
@@ -517,18 +512,6 @@ namespace System.Runtime.InteropServices
             else // otherwise, let OS count number of ANSI chars
             {
                 length = GetByteCount(pManaged, lenUnicode);
-            }
-
-            // Clamp to nativeByteLength when caller provides a bounded output buffer (ByValTStr).
-            // For non-ASCII, ConvertWideCharToMultiByte will throw (Unix) or truncate (Windows)
-            // when the encoded bytes exceed the clamped length. This matches CoreCLR behavior.
-            if (nativeByteLength >= 0)
-            {
-                int maxBytesToWrite = terminateWithNull ? Math.Max(0, nativeByteLength - 1) : nativeByteLength;
-                if (length > maxBytesToWrite)
-                {
-                    length = maxBytesToWrite;
-                }
             }
 
             if (pNative == null)
@@ -550,8 +533,8 @@ namespace System.Runtime.InteropServices
                                            throwOnUnmappableChar);
             }
 
-            // Zero terminate if requested and the buffer is not specified to be size 0.
-            if (terminateWithNull && nativeByteLength != 0)
+            // Zero terminate
+            if (terminateWithNull)
                 *(pNative + length) = 0;
 
             return pNative;

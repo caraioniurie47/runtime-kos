@@ -449,7 +449,7 @@ namespace System.Net.Http.Functional.Tests
                     RequestUri = server.Address,
                     Version = HttpVersion30,
                     VersionPolicy = HttpVersionPolicy.RequestVersionExact,
-                    Content = new ByteAtATimeContent(64*1024)
+                    Content = new ByteAtATimeContent(64 * 1024)
                 };
                 using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
                 var content = await response.Content.ReadAsStringAsync();
@@ -1930,7 +1930,6 @@ namespace System.Net.Http.Functional.Tests
             new TheoryData<string>
             {
                 { "https://www.litespeedtech.com/" }, // LiteSpeed
-                { "https://quic.tech:8443/" }, // Cloudflare
                 { "https://quic.aiortc.org:443/" }, // aioquic
                 { "https://h2o.examp1e.net/" } // h2o/quicly
             };
@@ -1943,7 +1942,6 @@ namespace System.Net.Http.Functional.Tests
             new TheoryData<string>
             {
                 { "https://cloudflare-quic.com/" }, // Cloudflare with content
-                { "https://quic.nginx.org/" }, // Nginx with content
             };
     }
 

@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Security.Cryptography.X509Certificates;
@@ -73,8 +72,21 @@ namespace System.Security.Cryptography.Xml
         private int _xmlDsigSearchDepthCounter;
         private int _xmlDsigSearchDepth;
 
-        // Built in transform algorithm URIs
-        private static IList<string>? s_defaultSafeTransformMethods;
+        private static readonly string[] s_defaultSafeTransformMethods =
+        {
+            // Built in canonicalization algorithms
+            SignedXml.XmlDsigC14NTransformUrl,
+            SignedXml.XmlDsigC14NWithCommentsTransformUrl,
+            SignedXml.XmlDsigExcC14NTransformUrl,
+            SignedXml.XmlDsigExcC14NWithCommentsTransformUrl,
+
+            // Other built in transform algorithms
+            SignedXml.XmlDsigBase64TransformUrl,
+            SignedXml.XmlLicenseTransformUrl,
+            // Keep this aligned with SignedXml's safe-transform allow-list. The decryption
+            // transform is further bounded by DangerousMaxRecursionDepth.
+            SignedXml.XmlDecryptionTransformUrl,
+        };
 
         //
         // public constructors
@@ -951,8 +963,8 @@ namespace System.Security.Cryptography.Xml
 
         private static bool ReferenceUsesSafeTransformMethods(CipherReference reference)
         {
-            // If the app context switch to enforce safe transforms is not enabled,
-            // then we consider all transforms to be safe.
+            // If the compatibility switch to allow dangerous encrypted XML transforms
+            // is enabled, skip the safe-transform allow-list check.
             if (LocalAppContextSwitches.AllowDangerousEncryptedXmlTransforms)
             {
                 return true;
@@ -976,7 +988,7 @@ namespace System.Security.Cryptography.Xml
 
         private static bool IsSafeTransform(string transformAlgorithm)
         {
-            foreach (string safeAlgorithm in DefaultSafeTransformMethods)
+            foreach (string safeAlgorithm in s_defaultSafeTransformMethods)
             {
                 if (string.Equals(safeAlgorithm, transformAlgorithm, StringComparison.OrdinalIgnoreCase))
                 {
@@ -985,32 +997,6 @@ namespace System.Security.Cryptography.Xml
             }
 
             return false;
-        }
-
-        private static IList<string> DefaultSafeTransformMethods
-        {
-            get
-            {
-                if (s_defaultSafeTransformMethods == null)
-                {
-                    List<string> safeAlgorithms = new List<string>();
-
-                    // Built in canonicalization algorithms
-                    safeAlgorithms.Add(SignedXml.XmlDsigC14NTransformUrl);
-                    safeAlgorithms.Add(SignedXml.XmlDsigC14NWithCommentsTransformUrl);
-                    safeAlgorithms.Add(SignedXml.XmlDsigExcC14NTransformUrl);
-                    safeAlgorithms.Add(SignedXml.XmlDsigExcC14NWithCommentsTransformUrl);
-
-                    // Other built in transform algorithms
-                    safeAlgorithms.Add(SignedXml.XmlDsigBase64TransformUrl);
-                    safeAlgorithms.Add(SignedXml.XmlLicenseTransformUrl);
-                    safeAlgorithms.Add(SignedXml.XmlDecryptionTransformUrl);
-
-                    s_defaultSafeTransformMethods = safeAlgorithms;
-                }
-
-                return s_defaultSafeTransformMethods;
-            }
         }
     }
 }

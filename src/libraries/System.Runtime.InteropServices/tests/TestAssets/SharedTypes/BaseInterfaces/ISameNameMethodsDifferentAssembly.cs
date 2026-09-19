@@ -6,6 +6,11 @@ using System.Runtime.InteropServices.Marshalling;
 
 namespace SharedTypes.ComInterfaces
 {
+    // Two disjoint base COM interfaces in a separate assembly that happen to declare a
+    // parameterless method of the same name (only the return type differs). Cross-assembly
+    // consumers that derive a [GeneratedComInterface] from each must still build, even though
+    // both inherited MyMethod members reduce to the same IL name with no parameters to
+    // distinguish them.
     [GeneratedComInterface]
     [Guid(IID_A)]
     public partial interface IExternalSameNameA

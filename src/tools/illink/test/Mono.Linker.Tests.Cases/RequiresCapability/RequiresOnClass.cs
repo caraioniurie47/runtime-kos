@@ -1347,12 +1347,23 @@ namespace Mono.Linker.Tests.Cases.RequiresCapability
             {
             }
 
+            class RequiresNewAndConstructors<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T> where T : new()
+            {
+            }
+
+            interface IRequiresAll<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] U>
+            {
+            }
+
+            interface IRequiresNew<T> where T : new()
+            {
+            }
+
             [RequiresUnreferencedCode("--ClassWithRequires--")]
             public class ClassWithRequires
             {
                 public static RequiresAll<T> field;
 
-                [UnexpectedWarning("IL2091", Tool.Trimmer, "https://github.com/dotnet/runtime/issues/108523")]
                 public RequiresAll<T> instanceField;
 
                 [RequiresOnCtor]
@@ -1374,7 +1385,6 @@ namespace Mono.Linker.Tests.Cases.RequiresCapability
                 public void InstanceMethodWithAttribute() { }
 
                 // NOTE: The enclosing RUC does not apply to nested types.
-                [ExpectedWarning("IL2091")]
                 public class ClassWithWarning : RequiresAll<T>
                 {
                     [ExpectedWarning("IL2091")]
@@ -1391,37 +1401,93 @@ namespace Mono.Linker.Tests.Cases.RequiresCapability
                 }
             }
 
-            // This warning should ideally be suppressed by the RUC on the type:
-            [UnexpectedWarning("IL2091", Tool.All, "https://github.com/dotnet/runtime/issues/108523")]
+            class ClassWithOtherCapabilityRequirements
+            {
+                [RequiresAssemblyFiles("--ClassWithOtherCapabilityRequirements--")]
+                [RequiresDynamicCode("--ClassWithOtherCapabilityRequirements--")]
+                public ClassWithOtherCapabilityRequirements()
+                {
+                }
+            }
+
             [RequiresUnreferencedCode("--GenericClassWithWarningWithRequires--")]
             public class GenericClassWithWarningWithRequires<U> : RequiresAll<U>
             {
             }
 
-            // This warning should ideally be suppressed by the RUC on the type:
-            [UnexpectedWarning("IL2091", Tool.All, "https://github.com/dotnet/runtime/issues/108523")]
             [RequiresUnreferencedCode("--ClassWithWarningWithRequires--")]
             public class ClassWithWarningWithRequires : RequiresAll<T>
             {
             }
 
-            [ExpectedWarning("IL2026", "ClassWithRequires()", "--ClassWithRequires--")]
             class ClassWithWarningOnGenericArgumentConstructor : RequiresNew<ClassWithRequires>
             {
-                // Analyzer misses warning for implicit call to the base constructor, because the new constraint is not checked in dataflow.
-                [ExpectedWarning("IL2026", Tool.Trimmer | Tool.NativeAot, "https://github.com/dotnet/runtime/issues/108507")]
+                [ExpectedWarning("IL2026", "--ClassWithRequires--")]
                 public ClassWithWarningOnGenericArgumentConstructor()
                 {
                 }
             }
 
-            [UnexpectedWarning("IL2026", Tool.All, "https://github.com/dotnet/runtime/issues/108507")]
+            class ClassWithWarningOnGenericArgumentConstructor_NewAndAnnotation : RequiresNewAndConstructors<ClassWithRequires>
+            {
+                [ExpectedWarning("IL2026", "--ClassWithRequires--")]
+                public ClassWithWarningOnGenericArgumentConstructor_NewAndAnnotation()
+                {
+                }
+            }
+
             [RequiresUnreferencedCode("--ClassWithWarningOnGenericArgumentConstructorWithRequires--")]
             class ClassWithWarningOnGenericArgumentConstructorWithRequires : RequiresNew<ClassWithRequires>
             {
             }
 
-            [UnexpectedWarning("IL2091", Tool.All, "https://github.com/dotnet/runtime/issues/108523")]
+            [ExpectedWarning("IL2026", "ClassWithRequires()", "--ClassWithRequires--")]
+            class ClassImplementingInterfaceWithWarningOnGenericArgumentConstructor : IRequiresNew<ClassWithRequires>
+            {
+            }
+
+            [RequiresUnreferencedCode("--ClassImplementingInterfaceWithWarningOnGenericArgumentConstructorWithRequires--")]
+            class ClassImplementingInterfaceWithWarningOnGenericArgumentConstructorWithRequires : IRequiresNew<ClassWithRequires>
+            {
+            }
+
+            [RequiresUnreferencedCode("--ClassImplementingInterfaceWithWarningWithRequires--")]
+            public class ClassImplementingInterfaceWithWarningWithRequires : IRequiresAll<T>
+            {
+            }
+
+            [ExpectedWarning("IL3002", "ClassWithOtherCapabilityRequirements()", "--ClassWithOtherCapabilityRequirements--", Tool.NativeAot, "")]
+            [ExpectedWarning("IL3050", "ClassWithOtherCapabilityRequirements()", "--ClassWithOtherCapabilityRequirements--", Tool.NativeAot, "")]
+            [RequiresUnreferencedCode("--ClassImplementingInterfaceWithOtherCapabilityWarningsWithRequires--")]
+            class ClassImplementingInterfaceWithOtherCapabilityWarningsWithRequires : IRequiresNew<ClassWithOtherCapabilityRequirements>
+            {
+            }
+
+            [RequiresUnreferencedCode("--ClassWithOtherCapabilityWarningsInBaseWithRequires--")]
+            class ClassWithOtherCapabilityWarningsInBaseWithRequires : RequiresNew<ClassWithOtherCapabilityRequirements>
+            {
+                [ExpectedWarning("IL3002", "ClassWithOtherCapabilityRequirements()", "--ClassWithOtherCapabilityRequirements--", Tool.Analyzer | Tool.NativeAot, "")]
+                [ExpectedWarning("IL3050", "ClassWithOtherCapabilityRequirements()", "--ClassWithOtherCapabilityRequirements--", Tool.Analyzer | Tool.NativeAot, "")]
+                public ClassWithOtherCapabilityWarningsInBaseWithRequires()
+                {
+                }
+            }
+
+            [RequiresDynamicCode("--ClassWithOtherCapabilityWarningsInBaseWithRdc--")]
+            class ClassWithOtherCapabilityWarningsInBaseWithRdc : RequiresNew<ClassWithOtherCapabilityRequirements>
+            {
+                [ExpectedWarning("IL3002", "ClassWithOtherCapabilityRequirements()", "--ClassWithOtherCapabilityRequirements--", Tool.Analyzer | Tool.NativeAot, "")]
+                public ClassWithOtherCapabilityWarningsInBaseWithRdc()
+                {
+                }
+            }
+
+            [ExpectedWarning("IL3002", "ClassWithOtherCapabilityRequirements()", "--ClassWithOtherCapabilityRequirements--", Tool.NativeAot, "")]
+            [RequiresDynamicCode("--ClassImplementingInterfaceWithOtherCapabilityWarningsWithRdc--")]
+            class ClassImplementingInterfaceWithOtherCapabilityWarningsWithRdc : IRequiresNew<ClassWithOtherCapabilityRequirements>
+            {
+            }
+
             [RequiresUnreferencedCode("--GenericAnnotatedWithWarningWithRequires--")]
             public class GenericAnnotatedWithWarningWithRequires<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields)] TFields> : RequiresAll<TFields>
             {
@@ -1434,8 +1500,13 @@ namespace Mono.Linker.Tests.Cases.RequiresCapability
             [ExpectedWarning("IL2026", "--GenericClassWithWarningWithRequires--")]
             [ExpectedWarning("IL2026", "--ClassWithWarningWithRequires--")]
             [ExpectedWarning("IL2026", "--ClassWithWarningOnGenericArgumentConstructorWithRequires--")]
+            [ExpectedWarning("IL2026", "--ClassImplementingInterfaceWithWarningOnGenericArgumentConstructorWithRequires--")]
+            [ExpectedWarning("IL2026", "--ClassImplementingInterfaceWithWarningWithRequires--")]
+            [ExpectedWarning("IL2026", "--ClassImplementingInterfaceWithOtherCapabilityWarningsWithRequires--")]
+            [ExpectedWarning("IL2026", "--ClassWithOtherCapabilityWarningsInBaseWithRequires--")]
+            [ExpectedWarning("IL3050", "--ClassWithOtherCapabilityWarningsInBaseWithRdc--", Tool.Analyzer | Tool.NativeAot, "")]
+            [ExpectedWarning("IL3050", "--ClassImplementingInterfaceWithOtherCapabilityWarningsWithRdc--", Tool.Analyzer | Tool.NativeAot, "")]
             [ExpectedWarning("IL2026", "--GenericAnnotatedWithWarningWithRequires--")]
-            [ExpectedWarning("IL2091", Tool.Trimmer, "")]
             public static void Test(ClassWithRequires inst = null)
             {
                 var f = ClassWithRequires.field;
@@ -1451,8 +1522,21 @@ namespace Mono.Linker.Tests.Cases.RequiresCapability
                 var g = new GenericClassWithWarningWithRequires<int>();
                 var h = new ClassWithWarningWithRequires();
                 var j = new ClassWithWarningOnGenericArgumentConstructor();
-                var k = new ClassWithWarningOnGenericArgumentConstructorWithRequires();
-                var l = new GenericAnnotatedWithWarningWithRequires<int>();
+                var k = new ClassWithWarningOnGenericArgumentConstructor_NewAndAnnotation();
+                var l = new ClassWithWarningOnGenericArgumentConstructorWithRequires();
+                var m = new GenericAnnotatedWithWarningWithRequires<int>();
+                var n = new ClassImplementingInterfaceWithWarningOnGenericArgumentConstructor();
+                var o = new ClassImplementingInterfaceWithWarningOnGenericArgumentConstructorWithRequires();
+                var p = new ClassImplementingInterfaceWithWarningWithRequires();
+                var q = new ClassImplementingInterfaceWithOtherCapabilityWarningsWithRequires();
+                var r = new ClassImplementingInterfaceWithOtherCapabilityWarningsWithRdc();
+                var s = new ClassWithOtherCapabilityWarningsInBaseWithRequires();
+                var t = new ClassWithOtherCapabilityWarningsInBaseWithRdc();
+
+                // Reference the interfaces, otherwise they could be trimmed
+                Type interfaceType;
+                interfaceType = typeof(IRequiresNew<>);
+                interfaceType = typeof(IRequiresAll<>);
             }
         }
 

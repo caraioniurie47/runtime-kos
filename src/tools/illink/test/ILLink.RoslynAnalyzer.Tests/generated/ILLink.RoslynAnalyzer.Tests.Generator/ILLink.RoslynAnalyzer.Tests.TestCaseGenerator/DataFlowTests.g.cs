@@ -44,6 +44,12 @@ namespace ILLink.RoslynAnalyzer.Tests
         }
 
         [Fact]
+        public Task RuntimeAsyncMethods()
+        {
+            return RunTest(allowMissingWarnings: true);
+        }
+
+        [Fact]
         public Task StaticInterfaceMethodDataflow()
         {
             return RunTest(allowMissingWarnings: true);
@@ -57,6 +63,12 @@ namespace ILLink.RoslynAnalyzer.Tests
 
         [Fact]
         public Task UnsafeDataFlow()
+        {
+            return RunTest(allowMissingWarnings: true);
+        }
+
+        [Fact]
+        public Task UnusedVirtualMethodAnnotations()
         {
             return RunTest(allowMissingWarnings: true);
         }

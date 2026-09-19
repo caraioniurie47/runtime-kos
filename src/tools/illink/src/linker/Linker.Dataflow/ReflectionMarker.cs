@@ -13,15 +13,17 @@ namespace Mono.Linker.Dataflow
 {
     public readonly struct ReflectionMarker
     {
-        readonly LinkContext _context;
         readonly MarkStep _markStep;
         readonly bool _enabled;
+        readonly bool _suppressTrimAnalysisWarnings;
+        public LinkContext Context { get;  }
 
-        public ReflectionMarker(LinkContext context, MarkStep markStep, bool enabled)
+        public ReflectionMarker(LinkContext context, MarkStep markStep, bool enabled, bool suppressTrimAnalysisWarnings = false)
         {
-            _context = context;
+            Context = context;
             _markStep = markStep;
             _enabled = enabled;
+            _suppressTrimAnalysisWarnings = suppressTrimAnalysisWarnings;
         }
 
         internal void MarkTypeForDynamicallyAccessedMembers(in MessageOrigin origin, TypeReference type, DynamicallyAccessedMemberTypes requiredMemberTypes, DependencyKind dependencyKind, bool declaredOnly = false)
@@ -29,10 +31,10 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (type.ResolveToTypeDefinition(_context) is not TypeDefinition typeDefinition)
+            if (type.ResolveToTypeDefinition(Context) is not TypeDefinition typeDefinition)
                 return;
 
-            foreach (var member in typeDefinition.GetDynamicallyAccessedMembers(_context, requiredMemberTypes, declaredOnly))
+            foreach (var member in typeDefinition.GetDynamicallyAccessedMembers(Context, requiredMemberTypes, declaredOnly))
             {
                 switch (member)
                 {
@@ -62,7 +64,7 @@ namespace Mono.Linker.Dataflow
         // This method will probe the current context assembly and if that fails CoreLib for the specified type. Emulates behavior of Type.GetType.
         internal bool TryResolveTypeNameAndMark(string typeName, in DiagnosticContext diagnosticContext, bool needsAssemblyName, [NotNullWhen(true)] out TypeReference? type)
         {
-            if (!_context.TypeNameResolver.TryResolveTypeName(typeName, diagnosticContext, out type, out var typeResolutionRecords, needsAssemblyName))
+            if (!Context.TypeNameResolver.TryResolveTypeName(typeName, diagnosticContext, out type, out var typeResolutionRecords, needsAssemblyName))
             {
                 type = default;
                 return false;
@@ -73,9 +75,9 @@ namespace Mono.Linker.Dataflow
         }
 
         // Resolve a type from the specified assembly and mark it for reflection.
-        internal bool TryResolveTypeNameAndMark(AssemblyDefinition assembly, string typeName, in DiagnosticContext diagnosticContext, [NotNullWhen(true)] out TypeReference? type)
+        internal bool TryResolveTypeNameAndMark(AssemblyDefinition assembly, string typeName, in DiagnosticContext diagnosticContext, bool fallbackToCoreLib, [NotNullWhen(true)] out TypeReference? type)
         {
-            if (!_context.TypeNameResolver.TryResolveTypeName(assembly, typeName, out type, out var typeResolutionRecords))
+            if (!Context.TypeNameResolver.TryResolveTypeName(assembly, typeName, fallbackToCoreLib, out type, out var typeResolutionRecords))
             {
                 type = default;
                 return false;
@@ -101,7 +103,7 @@ namespace Mono.Linker.Dataflow
                 _markStep.MarkTypeVisibleToReflection(typeReference, new DependencyInfo(DependencyKind.AccessedViaReflection, origin.Provider), origin);
                 foreach (var typeResolutionRecord in typeResolutionRecords)
                 {
-                    _context.MarkingHelpers.MarkMatchingExportedType(typeResolutionRecord.ResolvedType, typeResolutionRecord.ReferringAssembly, new DependencyInfo(DependencyKind.DynamicallyAccessedMember, typeReference), origin);
+                    Context.MarkingHelpers.MarkMatchingExportedType(typeResolutionRecord.ResolvedType, typeResolutionRecord.ReferringAssembly, new DependencyInfo(DependencyKind.DynamicallyAccessedMember, typeReference), origin);
                 }
             }
         }
@@ -111,7 +113,7 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (typeRef.ResolveToTypeDefinition(_context) is not TypeDefinition type)
+            if (typeRef.ResolveToTypeDefinition(Context) is not TypeDefinition type)
                 return;
 
             _markStep.MarkTypeVisibleToReflection(type, new DependencyInfo(dependencyKind, origin.Provider), origin);
@@ -122,10 +124,10 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (_context.TryResolve(methodRef) is not MethodDefinition method)
+            if (Context.TryResolve(methodRef) is not MethodDefinition method)
                 return;
 
-            _markStep.MarkMethodVisibleToReflection(method, new DependencyInfo(dependencyKind, origin.Provider), origin);
+            _markStep.MarkMethodVisibleToReflection(method, new DependencyInfo(dependencyKind, origin.Provider), origin, suppressTrimAnalysisWarnings: _suppressTrimAnalysisWarnings);
         }
 
         void MarkField(in MessageOrigin origin, FieldDefinition field, DependencyKind dependencyKind = DependencyKind.AccessedViaReflection)
@@ -133,7 +135,7 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            _markStep.MarkFieldVisibleToReflection(field, new DependencyInfo(dependencyKind, origin.Provider), origin);
+            _markStep.MarkFieldVisibleToReflection(field, new DependencyInfo(dependencyKind, origin.Provider), origin, suppressTrimAnalysisWarnings: _suppressTrimAnalysisWarnings);
         }
 
         internal void MarkProperty(in MessageOrigin origin, PropertyDefinition property, DependencyKind dependencyKind = DependencyKind.AccessedViaReflection)
@@ -141,7 +143,7 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            _markStep.MarkPropertyVisibleToReflection(property, new DependencyInfo(dependencyKind, origin.Provider), origin);
+            _markStep.MarkPropertyVisibleToReflection(property, new DependencyInfo(dependencyKind, origin.Provider), origin, suppressTrimAnalysisWarnings: _suppressTrimAnalysisWarnings);
         }
 
         void MarkEvent(in MessageOrigin origin, EventDefinition @event, DependencyKind dependencyKind = DependencyKind.AccessedViaReflection)
@@ -149,7 +151,7 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            _markStep.MarkEventVisibleToReflection(@event, new DependencyInfo(dependencyKind, origin.Provider), origin);
+            _markStep.MarkEventVisibleToReflection(@event, new DependencyInfo(dependencyKind, origin.Provider), origin, suppressTrimAnalysisWarnings: _suppressTrimAnalysisWarnings);
         }
 
         void MarkInterfaceImplementation(in MessageOrigin origin, InterfaceImplementation interfaceImplementation, DependencyKind dependencyKind = DependencyKind.AccessedViaReflection)
@@ -165,7 +167,7 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (typeRef.ResolveToTypeDefinition(_context) is not TypeDefinition type)
+            if (typeRef.ResolveToTypeDefinition(Context) is not TypeDefinition type)
                 return;
 
             foreach (var ctor in type.GetConstructorsOnType(filter, bindingFlags))
@@ -177,10 +179,10 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (typeRef.ResolveToTypeDefinition(_context) is not TypeDefinition type)
+            if (typeRef.ResolveToTypeDefinition(Context) is not TypeDefinition type)
                 return;
 
-            foreach (var field in type.GetFieldsOnTypeHierarchy(_context, filter, bindingFlags))
+            foreach (var field in type.GetFieldsOnTypeHierarchy(Context, filter, bindingFlags))
                 MarkField(origin, field);
         }
 
@@ -189,10 +191,10 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (typeRef.ResolveToTypeDefinition(_context) is not TypeDefinition type)
+            if (typeRef.ResolveToTypeDefinition(Context) is not TypeDefinition type)
                 return;
 
-            foreach (var property in type.GetPropertiesOnTypeHierarchy(_context, filter, bindingFlags))
+            foreach (var property in type.GetPropertiesOnTypeHierarchy(Context, filter, bindingFlags))
                 MarkProperty(origin, property);
         }
 
@@ -201,10 +203,10 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (typeRef.ResolveToTypeDefinition(_context) is not TypeDefinition type)
+            if (typeRef.ResolveToTypeDefinition(Context) is not TypeDefinition type)
                 return;
 
-            foreach (var @event in type.GetEventsOnTypeHierarchy(_context, filter, bindingFlags))
+            foreach (var @event in type.GetEventsOnTypeHierarchy(Context, filter, bindingFlags))
                 MarkEvent(origin, @event);
         }
 
@@ -213,10 +215,10 @@ namespace Mono.Linker.Dataflow
             if (!_enabled)
                 return;
 
-            if (typeRef.ResolveToTypeDefinition(_context) is not TypeDefinition type)
+            if (typeRef.ResolveToTypeDefinition(Context) is not TypeDefinition type)
                 return;
 
-            _markStep.MarkStaticConstructorVisibleToReflection(type, new DependencyInfo(DependencyKind.AccessedViaReflection, origin.Provider), origin);
+            _markStep.MarkStaticConstructorVisibleToReflection(type, new DependencyInfo(DependencyKind.AccessedViaReflection, origin.Provider), origin, suppressTrimAnalysisWarnings: _suppressTrimAnalysisWarnings);
         }
     }
 }

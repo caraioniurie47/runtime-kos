@@ -663,7 +663,7 @@ namespace System.Security.Cryptography.Xml.Tests
             }
         }
 
-#if NET // Remove once netfx has been serviced
+#if NET
         [Fact]
         public void DecryptData_CipherReference_IdUri_Default()
         {

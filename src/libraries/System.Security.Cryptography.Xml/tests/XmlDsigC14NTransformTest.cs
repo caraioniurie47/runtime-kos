@@ -391,10 +391,10 @@ namespace System.Security.Cryptography.Xml.Tests
         [Fact]
         public void GetDigestedOutput_Null()
         {
-            Assert.Throws< NullReferenceException>(() => new XmlDsigExcC14NTransform().GetDigestedOutput(null));
+            Assert.Throws<NullReferenceException>(() => new XmlDsigC14NTransform().GetDigestedOutput(null));
         }
 
-#if NET // Remove once netfx has been serviced
+#if NET
         [Theory]
         [InlineData(64, false)]   // at the default limit - should pass
         [InlineData(65, true)]    // one over the default limit - should fail

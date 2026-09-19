@@ -2,6 +2,7 @@ parameters:
   runtimeFlavor: ''
   archType: ''
   buildConfig: ''
+  helixBuildConfig: ''
   creator: ''
   helixQueues: ''
   osGroup: ''
@@ -12,51 +13,41 @@ parameters:
   condition: always()
   extraHelixArguments: ''
   shouldContinueOnError: false
+  useHelixMonitor: false
   scenarios: ''
   SuperPmiCollect: ''
   SuperPmiCollectionType: ''
   SuperPmiCollectionName: ''
-  # When false, Helix work item and test failures do not fail the build, so the "Send to Helix"
-  # step still succeeds. Unlike shouldContinueOnError (which only marks the build as
-  # partiallySucceeded), this produces a fully successful build. Scheduled builds with
-  # always:false set this so that flaky tests don't cause AzDO to re-queue the same commit daily.
-  failOnTestFailures: true
-  # When true, failed Helix work items are surfaced as build warnings (visible in the AzDO
-  # timeline) instead of being silently ignored. Intended to be paired with failOnTestFailures:
-  # false so that failures stay visible without failing the build.
-  warnOnTestFailures: false
 
 steps:
-  - script: $(_msbuildCommand) $(_warnAsErrorParamHelixOverride) -restore
-            $(Build.SourcesDirectory)/src/libraries/sendtohelix.proj
-            /p:RuntimeFlavor=${{ parameters.runtimeFlavor }}
-            /p:TargetArchitecture=${{ parameters.archType }}
-            /p:TargetRuntimeIdentifier=${{ parameters.targetRid }}
-            /p:Configuration=${{ parameters.buildConfig }}
-            /p:TargetOS=${{ parameters.osGroup }}
-            /p:MonoForceInterpreter=${{ parameters.interpreter }}
-            /p:TestScope=${{ parameters.testScope }}
-            /p:TestRunNamePrefixSuffix=${{ parameters.testRunNamePrefixSuffix }}
-            /p:HelixBuild=$(Build.BuildNumber)
-            /p:FailOnWorkItemFailure=${{ parameters.failOnTestFailures }}
-            /p:FailOnTestFailure=${{ parameters.failOnTestFailures }}
-            /p:WarnOnHelixTestFailure=${{ parameters.warnOnTestFailures }}
-            ${{ parameters.extraHelixArguments }}
-            /bl:$(Build.SourcesDirectory)/artifacts/log/$(_BuildConfig)/SendToHelix.binlog
-    displayName: Send to Helix
-    condition: and(succeeded(), ${{ parameters.condition }})
-    continueOnError: ${{ eq(parameters.shouldContinueOnError, true) }}
-    env:
-      SYSTEM_ACCESSTOKEN: $(System.AccessToken) # We need to set this env var to publish helix results to Azure Dev Ops
-      _Scenarios: ${{ join(',', parameters.scenarios) }} # Pass scenarios to MSBuild as env var to avoid need of escaping comma separated list
-      _SuperPmiCollect: ${{ parameters.SuperPmiCollect }}
-      _SuperPmiCollectionType: ${{ parameters.SuperPmiCollectionType }}
-      _SuperPmiCollectionName: ${{ parameters.SuperPmiCollectionName }}
+- script: $(_msbuildCommand) $(_warnAsErrorParamHelixOverride) -restore
+          $(Build.SourcesDirectory)/src/libraries/sendtohelix.proj
+          /p:RuntimeFlavor=${{ parameters.runtimeFlavor }}
+          /p:TargetArchitecture=${{ parameters.archType }}
+          /p:TargetRuntimeIdentifier=${{ parameters.targetRid }}
+          /p:Configuration=${{ coalesce(parameters.helixBuildConfig, parameters.buildConfig) }}
+          /p:TargetOS=${{ parameters.osGroup }}
+          /p:MonoForceInterpreter=${{ parameters.interpreter }}
+          /p:TestScope=${{ parameters.testScope }}
+          /p:TestRunNamePrefixSuffix=${{ parameters.testRunNamePrefixSuffix }}
+          /p:HelixBuild=$(Build.BuildNumber)
+          /p:EnableHelixJobMonitor=${{ parameters.useHelixMonitor }}
+          ${{ parameters.extraHelixArguments }}
+          /bl:$(Build.SourcesDirectory)/artifacts/log/$(_BuildConfig)/SendToHelix.binlog
+  displayName: Send to Helix
+  condition: and(succeeded(), ${{ parameters.condition }})
+  continueOnError: ${{ eq(parameters.shouldContinueOnError, true) }}
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken) # We need to set this env var to publish helix results to Azure Dev Ops
+    _Scenarios: ${{ join(',', parameters.scenarios) }} # Pass scenarios to MSBuild as env var to avoid need of escaping comma separated list
+    _SuperPmiCollect: ${{ parameters.SuperPmiCollect }}
+    _SuperPmiCollectionType: ${{ parameters.SuperPmiCollectionType }}
+    _SuperPmiCollectionName: ${{ parameters.SuperPmiCollectionName }}
 
-      ${{ if eq(variables['System.TeamProject'], 'internal') }}:
-        HelixAccessToken: $(HelixApiAccessToken)
-        HelixTargetQueues: ${{ replace(lower(join('+', parameters.helixQueues)), '.open', '') }}
-        Creator: ''
-      ${{ if eq(variables['System.TeamProject'], 'public') }}:
-        HelixTargetQueues: ${{ join('+', parameters.helixQueues) }}
-        Creator: ${{ parameters.creator }}
+    ${{ if eq(variables['System.TeamProject'], 'internal') }}:
+      HelixAccessToken: $(HelixApiAccessToken)
+      HelixTargetQueues: ${{ replace(lower(join('+', parameters.helixQueues)), '.open', '') }}
+      Creator: ''
+    ${{ if eq(variables['System.TeamProject'], 'public') }}:
+      HelixTargetQueues: ${{ join('+', parameters.helixQueues) }}
+      Creator: ${{ parameters.creator }}

@@ -13,12 +13,7 @@ namespace System.Security.Cryptography.Xml
         internal const string CreateFromNameUnreferencedCodeMessage = "The algorithm implementations referenced in the XML payload might be removed. Ensure the required algorithm implementations are preserved in your application.";
         internal const string XsltRequiresDynamicCodeMessage = "XmlDsigXsltTransform uses XslCompiledTransform which requires dynamic code.";
 
-#if NET
-        private static readonly SearchValues<char> s_invalidChars = SearchValues.Create
-#else
-        private static readonly char[] s_invalidChars =
-#endif
-            ([',', '`', '[', '*', '&', '+']);
+        private static readonly SearchValues<char> s_invalidChars = SearchValues.Create(",`[*&+");
 
         [RequiresDynamicCode(XsltRequiresDynamicCodeMessage)]
         [RequiresUnreferencedCode(CreateFromNameUnreferencedCodeMessage)]
@@ -71,7 +66,7 @@ namespace System.Security.Cryptography.Xml
         [RequiresUnreferencedCode(CreateFromNameUnreferencedCodeMessage)]
         public static T? CreateFromName<T>(string? name) where T : class
         {
-            if (name == null || name.IndexOfAny(s_invalidChars) >= 0)
+            if (name == null || name.AsSpan().ContainsAny(s_invalidChars))
             {
                 return null;
             }

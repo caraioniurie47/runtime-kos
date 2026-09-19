@@ -19,6 +19,9 @@ GCSystemInfo g_SystemInfo;
 
 static bool g_SeLockMemoryPrivilegeAcquired = false;
 
+// The cached total number of CPUs that can be used in the OS.
+uint32_t g_totalCpuCount = 0;
+
 static AffinitySet g_processAffinitySet;
 
 namespace {
@@ -645,12 +648,6 @@ bool GCToOSInterface::CanGetCurrentProcessorNumber()
     return true;
 }
 
-// Flush write buffers of processors that are executing threads of the current process
-void GCToOSInterface::FlushProcessWriteBuffers()
-{
-    ::FlushProcessWriteBuffers();
-}
-
 // Break into a debugger
 void GCToOSInterface::DebugBreak()
 {
@@ -921,7 +918,7 @@ const AffinitySet* GCToOSInterface::SetGCThreadsAffinitySet(uintptr_t configAffi
         if (!configAffinitySet->IsEmpty())
         {
             // Update the process affinity set using the configured set
-            for (size_t i = 0; i < GCToOSInterface::GetTotalProcessorCount(); i++)
+            for (size_t i = 0; i < g_totalCpuCount; i++)
             {
                 if (g_processAffinitySet.Contains(i) && !configAffinitySet->Contains(i))
                 {
@@ -1069,56 +1066,23 @@ void GCToOSInterface::GetMemoryStatus(uint64_t restricted_limit, uint32_t* memor
     }
 }
 
-// Get a high precision performance counter
-// Return:
-//  The counter value
-int64_t GCToOSInterface::QueryPerformanceCounter()
-{
-    LARGE_INTEGER ts;
-    if (!::QueryPerformanceCounter(&ts))
-    {
-        assert(false && "Failed to query performance counter");
-    }
-
-    return ts.QuadPart;
-}
-
-// Get a frequency of the high precision performance counter
-// Return:
-//  The counter frequency
-int64_t GCToOSInterface::QueryPerformanceFrequency()
-{
-    LARGE_INTEGER ts;
-    if (!::QueryPerformanceFrequency(&ts))
-    {
-        assert(false && "Failed to query performance counter");
-    }
-
-    return ts.QuadPart;
-}
-
-// Get a time stamp with a low precision
-// Return:
-//  Time stamp in milliseconds
-uint64_t GCToOSInterface::GetLowPrecisionTimeStamp()
-{
-    return ::GetTickCount64();
-}
-
 // Gets the total number of processors on the machine, not taking
 // into account current process affinity.
 // Return:
 //  Number of processors on the machine
 uint32_t GCToOSInterface::GetTotalProcessorCount()
 {
+    if (g_totalCpuCount != 0)
+        return g_totalCpuCount;
     if (CanEnableGCCPUGroups())
     {
-        return g_nProcessors;
+        g_totalCpuCount = g_nProcessors;
     }
     else
     {
-        return g_SystemInfo.dwNumberOfProcessors;
+        g_totalCpuCount = g_SystemInfo.dwNumberOfProcessors;
     }
+    return g_totalCpuCount;
 }
 
 uint32_t GCToOSInterface::GetMaxProcessorCount()
@@ -1196,7 +1160,7 @@ bool GCToOSInterface::GetProcessorForHeap(uint16_t heap_number, uint16_t* proc_n
     // Locate heap_number-th available processor
     uint16_t procIndex = 0;
     size_t cnt = heap_number;
-    for (uint32_t i = 0; i < GCToOSInterface::GetTotalProcessorCount(); i++)
+    for (uint32_t i = 0; i < g_totalCpuCount; i++)
     {
         if (g_processAffinitySet.Contains(i))
         {

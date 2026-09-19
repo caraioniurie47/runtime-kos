@@ -15,7 +15,9 @@
 #include "instmethhash.h"
 #include "typestring.h"
 #include "typedesc.h"
+#ifndef DACCESS_COMPILE
 #include "comdelegate.h"
+#endif // !DACCESS_COMPILE
 
 // Instantiated generic methods
 //
@@ -61,6 +63,8 @@
 //
 
 
+#ifndef DACCESS_COMPILE
+
 // Helper method that creates a method-desc off a template method desc
 static MethodDesc* CreateMethodDesc(LoaderAllocator *pAllocator,
                                     Module* pLoaderModule,
@@ -74,7 +78,6 @@ static MethodDesc* CreateMethodDesc(LoaderAllocator *pAllocator,
     {
         THROWS;
         GC_TRIGGERS;
-        INJECT_FAULT(COMPlusThrowOM(););
         PRECONDITION(CheckPointer(pAllocator));
         PRECONDITION(CheckPointer(pMT));
         PRECONDITION(CheckPointer(pTemplateMD));
@@ -150,6 +153,8 @@ static MethodDesc* CreateMethodDesc(LoaderAllocator *pAllocator,
     return pMD;
 }
 
+#endif // !DACCESS_COMPILE
+
 //
 // The following methods map between tightly bound boxing and unboxing MethodDesc.
 // We always layout boxing and unboxing MethodDescs next to each other in same
@@ -164,9 +169,11 @@ static MethodDesc * FindTightlyBoundWrappedMethodDesc(MethodDesc * pMD)
 {
     CONTRACTL
     {
+        MODE_ANY;
         NOTHROW;
         GC_NOTRIGGER;
         PRECONDITION(CheckPointer(pMD));
+        SUPPORTS_DAC;
     }
     CONTRACTL_END
 
@@ -196,6 +203,7 @@ static MethodDesc * FindTightlyBoundUnboxingStub(MethodDesc * pMD)
         NOTHROW;
         GC_NOTRIGGER;
         PRECONDITION(CheckPointer(pMD));
+        SUPPORTS_DAC;
     }
     CONTRACTL_END
 
@@ -227,7 +235,7 @@ static MethodDesc * FindTightlyBoundUnboxingStub(MethodDesc * pMD)
     return pCurMD->IsUnboxingStub() ? pCurMD : NULL;
 }
 
-#ifdef _DEBUG
+#if defined(_DEBUG) && !defined(DACCESS_COMPILE)
 //
 // Alternative brute-force implementation of FindTightlyBoundWrappedMethodDesc for debug-only check.
 //
@@ -304,7 +312,9 @@ static MethodDesc * FindTightlyBoundUnboxingStub_DEBUG(MethodDesc * pMD)
     }
     return NULL;
 }
-#endif // _DEBUG
+#endif // _DEBUG && !DACCESS_COMPILE
+
+#ifndef DACCESS_COMPILE
 
 static BOOL SatisfiesMethodConstraintsForInstantiation(MethodDesc *pGenericMethodDef,
                                                        TypeHandle thParent,
@@ -316,7 +326,6 @@ static BOOL SatisfiesMethodConstraintsForInstantiation(MethodDesc *pGenericMetho
         THROWS;
         GC_TRIGGERS;
         MODE_ANY;
-        INJECT_FAULT(COMPlusThrowOM());
         PRECONDITION(CheckPointer(pGenericMethodDef));
     }
     CONTRACTL_END;
@@ -389,20 +398,17 @@ InstantiatedMethodDesc::NewInstantiatedMethodDesc(MethodTable *pExactMT,
                                                   Instantiation methodInst,
                                                   BOOL getWrappedCode)
 {
-    CONTRACT(InstantiatedMethodDesc*)
+    CONTRACTL
     {
+        MODE_PREEMPTIVE;
         THROWS;
         GC_TRIGGERS;
-        INJECT_FAULT(COMPlusThrowOM(););
         PRECONDITION(CheckPointer(pExactMT));
         PRECONDITION(CheckPointer(pGenericMDescInRepMT));
         PRECONDITION(methodInst.IsEmpty() || pGenericMDescInRepMT->IsGenericMethodDefinition());
         PRECONDITION(methodInst.GetNumArgs() == pGenericMDescInRepMT->GetNumGenericMethodArgs());
-        POSTCONDITION(CheckPointer(RETVAL));
-        POSTCONDITION(getWrappedCode == RETVAL->IsSharedByGenericInstantiations());
-        POSTCONDITION(methodInst.IsEmpty() || RETVAL->HasMethodInstantiation());
     }
-    CONTRACT_END;
+    CONTRACTL_END;
 
     // All instantiated method descs live off the RepMT for the
     // instantiated class they live in.
@@ -451,7 +457,7 @@ InstantiatedMethodDesc::NewInstantiatedMethodDesc(MethodTable *pExactMT,
                                                   pGenericMDescInRepMT->GetMemberDef(),
                                                   methodInst,
                                                   getWrappedCode,
-                                                  pGenericMDescInRepMT->IsAsyncVariantMethod());
+                                                  pGenericMDescInRepMT->GetMatchingAsyncVariantLookup());
 
         if (pNewMD == NULL)
         {
@@ -582,48 +588,12 @@ InstantiatedMethodDesc::NewInstantiatedMethodDesc(MethodTable *pExactMT,
     }
 
     _ASSERTE(pNewMD != NULL);
+    _ASSERTE(getWrappedCode == pNewMD->IsSharedByGenericInstantiations());
+    _ASSERTE(methodInst.IsEmpty() || pNewMD->HasMethodInstantiation());
     pNewMD->CheckRestore();
-
-    RETURN pNewMD;
+    return pNewMD;
 }
-
-// Calling this method is equivalent to
-// FindOrCreateAssociatedMethodDesc(pCanonicalMD, pExactMT, FALSE, Instantiation(), FALSE, TRUE)
-// except that it also creates InstantiatedMethodDescs based on shared class methods. This is
-// convenient for interop where, unlike ordinary managed methods, marshaling stubs for say Foo<string>
-// and Foo<object> look very different and need separate representation.
-InstantiatedMethodDesc*
-InstantiatedMethodDesc::FindOrCreateExactClassMethod(MethodTable *pExactMT,
-                                                     MethodDesc *pCanonicalMD)
-{
-    CONTRACTL
-    {
-        THROWS;
-        GC_TRIGGERS;
-        MODE_ANY;
-        PRECONDITION(!pExactMT->IsSharedByGenericInstantiations());
-        PRECONDITION(pCanonicalMD->IsSharedByGenericInstantiations());
-    }
-    CONTRACTL_END;
-
-    InstantiatedMethodDesc *pInstMD = FindLoadedInstantiatedMethodDesc(pExactMT,
-                                                                       pCanonicalMD->GetMemberDef(),
-                                                                       Instantiation(),
-                                                                       FALSE,
-                                                                       pCanonicalMD->IsAsyncVariantMethod());
-
-    if (pInstMD == NULL)
-    {
-        // create a new MD if not found
-        pInstMD = NewInstantiatedMethodDesc(pExactMT,
-                                            pCanonicalMD,
-                                            pCanonicalMD,
-                                            Instantiation(),
-                                            FALSE);
-    }
-
-    return pInstMD;
-}
+#endif // !DACCESS_COMPILE
 
 // N.B. it is not guarantee that the returned InstantiatedMethodDesc is restored.
 // It is the caller's responsibility to call CheckRestore on the returned value.
@@ -633,29 +603,21 @@ InstantiatedMethodDesc::FindLoadedInstantiatedMethodDesc(MethodTable *pExactOrRe
                                                          mdMethodDef methodDef,
                                                          Instantiation methodInst,
                                                          BOOL getWrappedCode,
-                                                         BOOL asyncThunk)
+                                                         AsyncVariantLookup variantLookup)
 {
-    CONTRACT(InstantiatedMethodDesc *)
+    CONTRACTL
     {
         THROWS;
         GC_NOTRIGGER;
-        FORBID_FAULT;
         PRECONDITION(CheckPointer(pExactOrRepMT));
+        SUPPORTS_DAC;
 
         // All wrapped method descriptors (except BoxedEntryPointStubs, which don't use this path) are
         // canonical and exhibit some kind of code sharing.
         PRECONDITION(!getWrappedCode || pExactOrRepMT->IsCanonicalMethodTable());
         PRECONDITION(!getWrappedCode || pExactOrRepMT->IsSharedByGenericInstantiations() || ClassLoader::IsSharableInstantiation(methodInst));
-
-        // Unboxing stubs are dealt with separately in FindOrCreateAssociatedMethodDesc.  This should
-        // probably be streamlined...
-        POSTCONDITION(!RETVAL || !RETVAL->IsUnboxingStub());
-
-        // All wrapped method descriptors (except BoxedEntryPointStubs, which don't use this path) take an inst arg.
-        // The only ones that don't should have been found in the type's meth table.
-        POSTCONDITION(!getWrappedCode || !RETVAL || RETVAL->RequiresInstArg());
     }
-    CONTRACT_END
+    CONTRACTL_END
 
 
     // First look in the table for the runtime loader module in case someone created it before any
@@ -668,12 +630,23 @@ InstantiatedMethodDesc::FindLoadedInstantiatedMethodDesc(MethodTable *pExactOrRe
                                                   FALSE /* not forceBoxedEntryPoint */,
                                                   methodInst,
                                                   getWrappedCode,
-                                                  asyncThunk);
+                                                  variantLookup);
 
     if (resultMD != NULL)
-       RETURN((InstantiatedMethodDesc*) resultMD);
+    {
+        InstantiatedMethodDesc *pInstMD = (InstantiatedMethodDesc*)resultMD;
 
-    RETURN(NULL);
+        // Unboxing stubs are dealt with separately in FindOrCreateAssociatedMethodDesc.  This should
+        // probably be streamlined...
+        _ASSERTE(!pInstMD->IsUnboxingStub());
+
+        // All wrapped method descriptors (except BoxedEntryPointStubs, which don't use this path) take an inst arg.
+        // The only ones that don't should have been found in the type's meth table.
+        _ASSERTE(!getWrappedCode || pInstMD->RequiresInstArg());
+        return pInstMD;
+    }
+
+    return NULL;
 }
 
 
@@ -786,16 +759,17 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                              BOOL forceBoxedEntryPoint,
                                              Instantiation methodInst,
                                              BOOL allowInstParam,
+                                             AsyncVariantLookup asyncVariantLookup,
                                              BOOL forceRemotableMethod,
                                              BOOL allowCreate,
-                                             AsyncVariantLookup asyncVariantLookup,
                                              ClassLoadLevel level)
 {
-    CONTRACT(MethodDesc*)
+    CONTRACTL
     {
         THROWS;
+        if (allowCreate) { MODE_PREEMPTIVE; } else { MODE_ANY; }
         if (allowCreate) { GC_TRIGGERS; } else { GC_NOTRIGGER; }
-        INJECT_FAULT(COMPlusThrowOM(););
+        if (!allowCreate) { SUPPORTS_DAC; }
 
         PRECONDITION(CheckPointer(pDefMD));
         PRECONDITION(CheckPointer(pExactMT));
@@ -814,24 +788,21 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
         // For remotable methods we better not be allowing instantiation parameters.
         PRECONDITION(!forceRemotableMethod || !allowInstParam);
 
-        POSTCONDITION(((RETVAL == NULL) && !allowCreate) || CheckPointer(RETVAL));
-        POSTCONDITION(((RETVAL == NULL) && !allowCreate) || forceBoxedEntryPoint || !RETVAL->IsUnboxingStub());
-        POSTCONDITION(((RETVAL == NULL) && !allowCreate) || allowInstParam || !RETVAL->RequiresInstArg());
     }
-    CONTRACT_END;
+    CONTRACTL_END;
 
     // Quick exit for the common cases where the result is the same as the primary MD we are given
     if (!pDefMD->HasClassOrMethodInstantiation() &&
         methodInst.IsEmpty() &&
         !forceBoxedEntryPoint &&
         !pDefMD->IsUnboxingStub() &&
-        asyncVariantLookup == AsyncVariantLookup::MatchingAsyncVariant)
+        pDefMD->MatchesAsyncVariantLookup(asyncVariantLookup))
     {
         // Make sure that pDefMD->GetMethodTable() and pExactMT are related types even
         // if we took the fast path.
         _ASSERTE(pDefMD->IsArray() || pDefMD->GetExactDeclaringType(pExactMT) != NULL);
 
-        RETURN pDefMD;
+        return pDefMD;
     }
 
     // Get the version of the method desc. for the instantiated shared class, e.g.
@@ -854,7 +825,9 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
         COMPlusThrowHR(COR_E_TYPELOAD);
     }
 
-    if (pDefMD->HasClassOrMethodInstantiation() || !methodInst.IsEmpty() || asyncVariantLookup == AsyncVariantLookup::AsyncOtherVariant)
+    if (pDefMD->HasClassOrMethodInstantiation() ||
+        !methodInst.IsEmpty() ||
+        !pDefMD->MatchesAsyncVariantLookup(asyncVariantLookup))
     {
         // General checks related to generics: arity (if any) must match and generic method
         // instantiation (if any) must be well-formed.
@@ -868,7 +841,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
 
         if (!allowCreate && !pMDescInCanonMT->GetMethodTable()->IsFullyLoaded())
         {
-            RETURN(NULL);
+            return NULL;
         }
 
         pMDescInCanonMT->CheckRestore(level);
@@ -881,11 +854,11 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
     // - we don't need instantiating stubs for these.
     if (    methodInst.IsEmpty()
         && (allowInstParam || !pMDescInCanonMT->RequiresInstArg())
-        && (forceBoxedEntryPoint == pMDescInCanonMT->IsUnboxingStub())
-        && (!forceRemotableMethod || !pMDescInCanonMT->IsInterface()
-                || !pMDescInCanonMT->GetMethodTable()->IsSharedByGenericInstantiations()) )
+        && (static_cast<bool>(forceBoxedEntryPoint) == pMDescInCanonMT->IsUnboxingStub())
+        && (!forceRemotableMethod || !pMDescInCanonMT->IsInterface() || !pMDescInCanonMT->GetMethodTable()->IsSharedByGenericInstantiations())
+        && (pMDescInCanonMT->MatchesAsyncVariantLookup(asyncVariantLookup)))
     {
-        RETURN(pMDescInCanonMT);
+        return pMDescInCanonMT;
     }
 
     // Unboxing stubs
@@ -919,13 +892,15 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
             // that there is no associated unboxing stub, and FindTightlyBoundUnboxingStub takes
             // this into account but the _DEBUG version does not, so only use it if the method
             // returned is actually different.
+#ifndef DACCESS_COMPILE
             _ASSERTE(pResultMD == pMDescInCanonMT ||
                      pResultMD == FindTightlyBoundUnboxingStub_DEBUG(pMDescInCanonMT));
+#endif // !DACCESS_COMPILE
 
             if (pResultMD != NULL)
             {
                 _ASSERTE(pResultMD->GetMethodTable()->IsFullyLoaded());
-                RETURN(pResultMD);
+                return pResultMD;
             }
 
             MethodTable *pRepMT = pMDescInCanonMT->GetMethodTable();
@@ -941,7 +916,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                TRUE /* forceBoxedEntryPoint */,
                                                Instantiation(),
                                                FALSE /* no inst param */,
-                                               pMDescInCanonMT->IsAsyncVariantMethod());
+                                               pMDescInCanonMT->GetMatchingAsyncVariantLookup());
 
             // If we didn't find it then create it...
             if (!pResultMD)
@@ -949,9 +924,10 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                 // !allowCreate ==> GC_NOTRIGGER ==> no entering Crst
                 if (!allowCreate)
                 {
-                    RETURN(NULL);
+                    return NULL;
                 }
 
+#ifndef DACCESS_COMPILE
                 CrstHolder ch(&pLoaderModule->m_InstMethodHashTableCrst);
 
                 // Check whether another thread beat us to it!
@@ -960,7 +936,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                    TRUE,
                                                    Instantiation(),
                                                    FALSE,
-                                                   pMDescInCanonMT->IsAsyncVariantMethod());
+                                                   pMDescInCanonMT->GetMatchingAsyncVariantLookup());
                 if (pResultMD == NULL)
                 {
                     AllocMemTracker amt;
@@ -990,6 +966,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                 }
 
                 // CrstHolder goes out of scope here
+#endif // !DACCESS_COMPILE
             }
 
         }
@@ -1007,16 +984,17 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                TRUE, /* forceBoxedEntryPoint */
                                                methodInst,
                                                FALSE /* no inst param */,
-                                               pMDescInCanonMT->IsAsyncVariantMethod());
+                                               pMDescInCanonMT->GetMatchingAsyncVariantLookup());
 
             if (!pResultMD)
             {
                 // !allowCreate ==> GC_NOTRIGGER ==> no entering Crst
                 if (!allowCreate)
                 {
-                    RETURN(NULL);
+                    return NULL;
                 }
 
+#ifndef DACCESS_COMPILE
                 // Recursively get the non-unboxing instantiating stub.  Thus we chain an unboxing
                 // stub with an instantiating stub.
                 MethodDesc* pNonUnboxingStub=
@@ -1024,12 +1002,15 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                                  pExactMT,
                                                                  FALSE /* not Unboxing */,
                                                                  methodInst,
-                                                                 FALSE, FALSE, TRUE, asyncVariantLookup);
+                                                                 FALSE,
+                                                                 asyncVariantLookup,
+                                                                 FALSE,
+                                                                 TRUE);
 
                 _ASSERTE(pNonUnboxingStub->GetClassification() == mcInstantiated);
                 _ASSERTE(!pNonUnboxingStub->RequiresInstArg());
                 _ASSERTE(!pNonUnboxingStub->IsUnboxingStub());
-                _ASSERTE(pNonUnboxingStub->IsAsyncVariantMethod() == pMDescInCanonMT->IsAsyncVariantMethod());
+                _ASSERTE(pNonUnboxingStub->GetMatchingAsyncVariantLookup() == pMDescInCanonMT->GetMatchingAsyncVariantLookup());
 
                 // Enter the critical section *after* we've found or created the non-unboxing instantiating stub (else we'd have a race,
                 // and its possible that the non-unboxing instantiating stub may be in a different loader module than pLoaderModule
@@ -1042,7 +1023,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                    TRUE, /* forceBoxedEntryPoint */
                                                    methodInst,
                                                    FALSE /* no inst param */,
-                                                   pNonUnboxingStub->IsAsyncVariantMethod());
+                                                   pNonUnboxingStub->GetMatchingAsyncVariantLookup());
 
                 if (pResultMD == NULL)
                 {
@@ -1074,19 +1055,20 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                 }
 
                 // CrstHolder goes out of scope here
+#endif // !DACCESS_COMPILE
             }
         }
         _ASSERTE(pResultMD);
 
         if (!allowCreate && !pResultMD->GetMethodTable()->IsFullyLoaded())
         {
-            RETURN(NULL);
+            return NULL;
         }
 
         pResultMD->CheckRestore(level);
         _ASSERTE(pResultMD->IsUnboxingStub());
         _ASSERTE(!pResultMD->IsInstantiatingStub());
-        RETURN(pResultMD);
+        return pResultMD;
     }
 
 
@@ -1122,15 +1104,17 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
             // that this is not an unboxing stub, and FindTightlyBoundWrappedMethodDesc takes
             // this into account but the _DEBUG version does not, so only use it if the method
             // returned is actually different.
+#ifndef DACCESS_COMPILE
             _ASSERTE(pResultMD == pMDescInCanonMT ||
                      pResultMD == FindTightlyBoundWrappedMethodDesc_DEBUG(pMDescInCanonMT));
+#endif // !DACCESS_COMPILE
 
             if (pResultMD != NULL)
             {
                 _ASSERTE(pResultMD->GetMethodTable()->IsFullyLoaded());
                 if (allowInstParam || !pResultMD->RequiresInstArg())
                 {
-                    RETURN(pResultMD);
+                    return pResultMD;
                 }
             }
         }
@@ -1146,7 +1130,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
             ClassLoader::IsTypicalInstantiation(pModule, methodDef, methodInst))
         {
             _ASSERTE(!pMDescInCanonMT->IsUnboxingStub());
-            RETURN(pMDescInCanonMT);
+            return pMDescInCanonMT;
         }
 
         // OK, so we now know the thing we're looking for can only be found in the MethodDesc table.
@@ -1184,21 +1168,23 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                                          methodDef,
                                                                          Instantiation(repInst, methodInst.GetNumArgs()),
                                                                          TRUE,
-                                                                         pMDescInCanonMT->IsAsyncVariantMethod());
+                                                                         asyncVariantLookup);
 
             // No - so create one.
             if (pInstMD == NULL)
             {
                 if (!allowCreate)
                 {
-                    RETURN(NULL);
+                    return NULL;
                 }
 
+#ifndef DACCESS_COMPILE
                 pInstMD = InstantiatedMethodDesc::NewInstantiatedMethodDesc(pExactMT->GetCanonicalMethodTable(),
                                                                             pMDescInCanonMT,
                                                                             NULL,
                                                                             Instantiation(repInst, methodInst.GetNumArgs()),
                                                                             TRUE);
+#endif // !DACCESS_COMPILE
             }
         }
         else if (getWrappedThenStub)
@@ -1209,16 +1195,17 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                                          methodDef,
                                                                          methodInst,
                                                                          FALSE,
-                                                                         pMDescInCanonMT->IsAsyncVariantMethod());
+                                                                         asyncVariantLookup);
 
             // No - so create one.  Go fetch the shared one first
             if (pInstMD == NULL)
             {
                 if (!allowCreate)
                 {
-                    RETURN(NULL);
+                    return NULL;
                 }
 
+#ifndef DACCESS_COMPILE
                 // This always returns the shared code.  Repeat the original call except with
                 // approximate params and allowInstParam=true
                 MethodDesc* pWrappedMD = FindOrCreateAssociatedMethodDesc(pDefMD,
@@ -1226,9 +1213,9 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                                           FALSE,
                                                                           Instantiation(repInst, methodInst.GetNumArgs()),
                                                                           /* allowInstParam */ TRUE,
+                                                                          asyncVariantLookup,
                                                                           /* forceRemotableMethod */ FALSE,
                                                                           /* allowCreate */ TRUE,
-                                                                          asyncVariantLookup,
                                                                           /* level */ level);
 
                 _ASSERTE(pWrappedMD->IsSharedByGenericInstantiations());
@@ -1239,6 +1226,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                                             pWrappedMD,
                                                                             methodInst,
                                                                             FALSE);
+#endif // !DACCESS_COMPILE
             }
         }
         else
@@ -1250,35 +1238,41 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
                                                                          methodDef,
                                                                          methodInst,
                                                                          FALSE,
-                                                                         pMDescInCanonMT->IsAsyncVariantMethod());
+                                                                         asyncVariantLookup);
 
             // No - so create one.
             if (pInstMD == NULL)
             {
                 if (!allowCreate)
                 {
-                    RETURN(NULL);
+                    return NULL;
                 }
 
+#ifndef DACCESS_COMPILE
                 pInstMD = InstantiatedMethodDesc::NewInstantiatedMethodDesc(pExactMT,
                                                                             pMDescInCanonMT,
                                                                             NULL,
                                                                             methodInst,
                                                                             FALSE);
+#endif // !DACCESS_COMPILE
             }
         }
         _ASSERTE(pInstMD);
 
         if (!allowCreate && !pInstMD->GetMethodTable()->IsFullyLoaded())
         {
-            RETURN(NULL);
+            return NULL;
         }
 
         pInstMD->CheckRestore(level);
 
-        RETURN(pInstMD);
+        _ASSERTE(allowInstParam || !pInstMD->RequiresInstArg());
+
+        return pInstMD;
     }
 }
+
+#ifndef DACCESS_COMPILE
 
 // Normalize the methoddesc for reflection
 /*static*/ MethodDesc* MethodDesc::FindOrCreateAssociatedMethodDescForReflection(
@@ -1287,6 +1281,7 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
     Instantiation methodInst)
 {
     CONTRACTL {
+        MODE_PREEMPTIVE;
         THROWS;
         GC_TRIGGERS;    // Because allowCreate is TRUE
         PRECONDITION(CheckPointer(pMethod));
@@ -1364,15 +1359,13 @@ MethodDesc::FindOrCreateAssociatedMethodDesc(MethodDesc* pDefMD,
 //
 MethodDesc * MethodDesc::FindOrCreateTypicalSharedInstantiation(BOOL allowCreate /* = TRUE */)
 {
-    CONTRACT(MethodDesc*)
+    CONTRACTL
     {
         THROWS;
         GC_TRIGGERS;
         PRECONDITION(IsTypicalMethodDefinition());
-        POSTCONDITION(CheckPointer(RETVAL));
-        POSTCONDITION(RETVAL->IsTypicalSharedInstantiation());
     }
-    CONTRACT_END
+    CONTRACTL_END
 
     MethodDesc *pMD = this;
     MethodTable *pMT = pMD->GetMethodTable();
@@ -1423,13 +1416,18 @@ MethodDesc * MethodDesc::FindOrCreateTypicalSharedInstantiation(BOOL allowCreate
             genericMethodArgs[i] = TypeHandle(g_pCanonMethodTableClass);
     }
 
-    RETURN(MethodDesc::FindOrCreateAssociatedMethodDesc(pMD,
-                                                        pMT,
-                                                        FALSE, /* don't get unboxing entry point */
-                                                        Instantiation(genericMethodArgs, nGenericMethodArgs),
-                                                        TRUE,
-                                                        FALSE,
-                                                        allowCreate));
+    MethodDesc* result = MethodDesc::FindOrCreateAssociatedMethodDesc(
+        pMD,
+        pMT,
+        FALSE, /* don't get unboxing entry point */
+        Instantiation(genericMethodArgs, nGenericMethodArgs),
+        TRUE,
+        FALSE,
+        allowCreate);
+
+    _ASSERTE(result == NULL || result->IsSharedByGenericInstantiations());
+    return result;
+
 }
 
 //@GENERICSVER: Set up the typical instance (i.e., non-instantiated)
@@ -1443,7 +1441,6 @@ void InstantiatedMethodDesc::SetupGenericMethodDefinition(IMDInternalImport* pIM
     {
         THROWS;
         GC_NOTRIGGER;
-        INJECT_FAULT(COMPlusThrowOM(););
         PRECONDITION(CheckPointer(pIMDII));
         PRECONDITION(CheckPointer(pAllocator));
         PRECONDITION(CheckPointer(pamTracker));
@@ -1635,12 +1632,8 @@ void MethodDesc::CheckConstraintMetadataValidity(BOOL *pfHasCircularMethodConstr
             *pfHasCircularMethodConstraints = TRUE;
         }
     }
-
-    return;
 }
 
-
-#ifndef DACCESS_COMPILE
 
 BOOL MethodDesc::SatisfiesMethodConstraints(TypeHandle thParent, BOOL fThrowIfNotSatisfied/* = FALSE*/)
 {
@@ -1650,7 +1643,6 @@ BOOL MethodDesc::SatisfiesMethodConstraints(TypeHandle thParent, BOOL fThrowIfNo
         GC_TRIGGERS;
         MODE_ANY;
 
-        INJECT_FAULT(COMPlusThrowOM());
     }
     CONTRACTL_END;
 

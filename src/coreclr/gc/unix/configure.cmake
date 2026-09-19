@@ -159,78 +159,31 @@ int main(int argc, char **argv)
     return 0;
 }" HAVE_XSW_USAGE)
 
+check_struct_has_member(
+    "struct statfs"
+    f_fstypename
+    "sys/types.h;sys/mount.h"
+    HAVE_STATFS_FSTYPENAME)
+
+check_struct_has_member(
+    "struct statvfs"
+    f_fstypename
+    "sys/mount.h"
+    HAVE_STATVFS_FSTYPENAME)
+
 # statfs: Find whether this struct exists
-unset(STATFS_INCLUDES)
-
-check_c_source_compiles(
-    "
-    #include <sys/param.h>
-    #include <sys/mount.h>
-    int main(void)
-    {
-        struct statfs s;
-        return 0;
-    }
-    "
-    HAVE_STATFS_STRUCT_MOUNT_H)
-
-if (HAVE_STATFS_STRUCT_MOUNT_H)
-    set (STATFS_INCLUDES sys/param.h;sys/mount.h)
+if (HAVE_STATFS_FSTYPENAME OR HAVE_STATVFS_FSTYPENAME)
+    set (STATFS_INCLUDES sys/mount.h)
 else ()
-    check_c_source_compiles(
-        "
-        #include <sys/vfs.h>
-        int main(void)
-        {
-            struct statfs s;
-            return 0;
-        }
-        "
-        HAVE_STATFS_STRUCT_VFS_H)
-
-    if (HAVE_STATFS_STRUCT_VFS_H)
-        set (STATFS_INCLUDES sys/vfs.h)
-    else ()
-        check_c_source_compiles(
-            "
-            #include <sys/statfs.h>
-            int main(void)
-            {
-                struct statfs s;
-                return 0;
-            }
-            "
-            HAVE_STATFS_STRUCT_STATFS_H)
-        
-        if (HAVE_STATFS_STRUCT_STATFS_H)
-            set (STATFS_INCLUDES sys/statfs.h)
-        endif ()
-    endif ()
+    set (STATFS_INCLUDES sys/statfs.h)
 endif ()
 
-if (DEFINED STATFS_INCLUDES)
-    set (HAVE_STATFS_STRUCT 1)
-    
-    set (CMAKE_EXTRA_INCLUDE_FILES ${STATFS_INCLUDES})
-    check_type_size(
-        "struct statfs"
-        STATFS_SIZE
-        BUILTIN_TYPES_ONLY)
-    set(CMAKE_EXTRA_INCLUDE_FILES) # reset CMAKE_EXTRA_INCLUDE_FILES
-
-    check_struct_has_member(
-        "struct statfs"
-        f_fstypename
-        ${STATFS_INCLUDES}
-        HAVE_STATFS_FSTYPENAME)
-
-    check_prototype_definition(
-        statfs
-        "int statfs(const char *path, struct statfs *buf)"
-        0
-        ${STATFS_INCLUDES}
-        HAVE_NON_LEGACY_STATFS)
-endif ()
+check_prototype_definition(
+    statfs
+    "int statfs(const char *path, struct statfs *buf)"
+    0
+    ${STATFS_INCLUDES}
+    HAVE_NON_LEGACY_STATFS)
 
 set(CMAKE_REQUIRED_LIBRARIES)
 check_cxx_source_runs("

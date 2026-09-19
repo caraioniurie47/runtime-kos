@@ -32,10 +32,10 @@ class TypeDesc
 {
 public:
 #ifndef DACCESS_COMPILE
-    TypeDesc(CorElementType type) {
+    TypeDesc(CorElementType type, bool isCollectible) {
         LIMITED_METHOD_CONTRACT;
 
-        _typeAndFlags = type;
+        _typeAndFlags = type | (isCollectible ? enum_flag_IsCollectible : 0);
     }
 #endif
 
@@ -112,14 +112,19 @@ public:
     // Is actually ParamTypeDesc (BYREF, PTR)
     BOOL HasTypeParam();
 
+    bool IsCollectible() const
+    {
+        LIMITED_METHOD_CONTRACT;
+        return (_typeAndFlags & TypeDesc::enum_flag_IsCollectible) != 0;
+    }
 
-    BOOL HasTypeEquivalence() const
+    bool HasTypeEquivalence() const
     {
         LIMITED_METHOD_CONTRACT;
         return (_typeAndFlags & TypeDesc::enum_flag_HasTypeEquivalence) != 0;
     }
 
-    BOOL IsFullyLoaded() const
+    bool IsFullyLoaded() const
     {
         LIMITED_METHOD_CONTRACT;
 
@@ -186,7 +191,7 @@ public:
     // See methodtable.h for details of the flags with the same name there
     enum
     {
-        // unused                        = 0x00000100,
+        enum_flag_IsCollectible          = 0x00000100,
         // unused                        = 0x00000200,
         // unused                        = 0x00000400,
         // unused                        = 0x00000800,
@@ -228,7 +233,7 @@ class ParamTypeDesc : public TypeDesc {
 public:
 #ifndef DACCESS_COMPILE
     ParamTypeDesc(CorElementType type, TypeHandle arg)
-        : TypeDesc(type), m_Arg(arg) {
+        : TypeDesc(type, arg.IsCollectible()), m_Arg(arg) {
 
         LIMITED_METHOD_CONTRACT;
 
@@ -301,7 +306,7 @@ public:
 #ifndef DACCESS_COMPILE
 
     TypeVarTypeDesc(PTR_Module pModule, mdToken typeOrMethodDef, unsigned int index, mdGenericParam token) :
-        TypeDesc(TypeFromToken(typeOrMethodDef) == mdtTypeDef ? ELEMENT_TYPE_VAR : ELEMENT_TYPE_MVAR)
+        TypeDesc(TypeFromToken(typeOrMethodDef) == mdtTypeDef ? ELEMENT_TYPE_VAR : ELEMENT_TYPE_MVAR, pModule->IsCollectible())
     {
         CONTRACTL
         {
@@ -413,6 +418,7 @@ struct cdac_data<TypeVarTypeDesc>
 {
     static constexpr size_t Module = offsetof(TypeVarTypeDesc, m_pModule);
     static constexpr size_t Token = offsetof(TypeVarTypeDesc, m_token);
+    static constexpr size_t Index = offsetof(TypeVarTypeDesc, m_index);
 };
 
 /*************************************************************************/
@@ -426,7 +432,7 @@ class FnPtrTypeDesc : public TypeDesc
 public:
 #ifndef DACCESS_COMPILE
     FnPtrTypeDesc(BYTE callConv, DWORD numArgs, TypeHandle * retAndArgTypes, PTR_Module pLoaderModule)
-        : TypeDesc(ELEMENT_TYPE_FNPTR), m_pLoaderModule(pLoaderModule), m_NumArgs(numArgs), m_CallConv(callConv)
+        : TypeDesc(ELEMENT_TYPE_FNPTR, pLoaderModule->IsCollectible()), m_pLoaderModule(pLoaderModule), m_NumArgs(numArgs), m_CallConv(callConv)
     {
         LIMITED_METHOD_CONTRACT;
         for (DWORD i = 0; i <= numArgs; i++)
@@ -467,7 +473,8 @@ public:
         LIMITED_METHOD_CONTRACT;
         SUPPORTS_DAC;
 
-        return PTR_TypeHandle(m_RetAndArgTypes);
+        return dac_cast<PTR_TypeHandle>(
+            PTR_HOST_MEMBER_TADDR(FnPtrTypeDesc, this, m_RetAndArgTypes));
     }
 
     BOOL IsSharedByGenericInstantiations();

@@ -6,6 +6,7 @@
 #include "longfilepathwrappers.h"
 #include "sstring.h"
 #include "ex.h"
+#include <dn-stdio.h>
 
 #ifdef HOST_WINDOWS
 class LongFile
@@ -45,6 +46,7 @@ SearchPathWrapper(
     CONTRACTL
     {
         NOTHROW;
+        GC_NOTRIGGER;
     }
     CONTRACTL_END;
 
@@ -136,6 +138,7 @@ GetModuleFileNameWrapper(
     CONTRACTL
     {
         NOTHROW;
+        GC_NOTRIGGER;
     }
     CONTRACTL_END;
 
@@ -192,6 +195,7 @@ DWORD WINAPI GetEnvironmentVariableWrapper(
     CONTRACTL
     {
         NOTHROW;
+        GC_NOTRIGGER;
     }
     CONTRACTL_END;
 
@@ -255,6 +259,7 @@ LoadLibraryExWrapper(
     CONTRACTL
     {
         NOTHROW;
+        GC_NOTRIGGER;
     }
     CONTRACTL_END;
 
@@ -303,6 +308,7 @@ CreateFileWrapper(
     CONTRACTL
     {
         NOTHROW;
+        GC_NOTRIGGER;
     }
     CONTRACTL_END;
 
@@ -342,6 +348,33 @@ CreateFileWrapper(
     return ret;
 }
 
+int u16_fopen_wrapper(FILE** stream, const WCHAR* filename, const WCHAR* mode)
+{
+    CONTRACTL
+    {
+        NOTHROW;
+        GC_NOTRIGGER;
+    }
+    CONTRACTL_END;
+
+    EX_TRY
+    {
+        LongPathString path(LongPathString::Literal, filename);
+
+        if (SUCCEEDED(LongFile::NormalizePath(path)))
+        {
+            return u16_fopen_s(stream, path.GetUnicode(), mode);
+        }
+    }
+    EX_CATCH
+    {
+        return -1;
+    }
+    EX_END_CATCH
+
+    return -1;
+}
+
 BOOL
 CopyFileExWrapper(
         _In_        LPCWSTR lpExistingFileName,
@@ -356,6 +389,7 @@ CopyFileExWrapper(
     CONTRACTL
     {
         NOTHROW;
+        GC_NOTRIGGER;
     }
     CONTRACTL_END;
 

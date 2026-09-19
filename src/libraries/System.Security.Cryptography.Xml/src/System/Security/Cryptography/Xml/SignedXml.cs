@@ -271,7 +271,7 @@ namespace System.Security.Cryptography.Xml
                     bRet = CheckSignature(key);
                     SignedXmlDebugLog.LogVerificationResult(this, key, bRet);
                 }
-            } while (key != null && bRet == false);
+            } while (key != null && !bRet);
 
             signingKey = key;
             return bRet;
@@ -1061,11 +1061,6 @@ namespace System.Security.Cryptography.Xml
             // Calculate the hash
             byte[] hashValue = GetC14NDigest(macAlg);
             SignedXmlDebugLog.LogVerifySignedInfo(this, macAlg, hashValue, m_signature.SignatureValue);
-
-            if (LocalAppContextSwitches.AllowUnsafeTruncatedHmacSignatureVerification)
-            {
-                return m_signature.SignatureValue.AsSpan().SequenceEqual(hashValue.AsSpan(0, m_signature.SignatureValue.Length));
-            }
 
             return CryptographicEquals(m_signature.SignatureValue, hashValue);
         }

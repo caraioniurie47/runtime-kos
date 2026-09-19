@@ -2,10 +2,12 @@
 
 > **Unofficial community port, not affiliated with or endorsed by Microsoft or Kaspersky.**
 
-A fork of [dotnet/runtime](https://github.com/dotnet/runtime) that runs C# programs compiled with .NET 10
-NativeAOT on KasperskyOS Community Edition 1.4.0.102 (arm64, under QEMU).
+A fork of [dotnet/runtime](https://github.com/dotnet/runtime) that runs C# programs compiled with
+NativeAOT on KasperskyOS Community Edition 1.4.0.102 (arm64, under QEMU). This branch, `kos-main`, tracks
+dotnet/runtime `main`; the .NET 10 port is on
+[`kos_changes`](https://github.com/caraioniurie47/runtime-kos/tree/kos_changes).
 
-- [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt packages and a quick start
+- [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt .NET 10 packages and a quick start
 - [HOWTO-KOS.md](HOWTO-KOS.md): build everything from source
 - Samples: [`samples/helloworldapp-kos`](samples/helloworldapp-kos) and [`samples/showcase-kos`](samples/showcase-kos)
 - KasperskyOS CE SDK 1.1.1.40 (GCC): the frozen branch
@@ -53,7 +55,7 @@ We welcome contributions! Many people all over the world have helped make this p
 
 ## Reporting security issues and security bugs
 
-Security issues and bugs should be reported privately, via email, to the Microsoft Security Response Center (MSRC) <secure@microsoft.com>. You should receive a response within 24 hours. If for some reason you do not, please follow up via email to ensure we received your original message. Further information, including the MSRC PGP key, can be found in the [Security TechCenter](https://www.microsoft.com/msrc/faqs-report-an-issue). You can also find these instructions in this repo's [Security doc](SECURITY.md).
+Security issues and bugs should be reported privately to the Microsoft Security Response Center (MSRC) via the [MSRC Researcher Portal](https://msrc.microsoft.com/report/vulnerability/new). You should receive a response within 24 hours. Further information can be found in the [Security TechCenter](https://www.microsoft.com/msrc/faqs-report-an-issue). You can also find these instructions in this repo's [Security doc](SECURITY.md).
 
 Also see info about related [Microsoft .NET Bounty Program](https://www.microsoft.com/msrc/bounty-dot-net-core).
 

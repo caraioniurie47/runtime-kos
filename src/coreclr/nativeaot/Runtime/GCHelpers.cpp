@@ -111,7 +111,7 @@ void MethodTable::InitializeAsGcFreeType()
     m_uBaseSize = sizeof(Array) + SYNC_BLOCK_SKEW;
 }
 
-EXTERN_C void QCALLTYPE RhpCollect(uint32_t uGeneration, uint32_t uMode, UInt32_BOOL lowMemoryP)
+EXTERN_C void QCALLTYPE RhCollect(uint32_t uGeneration, uint32_t uMode, UInt32_BOOL lowMemoryP)
 {
     // This must be called via p/invoke rather than RuntimeImport to make the stack crawlable.
 
@@ -126,7 +126,7 @@ EXTERN_C void QCALLTYPE RhpCollect(uint32_t uGeneration, uint32_t uMode, UInt32_
     pCurThread->EnablePreemptiveMode();
 }
 
-EXTERN_C int64_t QCALLTYPE RhpGetGcTotalMemory()
+EXTERN_C int64_t QCALLTYPE RhGetGcTotalMemory()
 {
     // This must be called via p/invoke rather than RuntimeImport to make the stack crawlable.
 
@@ -142,7 +142,7 @@ EXTERN_C int64_t QCALLTYPE RhpGetGcTotalMemory()
     return ret;
 }
 
-EXTERN_C int32_t QCALLTYPE RhpStartNoGCRegion(int64_t totalSize, UInt32_BOOL hasLohSize, int64_t lohSize, UInt32_BOOL disallowFullBlockingGC)
+EXTERN_C int32_t QCALLTYPE RhStartNoGCRegion(int64_t totalSize, UInt32_BOOL hasLohSize, int64_t lohSize, UInt32_BOOL disallowFullBlockingGC)
 {
     Thread *pCurThread = ThreadStore::GetCurrentThread();
     ASSERT(!pCurThread->IsCurrentThreadInCooperativeMode());
@@ -157,7 +157,7 @@ EXTERN_C int32_t QCALLTYPE RhpStartNoGCRegion(int64_t totalSize, UInt32_BOOL has
     return result;
 }
 
-EXTERN_C int32_t QCALLTYPE RhpEndNoGCRegion()
+EXTERN_C int32_t QCALLTYPE RhEndNoGCRegion()
 {
     ASSERT(!ThreadStore::GetCurrentThread()->IsCurrentThreadInCooperativeMode());
 
@@ -367,19 +367,14 @@ public:
     uint32_t pauseTimePercent;
     uint8_t isCompaction;
     uint8_t isConcurrent;
-    RH_GC_GENERATION_INFO generationInfo0;
-    RH_GC_GENERATION_INFO generationInfo1;
-    RH_GC_GENERATION_INFO generationInfo2;
-    RH_GC_GENERATION_INFO generationInfo3;
-    RH_GC_GENERATION_INFO generationInfo4;
-    uint64_t pauseDuration0;
-    uint64_t pauseDuration1;
+    RH_GC_GENERATION_INFO generationInfo[5];
+    uint64_t pauseDurations[2];
 };
 
 FCIMPL2(void, RhGetMemoryInfo, RH_GH_MEMORY_INFO* pData, int kind)
 {
-    uint64_t* genInfoRaw = (uint64_t*)&(pData->generationInfo0);
-    uint64_t* pauseInfoRaw = (uint64_t*)&(pData->pauseDuration0);
+    uint64_t* genInfoRaw = (uint64_t*)&(pData->generationInfo[0]);
+    uint64_t* pauseInfoRaw = (uint64_t*)&(pData->pauseDurations[0]);
 
     return GCHeapUtilities::GetGCHeap()->GetMemoryInfo(
         &(pData->highMemLoadThresholdBytes),
@@ -617,11 +612,11 @@ static Object* GcAllocInternal(MethodTable* pEEType, uint32_t uFlags, uintptr_t 
     if (pObject == NULL)
         return NULL;
 
-    pObject->set_EEType(pEEType);
+    pObject->SetMethodTable(pEEType);
     if (pEEType->HasComponentSize())
     {
         ASSERT(numElements == (uint32_t)numElements);
-        ((Array*)pObject)->InitArrayLength((uint32_t)numElements);
+        ((Array*)pObject)->SetNumComponents((uint32_t)numElements);
     }
 
     if (isSampled)
@@ -655,7 +650,7 @@ static Object* GcAllocInternal(MethodTable* pEEType, uint32_t uFlags, uintptr_t 
 //  numElements     -  number of array elements
 //  pTransitionFrame-  transition frame to make stack crawlable
 // Returns a pointer to the object allocated or NULL on failure.
-EXTERN_C void* RhpGcAlloc(MethodTable* pEEType, uint32_t uFlags, uintptr_t numElements, PInvokeTransitionFrame* pTransitionFrame)
+EXTERN_C void* RhpGcAlloc(MethodTable* pEEType, uint32_t uFlags, intptr_t numElements, PInvokeTransitionFrame* pTransitionFrame)
 {
     Thread* pThread = ThreadStore::GetCurrentThread();
 
@@ -751,7 +746,6 @@ EXTERN_C void* QCALLTYPE RhRegisterFrozenSegment(void* pSection, size_t allocSiz
     ASSERT(allocSize <= commitSize);
     ASSERT(commitSize <= reservedSize);
 
-#ifdef FEATURE_BASICFREEZE
     segment_info seginfo;
 
     seginfo.pvMem = pSection;
@@ -761,9 +755,6 @@ EXTERN_C void* QCALLTYPE RhRegisterFrozenSegment(void* pSection, size_t allocSiz
     seginfo.ibReserved = reservedSize;
 
     return GCHeapUtilities::GetGCHeap()->RegisterFrozenSegment(&seginfo);
-#else // FEATURE_BASICFREEZE
-    return NULL;
-#endif // FEATURE_BASICFREEZE
 }
 
 EXTERN_C void QCALLTYPE RhUpdateFrozenSegment(void* pSegmentHandle, uint8_t* allocated, uint8_t* committed)

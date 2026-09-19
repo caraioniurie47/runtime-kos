@@ -546,7 +546,7 @@ namespace System.Security.Cryptography.Xml.Tests
             Assert.Throws<NullReferenceException>(() => new XmlDsigExcC14NTransform().GetDigestedOutput(null));
         }
 
-#if NET // Remove once netfx has been serviced
+#if NET
         [Theory]
         [InlineData(64, false)]   // at the default limit - should pass
         [InlineData(65, true)]    // one over the default limit - should fail

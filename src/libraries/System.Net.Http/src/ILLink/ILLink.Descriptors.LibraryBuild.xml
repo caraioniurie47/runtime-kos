@@ -3,9 +3,10 @@
     <type fullname="System.Net.Http.SocketsHttpHandler">
       <!-- called through reflection by System.Net.HttpWebRequest -->
       <method name="get_Settings" />
+    </type>
+    <type fullname="System.Net.Http.HttpRequestMessage">
       <!-- called through UnsafeAccessor by System.Net.Http tests -->
-      <method name="get_InitialHttp2MaxConcurrentStreams" />
-      <method name="set_InitialHttp2MaxConcurrentStreams" />
+      <method name="ExperimentalDangerousDoNotPartitionConnectionPoolBySni" />
     </type>
   </assembly>
 </linker>

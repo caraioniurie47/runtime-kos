@@ -117,6 +117,16 @@ namespace System.Net.Mime
                     }
                 }
 
+                if (buffer[i] == '\n')
+                {
+                    // Bare LF (not preceded by CR). Some SMTP servers may interpret a bare
+                    // "\n.\n" sequence as the "CRLF.CRLF" end-of-data marker, which would
+                    // corrupt the message. Canonicalize the bare LF to CRLF and reset the
+                    // line state so subsequent leading dots are still dot-stuffed.
+                    WriteState.AppendCRLF(false); // Resets CurrentLineLength to 0
+                    continue;
+                }
+
                 if ((WriteState.CurrentLineLength == 0) && (buffer[i] == '.'))
                 {
                     // RFC 2821 Section 4.5.2: We must pad leading dots on a line with an extra dot
@@ -131,26 +141,23 @@ namespace System.Net.Mime
                     continue;
                 }
 
-                // Just regular seven bit data
+                // Regular data byte, pass it through unchanged.
                 WriteState.Append(buffer[i]);
             }
         }
 
-        protected override void Dispose(bool disposing)
+        public override void Close()
         {
-            try
+            if (_lastWriteEndedWithCr)
             {
-                if (disposing && _lastWriteEndedWithCr)
-                {
-                    // write the delayed CR
-                    _lastWriteEndedWithCr = false;
-                    BaseStream.WriteByte((byte)'\r');
-                }
+                // Write the delayed CR before the underlying stream is closed.
+                // DelegatedStream.Close() closes the underlying stream, so this
+                // must happen before we delegate to the base implementation.
+                _lastWriteEndedWithCr = false;
+                BaseStream.WriteByte((byte)'\r');
             }
-            finally
-            {
-                base.Dispose(disposing);
-            }
+
+            base.Close();
         }
 
         public override async ValueTask DisposeAsync()
@@ -161,6 +168,10 @@ namespace System.Net.Mime
                 _lastWriteEndedWithCr = false;
                 await BaseStream.WriteAsync(new byte[] { (byte)'\r' }, CancellationToken.None).ConfigureAwait(false);
             }
+
+            // DelegatedStream does not override DisposeAsync, so the base implementation
+            // falls back to synchronous Dispose(), which disposes the underlying stream.
+            await base.DisposeAsync().ConfigureAwait(false);
         }
 
         public int DecodeBytes(Span<byte> buffer) { throw new NotImplementedException(); }

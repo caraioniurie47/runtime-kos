@@ -14,55 +14,36 @@
 // Check if we should use getfsstat or /proc/mounts
 #if HAVE_MNTINFO
 #include <sys/mount.h>
-#if !HAVE_STATFS_STRUCT && !HAVE_STATVFS_STRUCT
-#error Platform not supported
-#endif
 #else
+#if HAVE_SYS_STATFS_H
+#include <sys/statfs.h>
+#endif
 #if HAVE_SYS_MNTENT_H
 #include <sys/mntent.h>
 #include <sys/mnttab.h>
 #elif HAVE_MNTENT_H
 #include <mntent.h>
-#elif !defined(__KOS__) // TODO-KOS: MountPoints enum
-#error Platform not supported
 #endif
-
-#if !HAVE_NON_LEGACY_STATFS && !HAVE_STATVFS_STRUCT
-#error Platform not supported
-#endif
-
-#if HAVE_STATFS_STRUCT
-#if HAVE_STATFS_STRUCT_MOUNT_H // BSD, Apple
-#include <sys/param.h>
-#include <sys/mount.h>
-#elif HAVE_STATFS_STRUCT_VFS_H // Linux
-#include <sys/vfs.h>
-#elif HAVE_STATFS_STRUCT_STATFS_H
-#include <sys/statfs.h>
-#endif
-#endif
-
-#if HAVE_STATVFS_STRUCT
-#if HAVE_STATVFS_STRUCT_MOUNT_H
-#include <sys/mount.h>
-#elif HAVE_STATVFS_STRUCT_STATVFS_H
 #include <sys/statvfs.h>
-#endif
-#endif
-
 #define STRING_BUFFER_SIZE 8192
 
+#ifdef __HAIKU__
+#include <dirent.h>
+#include <fs_info.h>
+#include <fs_query.h>
+#endif // __HAIKU__
+
 // Android does not define MNTOPT_RO
-#ifndef MNTOPT_RO
+#if !defined(MNTOPT_RO) && (HAVE_SYS_MNTENT_H || HAVE_MNTENT_H)
 #define MNTOPT_RO "r"
-#endif // MNTOPT_RO
+#endif
 #endif
 
 int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
 {
-#if HAVE_MNTINFO
+#if HAVE_MNTINFO && HAVE_STATFS_MOUNT
     // Use getfsstat which is thread-safe (unlike getmntinfo which uses internal static buffers)
-#if HAVE_STATFS_STRUCT
+#if HAVE_STATFS
     struct statfs* mounts = NULL;
 #else
     struct statvfs* mounts = NULL;
@@ -98,7 +79,7 @@ int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
                 errno = ENOMEM;
                 return -1;
             }
-#if HAVE_STATFS_STRUCT
+#if HAVE_STATFS
             mounts = (struct statfs*)malloc(bufferSize);
 #else
             mounts = (struct statvfs*)malloc(bufferSize);
@@ -117,7 +98,15 @@ int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
         }
 
         // Get actual mount point information
+#if HAVE_GETFSSTAT_SIZE_T
+        count = getfsstat(mounts, bufferSize, MNT_NOWAIT);
+#elif HAVE_GETFSSTAT_LONG
+        count = getfsstat(mounts, (long)bufferSize, MNT_NOWAIT);
+#elif HAVE_GETFSSTAT_INT
         count = getfsstat(mounts, (int)bufferSize, MNT_NOWAIT);
+#else
+        count = getfsstat(mounts, bufferSize, MNT_NOWAIT);
+#endif
         if (count < 0)
         {
             free(mounts);
@@ -185,10 +174,44 @@ int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
     return result;
 }
 
-#else
-    // TODO-KOS: MountPoints enum
+#elif defined(__HAIKU__)
+    int32 cookie = 0;
+    dev_t currentDev;
+
+    while ((long)(currentDev = next_dev(&cookie)) >= 0)
+    {
+        struct fs_info info;
+        if (fs_stat_dev(currentDev, &info) != B_OK)
+        {
+            continue;
+        }
+
+        char name[STRING_BUFFER_SIZE];
+        // Two bytes for the name as we're storing "."
+        char buf[sizeof(struct dirent) + 2];
+        struct dirent *entry = (struct dirent *)&buf;
+        strncpy(entry->d_name, ".", 2);
+        entry->d_pdev = currentDev;
+        entry->d_pino = info.root;
+
+        if (get_path_for_dirent(entry, name, sizeof(name)) != B_OK)
+        {
+            continue;
+        }
+
+        onFound(context, name);
+    }
+
     return 0;
 }
+#elif defined(__KOS__)
+    // TODO-KOS: MountPoints enum. KOS has neither getfsstat/getmntinfo nor mntent.h (getvfsstat is declared).
+    (void)onFound;
+    (void)context;
+    return 0;
+}
+#else
+#error "Don't know how to enumerate mount points on this platform"
 #endif
 
 int32_t SystemNative_GetSpaceInfoForMountPoint(const char* name, MountPointInformation* mpi)
@@ -238,6 +261,9 @@ SystemNative_GetFileSystemTypeNameForMountPoint(const char* name, char* formatNa
 #if HAVE_NON_LEGACY_STATFS
     struct statfs stats;
     int result = statfs(name, &stats);
+#elif defined(__HAIKU__)
+    struct fs_info stats;
+    int result = fs_stat_dev(dev_for_path(name), &stats);
 #else
     struct statvfs stats;
     int result = statvfs(name, &stats);
@@ -267,6 +293,17 @@ SystemNative_GetFileSystemTypeNameForMountPoint(const char* name, char* formatNa
         }
         SafeStringCopy(formatNameBuffer, Int32ToSizeT(bufferLength), stats.f_basetype);
         *formatType = -1;
+#elif defined(__HAIKU__)
+        if (bufferLength < B_OS_NAME_LENGTH)
+        {
+            result = ERANGE;
+            *formatType = 0;
+        }
+        else
+        {
+            SafeStringCopy(formatNameBuffer, Int32ToSizeT(bufferLength), stats.fsh_name);
+            *formatType = -1;
+        }
 #else
         SafeStringCopy(formatNameBuffer, Int32ToSizeT(bufferLength), "");
         *formatType = (int64_t)(stats.f_type);

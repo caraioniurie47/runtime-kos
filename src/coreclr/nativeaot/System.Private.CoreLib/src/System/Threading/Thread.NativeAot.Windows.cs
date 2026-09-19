@@ -21,6 +21,8 @@ namespace System.Threading
 
         private ApartmentState _initialApartmentState = ApartmentState.Unknown;
 
+        private SafeWaitHandle GetJoinHandle() => _osHandle;
+
         partial void PlatformSpecificInitialize();
 
         // Platform-specific initialization of foreign threads, i.e. threads not created by Thread.Start
@@ -127,49 +129,6 @@ namespace System.Threading
             }
         }
 
-        private bool JoinInternal(int millisecondsTimeout)
-        {
-            // This method assumes the thread has been started
-            Debug.Assert(!GetThreadStateBit(ThreadState.Unstarted) || (millisecondsTimeout == 0));
-            SafeWaitHandle waitHandle = _osHandle;
-
-            // If an OS thread is terminated and its Thread object is resurrected, _osHandle may be finalized and closed
-            if (waitHandle.IsClosed)
-            {
-                return true;
-            }
-
-            // Handle race condition with the finalizer
-            try
-            {
-                waitHandle.DangerousAddRef();
-            }
-            catch (ObjectDisposedException)
-            {
-                return true;
-            }
-
-            try
-            {
-                int result;
-
-                if (millisecondsTimeout == 0)
-                {
-                    result = (int)Interop.Kernel32.WaitForSingleObject(waitHandle.DangerousGetHandle(), 0);
-                }
-                else
-                {
-                    result = WaitHandle.WaitOneCore(waitHandle.DangerousGetHandle(), millisecondsTimeout, useTrivialWaits: false);
-                }
-
-                return result == (int)Interop.Kernel32.WAIT_OBJECT_0;
-            }
-            finally
-            {
-                waitHandle.DangerousRelease();
-            }
-        }
-
         private unsafe bool CreateThread(GCHandle<Thread> thisThreadHandle)
         {
             const int AllocationGranularity = 0x10000;  // 64 KiB
@@ -208,6 +167,13 @@ namespace System.Threading
 
             // CoreCLR ignores OS errors while setting the priority, so do we
             SetPriorityLive(_priority);
+
+            // If the thread was interrupted before it was started, queue the interruption now
+            if (GetThreadStateBit(Interrupted))
+            {
+                ClearThreadStateBit(Interrupted);
+                Interrupt();
+            }
 
             Interop.Kernel32.ResumeThread(_osHandle);
             return true;
@@ -337,15 +303,9 @@ namespace System.Threading
             if ((t_comState & ComState.InitializedByUs) != 0)
                 return;
 
-#if ENABLE_WINRT
-            int hr = Interop.WinRT.RoInitialize(
-                (state == ApartmentState.STA) ? Interop.WinRT.RO_INIT_SINGLETHREADED
-                    : Interop.WinRT.RO_INIT_MULTITHREADED);
-#else
             int hr = Interop.Ole32.CoInitializeEx(IntPtr.Zero,
                 (state == ApartmentState.STA) ? Interop.Ole32.COINIT_APARTMENTTHREADED
                     : Interop.Ole32.COINIT_MULTITHREADED);
-#endif
             if (hr < 0)
             {
                 // RPC_E_CHANGED_MODE indicates this thread has been already initialized with a different
@@ -373,11 +333,7 @@ namespace System.Threading
             if ((t_comState & ComState.InitializedByUs) == 0)
                 return;
 
-#if ENABLE_WINRT
-            Interop.WinRT.RoUninitialize();
-#else
             Interop.Ole32.CoUninitialize();
-#endif
 
             t_comState &= ~ComState.InitializedByUs;
         }
@@ -406,7 +362,45 @@ namespace System.Threading
             return InitializeExistingThreadPoolThread();
         }
 
-        public void Interrupt() { throw new PlatformNotSupportedException(); }
+        public void Interrupt()
+        {
+            using (_lock.EnterScope())
+            {
+                // Thread.Interrupt for dead thread should do nothing
+                if (IsDead())
+                {
+                    return;
+                }
+
+                // Thread.Interrupt for thread that has not been started yet should queue a pending interrupt
+                // for when we actually create the thread.
+                if (_osHandle?.IsInvalid ?? true)
+                {
+                    SetThreadStateBit(Interrupted);
+                    return;
+                }
+
+                unsafe
+                {
+                    Interop.Kernel32.QueueUserAPC(RuntimeImports.RhGetInterruptApcCallback(), _osHandle, 0);
+                }
+            }
+        }
+
+        internal static void CheckForPendingInterrupt()
+        {
+            if (RuntimeImports.RhCheckAndClearPendingInterrupt())
+            {
+                CurrentThread.ClearWaitSleepJoinState();
+                throw new ThreadInterruptedException();
+            }
+        }
+
+        internal static unsafe int ReentrantWaitAny(bool alertable, int timeout, int count, IntPtr* handles)
+        {
+            Debug.Assert(ReentrantWaitsEnabled);
+            return RuntimeImports.RhCompatibleReentrantWaitAny(alertable, timeout, count, handles);
+        }
 
         internal static bool ReentrantWaitsEnabled =>
             GetCurrentApartmentState() == ApartmentState.STA;

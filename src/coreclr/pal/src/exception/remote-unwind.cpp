@@ -2,13 +2,10 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 /*++
-
 Module Name:
-
     remote-unwind.cpp
 
 Abstract:
-
     Implementation of out of context unwind using libunwind8
     remote unwind API.
 
@@ -35,7 +32,6 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 --*/
 
 #ifdef HOST_UNIX
@@ -46,7 +42,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pal/debug.h"
 #include "pal_endian.h"
 #include "pal.h"
-#define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <dlfcn.h>
 
@@ -67,19 +62,16 @@ SET_DEFAULT_DEBUG_CHANNEL(EXCEPT);
 
 #include "crosscomp.h"
 
-#define KNONVOLATILE_CONTEXT_POINTERS T_KNONVOLATILE_CONTEXT_POINTERS
 #define CONTEXT T_CONTEXT
 
 #else // HOST_UNIX
 
 #include <windows.h>
-#define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 #include <libunwind.h>
 #include "debugmacros.h"
 #include "crosscomp.h"
 
-#define KNONVOLATILE_CONTEXT_POINTERS T_KNONVOLATILE_CONTEXT_POINTERS
 #define CONTEXT T_CONTEXT
 
 typedef BOOL(*UnwindReadMemoryCallback)(PVOID address, PVOID buffer, SIZE_T size);
@@ -538,17 +530,17 @@ BinarySearchEntries(
 
     *found = false;
 
-    static_assert_no_msg(sizeof(T) >= sizeof(uint32_t));
+    static_assert(sizeof(T) >= sizeof(uint32_t));
 
 #ifdef __APPLE__
-    static_assert_no_msg(offsetof(unwind_info_section_header_index_entry, functionOffset) == 0);
-    static_assert_no_msg(sizeof(unwind_info_section_header_index_entry::functionOffset) == sizeof(uint32_t));
+    static_assert(offsetof(unwind_info_section_header_index_entry, functionOffset) == 0);
+    static_assert(sizeof(unwind_info_section_header_index_entry::functionOffset) == sizeof(uint32_t));
 
-    static_assert_no_msg(offsetof(unwind_info_regular_second_level_entry, functionOffset) == 0);
-    static_assert_no_msg(sizeof(unwind_info_regular_second_level_entry::functionOffset) == sizeof(uint32_t));
+    static_assert(offsetof(unwind_info_regular_second_level_entry, functionOffset) == 0);
+    static_assert(sizeof(unwind_info_regular_second_level_entry::functionOffset) == sizeof(uint32_t));
 
-    static_assert_no_msg(offsetof(unwind_info_section_header_lsda_index_entry, functionOffset) == 0);
-    static_assert_no_msg(sizeof(unwind_info_section_header_lsda_index_entry::functionOffset) == sizeof(uint32_t));
+    static_assert(offsetof(unwind_info_section_header_lsda_index_entry, functionOffset) == 0);
+    static_assert(sizeof(unwind_info_section_header_lsda_index_entry::functionOffset) == sizeof(uint32_t));
 #endif // __APPLE__
 
     // Do a binary search on table
@@ -2208,9 +2200,9 @@ find_proc_info(unw_addr_space_t as, unw_word_t ip, unw_proc_info_t *pip, int nee
         }
     }
 
-#if HAVE_GET_PROC_INFO_IN_RANGE || !defined(HOST_UNIX)
+#if HAVE_GET_PROC_INFO_IN_RANGE || defined(__APPLE__) || !defined(HOST_UNIX)
     return unw_get_proc_info_in_range(start_ip, end_ip, ehFrameHdrAddr, ehFrameHdrLen, exidxFrameHdrAddr, exidxFrameHdrLen, as, ip, pip, need_unwind_info, arg);
-#else // HAVE_GET_PROC_INFO_IN_RANGE || !defined(HOST_UNIX)
+#else // HAVE_GET_PROC_INFO_IN_RANGE || defined(__APPLE__) || !defined(HOST_UNIX)
 
     // This branch is executed when using llvm-libunwind (macOS and similar platforms)
     // or HP-libunwind version 1.6 and earlier.

@@ -8,7 +8,6 @@
 
 #include "holder.h"
 
-#define _T(s) L##s
 #include "RhConfig.h"
 
 #include "gcenv.h"
@@ -18,7 +17,7 @@
 #include "thread.h"
 #include "threadstore.h"
 
-#include "nativecontext.h"
+#include "NativeContext.h"
 
 #ifdef FEATURE_SPECIAL_USER_MODE_APC
 #include <versionhelpers.h>
@@ -195,7 +194,7 @@ uint64_t PalGetCurrentOSThreadId()
     return GetCurrentThreadId();
 }
 
-#if !defined(USE_PORTABLE_HELPERS) && !defined(FEATURE_RX_THUNKS)
+#if !defined(FEATURE_PORTABLE_HELPERS) && !defined(FEATURE_RX_THUNKS)
 UInt32_BOOL PalAllocateThunksFromTemplate(_In_ HANDLE hTemplateModule, uint32_t templateRva, size_t templateSize, _Outptr_result_bytebuffer_(templateSize) void** newThunksOut)
 {
 #ifdef XBOX_ONE
@@ -220,8 +219,15 @@ UInt32_BOOL PalAllocateThunksFromTemplate(_In_ HANDLE hTemplateModule, uint32_t 
     success = ((*newThunksOut) != NULL);
 
 cleanup:
-    CloseHandle(hMap);
-    CloseHandle(hFile);
+    if (hMap != NULL)
+    {
+        CloseHandle(hMap);
+    }
+
+    if (hFile != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(hFile);
+    }
 
     return success;
 #endif
@@ -235,7 +241,7 @@ UInt32_BOOL PalFreeThunksFromTemplate(_In_ void *pBaseAddress, size_t templateSi
     return UnmapViewOfFile(pBaseAddress);
 #endif
 }
-#endif // !USE_PORTABLE_HELPERS && !FEATURE_RX_THUNKS
+#endif // !FEATURE_PORTABLE_HELPERS && !FEATURE_RX_THUNKS
 
 UInt32_BOOL PalMarkThunksAsValidCallTargets(
     void *virtualAddress,
@@ -915,14 +921,15 @@ bool PalStartEventPipeHelperThread(_In_ BackgroundCallback callback, _In_opt_ vo
     return PalStartBackgroundWork(callback, pCallbackContext, FALSE);
 }
 
-HANDLE PalGetModuleHandleFromPointer(_In_ void* pointer)
+HANDLE PalGetModuleHandleFromPointer(_In_ void* pointer, bool pinModule)
 {
-    // The runtime is not designed to be unloadable today. Use GET_MODULE_HANDLE_EX_FLAG_PIN to prevent
-    // the module from ever unloading.
+    // The runtime is not designed to be unloadable today.
+    DWORD flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+        (pinModule ? GET_MODULE_HANDLE_EX_FLAG_PIN : GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT);
 
     HMODULE module;
     if (!GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+        flags,
         (LPCWSTR)pointer,
         &module))
     {
@@ -1040,11 +1047,6 @@ UInt32_BOOL PalCloseHandle(HANDLE arg1)
     return ::CloseHandle(arg1);
 }
 
-void PalFlushProcessWriteBuffers()
-{
-    ::FlushProcessWriteBuffers();
-}
-
 uint32_t PalGetCurrentProcessId()
 {
     return static_cast<uint32_t>(::GetCurrentProcessId());
@@ -1068,9 +1070,4 @@ UInt32_BOOL PalSetEvent(HANDLE arg1)
 uint32_t PalWaitForSingleObjectEx(HANDLE arg1, uint32_t arg2, UInt32_BOOL arg3)
 {
     return ::WaitForSingleObjectEx(arg1, arg2, arg3);
-}
-
-void PalGetSystemTimeAsFileTime(FILETIME * arg1)
-{
-    ::GetSystemTimeAsFileTime(arg1);
 }

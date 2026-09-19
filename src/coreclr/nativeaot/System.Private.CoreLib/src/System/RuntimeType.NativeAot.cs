@@ -11,6 +11,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 
+using Internal.Metadata.NativeFormat;
 using Internal.Reflection.Augments;
 using Internal.Reflection.Core.Execution;
 using Internal.Runtime;
@@ -19,7 +20,7 @@ using Debug = System.Diagnostics.Debug;
 
 namespace System
 {
-    internal sealed unsafe class RuntimeType : TypeInfo, ICloneable
+    internal sealed unsafe partial class RuntimeType : TypeInfo, ICloneable
     {
         private MethodTable* _pUnderlyingEEType;
         private IntPtr _runtimeTypeInfoHandle;
@@ -120,6 +121,19 @@ namespace System
                 throw new ArgumentException(SR.Arg_MustBeEnum, "enumType");
 
             return Enum.InternalGetUnderlyingType(this);
+        }
+
+        public override Type? GetNullableUnderlyingType()
+        {
+            MethodTable* pEEType = _pUnderlyingEEType;
+            if (pEEType != null)
+            {
+                if (!pEEType->IsNullable)
+                    return null;
+                if (!pEEType->IsGenericTypeDefinition)
+                    return GetTypeFromMethodTable(pEEType->NullableType);
+            }
+            return GetRuntimeTypeInfo().GetNullableUnderlyingType();
         }
 
         public override bool IsEnumDefined(object value)
@@ -349,7 +363,7 @@ namespace System
             {
                 int count = pEEType->NumInterfaces;
                 if (count == 0)
-                    return EmptyTypes;
+                    return [];
 
                 Type[] result = new Type[count];
                 for (int i = 0; i < result.Length; i++)
@@ -426,7 +440,7 @@ namespace System
                 if (pEEType != null)
                 {
                     if (!pEEType->IsGeneric)
-                        return EmptyTypes;
+                        return [];
 
                     MethodTableList genericArguments = pEEType->GenericArguments;
 
@@ -448,7 +462,7 @@ namespace System
                 return GenericTypeArguments;
             if (IsGenericTypeDefinition)
                 return GenericTypeParameters;
-            return EmptyTypes;
+            return [];
         }
 
         public override bool IsGenericParameter
@@ -565,7 +579,7 @@ namespace System
 
                 uint count = pEEType->NumFunctionPointerParameters;
                 if (count == 0)
-                    return EmptyTypes;
+                    return [];
 
                 MethodTableList parameterTypes = pEEType->FunctionPointerParameters;
 
@@ -690,7 +704,7 @@ namespace System
                 throw new InvalidOperationException(SR.InvalidOperation_NotFunctionPointer);
 
             // Requires a modified type to return the modifiers.
-            return EmptyTypes;
+            return [];
         }
 
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)]
@@ -783,30 +797,38 @@ namespace System
             => GetRuntimeTypeInfo().GetDefaultMembers();
 
         public override bool IsDefined(Type attributeType, bool inherit)
-            => GetRuntimeTypeInfo().IsDefined(attributeType, inherit);
+        {
+            ArgumentNullException.ThrowIfNull(attributeType);
+
+            if (attributeType.UnderlyingSystemType is not RuntimeType attributeRuntimeType)
+                throw new ArgumentException(SR.Arg_MustBeType, nameof(attributeType));
+
+            return RuntimeCustomAttribute.IsDefined(this, attributeRuntimeType, inherit);
+        }
 
         public override object[] GetCustomAttributes(bool inherit)
         {
-            return GetRuntimeTypeInfo().GetCustomAttributes(inherit);
+            return RuntimeCustomAttribute.GetCustomAttributes(this, (RuntimeType)typeof(object), inherit);
         }
 
         public override object[] GetCustomAttributes(Type attributeType, bool inherit)
         {
-            return GetRuntimeTypeInfo().GetCustomAttributes(attributeType, inherit);
-        }
+            ArgumentNullException.ThrowIfNull(attributeType);
 
-        public override IEnumerable<CustomAttributeData> CustomAttributes
-        {
-            get
-            {
-                return GetRuntimeTypeInfo().CustomAttributes;
-            }
+            if (attributeType.UnderlyingSystemType is not RuntimeType attributeRuntimeType)
+                throw new ArgumentException(SR.Arg_MustBeType, nameof(attributeType));
+
+            return RuntimeCustomAttribute.GetCustomAttributes(this, attributeRuntimeType, inherit);
         }
 
         public override IList<CustomAttributeData> GetCustomAttributesData()
         {
-            return GetRuntimeTypeInfo().GetCustomAttributesData();
+            return RuntimeCustomAttributeData.GetCustomAttributesInternal(this);
         }
+
+        internal MetadataReader? GetMetadataReader() => GetRuntimeTypeInfo().GetMetadataReader();
+
+        internal CustomAttributeHandleCollection GetCustomAttributeHandles() => GetRuntimeTypeInfo().GetCustomAttributeHandles();
 
         public override string Name
         {
@@ -855,6 +877,9 @@ namespace System
         [RequiresDynamicCode("The code for an array of the specified type might not be available.")]
         public override Type MakeArrayType(int rank)
             => GetRuntimeTypeInfo().MakeArrayType(rank);
+
+        public override Type MakeFunctionPointerType(Type[]? parameterTypes, bool isUnmanaged = false)
+            => GetRuntimeTypeInfo().MakeFunctionPointerType(parameterTypes, isUnmanaged);
 
         [RequiresDynamicCode("The native code for this instantiation might not be available at runtime.")]
         [RequiresUnreferencedCode("If some of the generic arguments are annotated (either with DynamicallyAccessedMembersAttribute, or generic constraints), trimming can't validate that the requirements of those annotations are met.")]

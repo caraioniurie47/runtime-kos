@@ -217,7 +217,7 @@ namespace System.Security.Cryptography.Xml
             if (encryptedDatas == null || encryptedDatas.Count == 0)
                 return;
             int maxDepth = LocalAppContextSwitches.DangerousMaxRecursionDepth;
-            int maxEncryptedDataElements = LocalAppContextSwitches.MaxDecryptedDataElements;
+            int maxDecryptedDataElements = LocalAppContextSwitches.MaxDecryptedDataElements;
             int decryptedElementsCount = 0;
             Queue<ProcessElementWorkItem> encryptedDatasQueue = new();
             foreach (XmlNode value in encryptedDatas)
@@ -234,9 +234,10 @@ namespace System.Security.Cryptography.Xml
                 if (encryptedDataElement != null && encryptedDataElement.LocalName == "EncryptedData" &&
                     encryptedDataElement.NamespaceURI == EncryptedXml.XmlEncNamespaceUrl)
                 {
-                    if (maxEncryptedDataElements > 0 && ++decryptedElementsCount > maxEncryptedDataElements)
+                    decryptedElementsCount++;
+                    if (maxDecryptedDataElements > 0 && decryptedElementsCount > maxDecryptedDataElements)
                     {
-                        throw new CryptographicException(SR.Cryptography_Xml_MaxEncryptedDataElementsExceeded);
+                        throw new CryptographicException(SR.Cryptography_Xml_MaxDecryptableDataElementsExceeded);
                     }
 
                     XmlNode sibling = encryptedDataElement.NextSibling!;
@@ -252,7 +253,7 @@ namespace System.Security.Cryptography.Xml
                             XmlNodeList nodes = child.SelectNodes("//enc:EncryptedData", _nsm!)!;
                             if (nodes.Count > 0)
                             {
-                                if (maxDepth > 0 && depth > maxDepth)
+                                if (maxDepth > 0 && depth >= maxDepth)
                                 {
                                     throw new CryptographicException(SR.Cryptography_Xml_MaxDepthExceeded);
                                 }

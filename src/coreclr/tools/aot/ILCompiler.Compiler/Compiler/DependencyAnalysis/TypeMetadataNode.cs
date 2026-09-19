@@ -37,15 +37,23 @@ namespace ILCompiler.DependencyAnalysis
         {
             DependencyList dependencies = new DependencyList();
 
-            DefType containingType = _type.ContainingType;
+            MetadataType containingType = _type.ContainingType;
             if (containingType != null)
-                dependencies.Add(factory.TypeMetadata((MetadataType)containingType), "Containing type of a reflectable type");
+                dependencies.Add(factory.TypeMetadata(containingType), "Containing type of a reflectable type");
             else
                 dependencies.Add(factory.ModuleMetadata(_type.Module), "Containing module of a reflectable type");
 
-            MetadataType baseType = _type.MetadataBaseType;
+            MetadataType baseType = _type.BaseType;
             if (baseType != null)
                 GetMetadataDependencies(ref dependencies, factory, baseType, "Base type of a reflectable type");
+
+            foreach (GenericParameterDesc genericParameter in _type.Instantiation)
+            {
+                foreach (TypeDesc typeConstraint in genericParameter.TypeConstraints)
+                {
+                    GetMetadataDependencies(ref dependencies, factory, typeConstraint, "Generic parameter constraint of a reflectable type");
+                }
+            }
 
             var mdManager = (UsageBasedMetadataManager)factory.MetadataManager;
 

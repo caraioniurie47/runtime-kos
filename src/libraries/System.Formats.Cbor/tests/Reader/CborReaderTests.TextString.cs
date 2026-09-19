@@ -110,7 +110,7 @@ namespace System.Formats.Cbor.Tests
             var reader = new CborReader(data);
             Assert.Equal(CborReaderState.StartIndefiniteLengthTextString, reader.PeekState());
 
-            Span<char> buffer = new char[70];
+            Span<char> buffer = stackalloc char[70];
             bool result = reader.TryReadTextString(buffer, out int charsWritten);
 
             Assert.True(result);

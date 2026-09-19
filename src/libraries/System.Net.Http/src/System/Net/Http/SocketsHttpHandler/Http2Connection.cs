@@ -131,9 +131,11 @@ namespace System.Net.Http
         private long _nextPingRequestTimestamp;
         private long _keepAlivePingTimeoutTimestamp;
         private volatile KeepAliveState _keepAliveState;
+        /// <summary>Set once <see cref="SetupAsync"/> completes. Until then, no keep alive PINGs are sent.</summary>
+        private bool _setupComplete;
 
-        public Http2Connection(HttpConnectionPool pool, Stream stream, Activity? connectionSetupActivity, IPEndPoint? remoteEndPoint)
-            : base(pool, connectionSetupActivity, remoteEndPoint)
+        public Http2Connection(HttpConnectionPool pool, Stream stream, Activity? connectionSetupActivity, IPEndPoint? remoteEndPoint, long connectionId)
+            : base(pool, connectionId, connectionSetupActivity, remoteEndPoint)
         {
             _stream = stream;
 
@@ -153,7 +155,7 @@ namespace System.Net.Http
             _nextStream = 1;
             _initialServerStreamWindowSize = DefaultInitialWindowSize;
 
-            _maxConcurrentStreams = (uint)pool.Settings._initialHttp2MaxConcurrentStreams;
+            _maxConcurrentStreams = pool._lastSeenHttp2MaxConcurrentStreams;
             _streamsInUse = 0;
 
             _pendingWindowUpdate = 0;
@@ -172,6 +174,10 @@ namespace System.Net.Http
             }
 
             if (NetEventSource.Log.IsEnabled()) TraceConnection(_stream);
+
+            // Register with the pool before doing anything that may tear the connection down,
+            // so that the pool can run keep alive ping logic for the whole lifetime of the connection.
+            pool.AddHttp2ConnectionForHeartBeat(this);
 
             static long TimeSpanToMs(TimeSpan value)
             {
@@ -256,8 +262,10 @@ namespace System.Net.Http
                     throw;
                 }
 
-                // TODO: Review this case!
-                throw new IOException(SR.net_http_http2_connection_not_established, e);
+                // Use _abortException if available, as it contains the real reason for the connection failure.
+                // For example, when ProcessIncomingFramesAsync detects a server-initiated disconnect and calls Abort(),
+                // _abortException will have the original IOException, while 'e' here may be an uninformative ObjectDisposedException.
+                throw new IOException(SR.net_http_http2_connection_not_established, _abortException ?? e);
             }
 
             // Avoid capturing the initial request's ExecutionContext for the entire lifetime of the new connection.
@@ -265,6 +273,9 @@ namespace System.Net.Http
             {
                 _ = ProcessOutgoingFramesAsync();
             }
+
+            // The connection is now able to write frames, so it may start sending keep alive PINGs.
+            _setupComplete = true;
         }
 
         private void Shutdown()
@@ -398,7 +409,7 @@ namespace System.Net.Http
                 }
 
                 _lastPendingWriterShouldFlush = false;
-                _outgoingBuffer.Discard(_outgoingBuffer.ActiveLength);
+                _outgoingBuffer.DiscardAll();
             }
         }
 
@@ -856,6 +867,14 @@ namespace System.Net.Http
                     switch ((SettingId)settingId)
                     {
                         case SettingId.MaxConcurrentStreams:
+                            // Only memorize the value for future connections if it's lower than what we're
+                            // configured to start with. SocketsHttpHandler.InitialHttp2MaxConcurrentStreams
+                            // acts as the upper bound for what every new connection starts with.
+                            if (settingValue < _pool.Settings._initialHttp2MaxConcurrentStreams)
+                            {
+                                _pool._lastSeenHttp2MaxConcurrentStreams = settingValue;
+                            }
+
                             ChangeMaxConcurrentStreams(settingValue);
                             maxConcurrentStreamsReceived = true;
                             break;
@@ -1347,8 +1366,27 @@ namespace System.Net.Http
         {
             Debug.Assert(!_pool.HasSyncObjLock);
 
-            if (_shutdown)
+            if (!_setupComplete)
+            {
+                // The connection is still being established. It can't send PINGs yet, and a server that
+                // never completes the handshake is the connect timeout's responsibility, not ours.
                 return;
+            }
+
+            if (_shutdown)
+            {
+                // The connection is shutting down (e.g. we received a GOAWAY frame), but it may still be
+                // processing existing requests. Keep sending PINGs while it does, as that's the only way
+                // to detect that the server became unresponsive. Once the last stream completes, the
+                // connection is torn down and unregistered from the pool, so we'll stop being called.
+                lock (SyncObject)
+                {
+                    if (_streamsInUse == 0)
+                    {
+                        return;
+                    }
+                }
+            }
 
             try
             {
@@ -1395,7 +1433,7 @@ namespace System.Net.Http
 
         private void WriteLiteralHeader(string name, ReadOnlySpan<string> values, Encoding? valueEncoding, ref ArrayBuffer headerBuffer)
         {
-            if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(name)}={name}, {nameof(values)}={string.Join(", ", values.ToArray())}");
+            if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(name)}={name}, {nameof(values)}={string.Join(", ", values)}");
 
             int bytesWritten;
             while (!HPackEncoder.EncodeLiteralHeaderFieldWithoutIndexingNewName(name, values, HttpHeaderParser.DefaultSeparatorBytes, valueEncoding, headerBuffer.AvailableSpan, out bytesWritten))
@@ -1408,7 +1446,7 @@ namespace System.Net.Http
 
         private void WriteLiteralHeaderValues(ReadOnlySpan<string> values, byte[]? separator, Encoding? valueEncoding, ref ArrayBuffer headerBuffer)
         {
-            if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(values)}={string.Join(Encoding.ASCII.GetString(separator ?? []), values.ToArray())}");
+            if (NetEventSource.Log.IsEnabled()) Trace($"{nameof(values)}={string.Join(Encoding.ASCII.GetString(separator ?? []), values)}");
 
             int bytesWritten;
             while (!HPackEncoder.EncodeStringLiterals(values, separator, valueEncoding, headerBuffer.AvailableSpan, out bytesWritten))
@@ -1907,6 +1945,8 @@ namespace System.Net.Http
             // ProcessIncomingFramesAsync and ProcessOutgoingFramesAsync respectively, and those methods are
             // responsible for returning the buffers.
 
+            _pool.RemoveHttp2ConnectionFromHeartBeat(this);
+
             MarkConnectionAsClosed();
         }
 
@@ -2037,6 +2077,8 @@ namespace System.Net.Http
 
         public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, bool async, CancellationToken cancellationToken)
         {
+            request.ConnectionId = Id;
+
             Debug.Assert(async);
             Debug.Assert(!_pool.HasSyncObjLock);
             if (NetEventSource.Log.IsEnabled()) Trace($"Sending request: {request}");
@@ -2070,7 +2112,7 @@ namespace System.Net.Http
                 // our built-in content types do), then we can just proceed to wait for the request body content to
                 // complete before worrying about response headers completing.
                 if (requestBodyTask.IsCompleted ||
-                    duplex == false ||
+                    !duplex ||
                     await Task.WhenAny(requestBodyTask, responseHeadersTask).ConfigureAwait(false) == requestBodyTask ||
                     requestBodyTask.IsCompleted ||
                     http2Stream.SendRequestFinished)
@@ -2102,7 +2144,35 @@ namespace System.Net.Http
                 // Wait for the response headers to complete if they haven't already, propagating any exceptions.
                 await responseHeadersTask.ConfigureAwait(false);
 
-                return http2Stream.GetAndClearResponse();
+                HttpResponseMessage response = http2Stream.GetAndClearResponse();
+
+                // Check if this is a session-based authentication challenge (Negotiate/NTLM) on HTTP/2.
+                // These authentication schemes require a persistent connection and don't work properly over HTTP/2.
+                if (AuthenticationHelper.IsSessionAuthenticationChallenge(response))
+                {
+                    // Mark the pool so future requests that can use HTTP/1.1 go directly to HTTP/1.1.
+                    // This is set regardless of whether we can retry this particular request,
+                    // so that subsequent requests benefit from the downgrade.
+                    _pool.OnSessionAuthenticationChallengeSeen();
+
+                    // We can only safely retry if there's no request content, as we cannot guarantee
+                    // that we can rewind arbitrary content streams.
+                    // Additionally, we only retry if the version negotiation allows the request to fall back to HTTP/1.1.
+                    if (request.Content is null &&
+                        HttpConnectionPool.CanFallBackToHttp11(request) &&
+                        !request.IsAuthDisabled())
+                    {
+                        if (NetEventSource.Log.IsEnabled())
+                        {
+                            Trace($"Received session-based authentication challenge on HTTP/2, request will be retried on HTTP/1.1.");
+                        }
+
+                        response.Dispose();
+                        throw new HttpRequestException(HttpRequestError.UserAuthenticationError, SR.net_http_authconnectionfailure, null, RequestRetryType.RetryOnSessionAuthenticationChallenge);
+                    }
+                }
+
+                return response;
             }
             catch (HttpIOException e)
             {

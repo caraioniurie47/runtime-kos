@@ -147,7 +147,6 @@ void LookupMap<TYPE>::AddElement(ModuleBase * pModule, DWORD rid, TYPE value, TA
         THROWS;
         GC_NOTRIGGER;
         MODE_ANY;
-        INJECT_FAULT(ThrowOutOfMemory(););
     }
     CONTRACTL_END;
 
@@ -180,7 +179,6 @@ void LookupMap<TYPE>::EnsureElementCanBeStored(Module * pModule, DWORD rid)
         THROWS;
         GC_NOTRIGGER;
         MODE_ANY;
-        INJECT_FAULT(ThrowOutOfMemory(););
     }
     CONTRACTL_END;
 
@@ -286,6 +284,7 @@ inline PTR_MethodDesc Module::LookupMethodDef(mdMethodDef token)
     return m_MethodDefToDescMap.GetElement(RidFromToken(token));
 }
 
+#ifdef FEATURE_CODE_VERSIONING
 inline PTR_ILCodeVersioningState Module::LookupILCodeVersioningState(mdMethodDef token)
 {
     CONTRACTL
@@ -300,6 +299,7 @@ inline PTR_ILCodeVersioningState Module::LookupILCodeVersioningState(mdMethodDef
     _ASSERTE(TypeFromToken(token) == mdtMethodDef);
     return m_ILCodeVersioningStateMap.GetElement(RidFromToken(token));
 }
+#endif // FEATURE_CODE_VERSIONING
 
 inline MethodDesc *Module::LookupMemberRefAsMethod(mdMemberRef token)
 {
@@ -324,7 +324,7 @@ inline Assembly *ModuleBase::LookupAssemblyRef(mdAssemblyRef token)
 #ifndef DACCESS_COMPILE
 inline void Module::ForceStoreAssemblyRef(mdAssemblyRef token, Assembly *value)
 {
-    WRAPPER_NO_CONTRACT; // THROWS/GC_NOTRIGGER/INJECT_FAULT()/MODE_ANY
+    WRAPPER_NO_CONTRACT; // THROWS/GC_NOTRIGGER/MODE_ANY
     _ASSERTE(value->GetModule());
     _ASSERTE(TypeFromToken(token) == mdtAssemblyRef);
 
@@ -364,7 +364,7 @@ template<typename Ptr, typename FixupNativeEntryCallback>
 BOOL Module::FixupDelayListAux(TADDR pFixupList,
                                Ptr pThis, FixupNativeEntryCallback pfnCB,
                                PTR_READYTORUN_IMPORT_SECTION pImportSections, COUNT_T nImportSections,
-                               PEDecoder * pNativeImage, BOOL mayUsePrecompiledPInvokeMethods)
+                               ReadyToRunLoadedImage * pNativeImage, BOOL mayUsePrecompiledPInvokeMethods)
 {
     CONTRACTL
     {

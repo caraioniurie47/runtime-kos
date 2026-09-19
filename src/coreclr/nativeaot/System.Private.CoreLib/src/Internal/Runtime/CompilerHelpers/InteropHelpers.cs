@@ -45,9 +45,7 @@ namespace Internal.Runtime.CompilerHelpers
 
                 fixed (char* pManaged = str)
                 {
-                    PInvokeMarshal.StringToAnsiString(pManaged, lenUnicode, pNative,
-                        /*terminateWithNull=*/true, bestFit, throwOnUnmappableChar,
-                        nativeByteLength: charCount);
+                    PInvokeMarshal.StringToAnsiString(pManaged, lenUnicode, pNative, /*terminateWithNull=*/true, bestFit, throwOnUnmappableChar);
                 }
             }
             else

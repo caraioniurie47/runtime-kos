@@ -221,6 +221,9 @@ namespace Test.Cryptography
         // Whether or not the current platform supports RC2
         internal static bool IsRC2Supported => s_lazyIsRC2Supported.Value;
 
+        internal static bool IsDSASupported => !PlatformDetection.IsApplePlatform && !PlatformDetection.IsBrowser;
+        internal static bool IsDSANotSupported => !IsDSASupported;
+
         internal static bool IsRSA384Supported => s_lazyIsRSA384Supported.Value;
 
 #if NET

@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
+using System.Runtime.Intrinsics.Wasm;
 using System.Runtime.Serialization;
 
 namespace System.Collections
@@ -97,6 +98,8 @@ namespace System.Collections
             {
                 BinaryPrimitives.ReverseEndianness(array, MemoryMarshal.Cast<byte, int>((Span<byte>)_array));
             }
+
+            ClearHighExtraBits();
         }
 
         /// <summary>Generates serialization data for the BitArray in a way that's compatible with the original .NET Framework implementation.</summary>
@@ -128,18 +131,52 @@ namespace System.Collections
         /// <param name="bytes">An array of bytes containing the values to copy, where each byte represents eight consecutive bits.</param>
         /// <exception cref="ArgumentNullException"><paramref name="bytes"/> is null.</exception>
         /// <exception cref="ArgumentException">The length of <paramref name="bytes"/> in bits is greater than <see cref="int.MaxValue"/>.</exception>
+        /// <remarks>
+        /// The first byte in the array represents bits 0 through 7, the second byte represents bits 8 through 15, and so on.
+        /// The least significant bit of each byte represents the lowest index value:
+        /// "<paramref name="bytes"/>[0] &amp; 1" represents bit 0, "<paramref name="bytes"/>[0] &amp; 2" represents bit 1,
+        /// "<paramref name="bytes"/>[0] &amp; 4" represents bit 2, and so on.
+        ///
+        /// This constructor is an <c>O(n)</c> operation, where <c>n</c> is the number of elements in <paramref name="bytes"/>.
+        /// </remarks>
         public BitArray(byte[] bytes)
         {
             ArgumentNullException.ThrowIfNull(bytes);
+
+            _array = CreateArray(bytes, out _bitLength);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BitArray"/> class that contains bit values copied
+        /// from the specified read-only span of bytes.
+        /// </summary>
+        /// <param name="bytes">A read-only span of bytes containing the values to copy, where each byte represents eight consecutive bits.</param>
+        /// <exception cref="ArgumentException">The length of <paramref name="bytes"/> in bits is greater than <see cref="int.MaxValue"/>.</exception>
+        /// <remarks>
+        /// The first byte in the span represents bits 0 through 7, the second byte represents bits 8 through 15, and so on.
+        /// The least significant bit of each byte represents the lowest index value:
+        /// "<paramref name="bytes"/>[0] &amp; 1" represents bit 0, "<paramref name="bytes"/>[0] &amp; 2" represents bit 1,
+        /// "<paramref name="bytes"/>[0] &amp; 4" represents bit 2, and so on.
+        ///
+        /// This constructor is an <c>O(n)</c> operation, where <c>n</c> is the number of elements in <paramref name="bytes"/>.
+        /// </remarks>
+        public BitArray(ReadOnlySpan<byte> bytes)
+        {
+            _array = CreateArray(bytes, out _bitLength);
+        }
+
+        private static byte[] CreateArray(ReadOnlySpan<byte> bytes, out int bitLength)
+        {
             if (bytes.Length > int.MaxValue / BitsPerByte)
             {
                 throw new ArgumentException(SR.Format(SR.Argument_ArrayTooLarge, BitsPerByte), nameof(bytes));
             }
 
-            _bitLength = bytes.Length * BitsPerByte;
-            _array = AllocateByteArray(_bitLength);
+            bitLength = bytes.Length * BitsPerByte;
+            byte[] array = AllocateByteArray(bitLength);
 
-            Array.Copy(bytes, _array, bytes.Length);
+            bytes.CopyTo(array);
+            return array;
         }
 
         /// <summary>
@@ -148,12 +185,33 @@ namespace System.Collections
         /// </summary>
         /// <param name="values">An array of Booleans to copy.</param>
         /// <exception cref="ArgumentNullException"><paramref name="values"/> is null.</exception>
+        /// <remarks>
+        /// This constructor is an <c>O(n)</c> operation, where <c>n</c> is the number of elements in <paramref name="values"/>.
+        /// </remarks>
         public BitArray(bool[] values)
         {
             ArgumentNullException.ThrowIfNull(values);
 
-            _array = AllocateByteArray(values.Length);
-            _bitLength = values.Length;
+            _array = CreateArray(values, out _bitLength);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BitArray"/> class that contains bit values
+        /// copied from the specified read-only span of Booleans.
+        /// </summary>
+        /// <param name="values">A read-only span of Booleans to copy.</param>
+        /// <remarks>
+        /// This constructor is an <c>O(n)</c> operation, where <c>n</c> is the number of elements in <paramref name="values"/>.
+        /// </remarks>
+        public BitArray(ReadOnlySpan<bool> values)
+        {
+            _array = CreateArray(values, out _bitLength);
+        }
+
+        private static byte[] CreateArray(ReadOnlySpan<bool> values, out int bitLength)
+        {
+            bitLength = values.Length;
+            byte[] array = AllocateByteArray(bitLength);
 
             uint i = 0;
 
@@ -164,59 +222,67 @@ namespace System.Collections
 
             // Comparing with 1s would get rid of the final negation, however this would not work for some CLR bools
             // (true for any non-zero values, false for 0) - any values between 2-255 will be interpreted as false.
-            // Instead, We compare with zeroes (== false) then negate the result to ensure compatibility.
+            // Instead, we compare with zeroes (== false) then negate the result to ensure compatibility.
 
-            ref byte arrayRef = ref MemoryMarshal.GetArrayDataReference(_array);
-            ref byte value = ref Unsafe.As<bool, byte>(ref MemoryMarshal.GetArrayDataReference<bool>(values));
+            ref byte arrayRef = ref MemoryMarshal.GetArrayDataReference(array);
+            ReadOnlySpan<byte> valuesAsBytes = MemoryMarshal.AsBytes(values);
             if (Vector512.IsHardwareAccelerated)
             {
-                for (; i <= (uint)values.Length - Vector512<byte>.Count; i += (uint)Vector512<byte>.Count)
+                while (valuesAsBytes.Length >= Vector512<byte>.Count)
                 {
-                    Vector512<byte> vector = Vector512.LoadUnsafe(ref value, i);
+                    Vector512<byte> vector = Vector512.Create(valuesAsBytes);
                     Vector512<byte> isFalse = Vector512.Equals(vector, Vector512<byte>.Zero);
 
                     ulong result = isFalse.ExtractMostSignificantBits();
                     Unsafe.WriteUnaligned(ref Unsafe.Add(ref arrayRef, sizeof(ulong) * (i / 64u)), ~result);
+                    i += (uint)Vector512<byte>.Count;
+                    valuesAsBytes = valuesAsBytes.Slice(Vector512<byte>.Count);
                 }
             }
             else if (Vector256.IsHardwareAccelerated)
             {
-                for (; i <= (uint)values.Length - Vector256<byte>.Count; i += (uint)Vector256<byte>.Count)
+                while (valuesAsBytes.Length >= Vector256<byte>.Count)
                 {
-                    Vector256<byte> vector = Vector256.LoadUnsafe(ref value, i);
+                    Vector256<byte> vector = Vector256.Create(valuesAsBytes);
                     Vector256<byte> isFalse = Vector256.Equals(vector, Vector256<byte>.Zero);
 
                     uint result = isFalse.ExtractMostSignificantBits();
                     Unsafe.WriteUnaligned(ref Unsafe.Add(ref arrayRef, sizeof(uint) * (i / 32u)), ~result);
+                    i += (uint)Vector256<byte>.Count;
+                    valuesAsBytes = valuesAsBytes.Slice(Vector256<byte>.Count);
                 }
             }
             else if (Vector128.IsHardwareAccelerated)
             {
-                for (; i <= (uint)values.Length - Vector128<byte>.Count * 2u; i += (uint)Vector128<byte>.Count * 2u)
+                while (valuesAsBytes.Length >= Vector128<byte>.Count * 2)
                 {
-                    Vector128<byte> lowerVector = Vector128.LoadUnsafe(ref value, i);
+                    Vector128<byte> lowerVector = Vector128.Create(valuesAsBytes);
                     Vector128<byte> lowerIsFalse = Vector128.Equals(lowerVector, Vector128<byte>.Zero);
                     uint lowerResult = lowerIsFalse.ExtractMostSignificantBits();
 
-                    Vector128<byte> upperVector = Vector128.LoadUnsafe(ref value, i + (uint)Vector128<byte>.Count);
+                    Vector128<byte> upperVector = Vector128.Create(valuesAsBytes.Slice(Vector128<byte>.Count));
                     Vector128<byte> upperIsFalse = Vector128.Equals(upperVector, Vector128<byte>.Zero);
                     uint upperResult = upperIsFalse.ExtractMostSignificantBits();
 
                     Unsafe.WriteUnaligned(
                         ref Unsafe.Add(ref arrayRef, sizeof(uint) * (i / 32u)),
                         ~((upperResult << 16) | lowerResult));
+                    i += (uint)Vector128<byte>.Count * 2u;
+                    valuesAsBytes = valuesAsBytes.Slice(Vector128<byte>.Count * 2);
                 }
             }
 
         Remainder:
             for (; i < (uint)values.Length; i++)
             {
-                if (values[i])
+                if (values[(int)i])
                 {
                     (uint byteIndex, uint bitOffset) = Math.DivRem(i, BitsPerByte);
-                    _array[byteIndex] |= (byte)(1 << (int)bitOffset);
+                    array[byteIndex] |= (byte)(1 << (int)bitOffset);
                 }
             }
+
+            return array;
         }
 
         /// <summary>
@@ -231,26 +297,55 @@ namespace System.Collections
         /// bits 32 through 63, and so on. The Least Significant Bit of each integer represents the lowest index value:
         /// "<paramref name="values"/>[0] &amp; 1" represents bit 0, "<paramref name="values"/>[0] &amp; 2" represents bit 1,
         /// "<paramref name="values"/>[0] &amp; 4" represents bit 2, and so on.
+        ///
+        /// This constructor is an <c>O(n)</c> operation, where <c>n</c> is the number of elements in <paramref name="values"/>.
         /// </remarks>
         public BitArray(int[] values)
         {
             ArgumentNullException.ThrowIfNull(values);
+
+            _array = CreateArray(values, out _bitLength);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BitArray"/> class that contains bit values
+        /// copied from the specified read-only span of 32-bit integers.
+        /// </summary>
+        /// <param name="values">A read-only span of 32-bit integers containing the values to copy, where each integer represents 32 consecutive bits.</param>
+        /// <exception cref="ArgumentException">The length of <paramref name="values"/> in bits is greater than <see cref="int.MaxValue"/>.</exception>
+        /// <remarks>
+        /// The number in the first <paramref name="values"/> span element represents bits 0 through 31, the second number in the span represents
+        /// bits 32 through 63, and so on. The least significant bit of each integer represents the lowest index value:
+        /// "<paramref name="values"/>[0] &amp; 1" represents bit 0, "<paramref name="values"/>[0] &amp; 2" represents bit 1,
+        /// "<paramref name="values"/>[0] &amp; 4" represents bit 2, and so on.
+        ///
+        /// This constructor is an <c>O(n)</c> operation, where <c>n</c> is the number of elements in <paramref name="values"/>.
+        /// </remarks>
+        public BitArray(ReadOnlySpan<int> values)
+        {
+            _array = CreateArray(values, out _bitLength);
+        }
+
+        private static byte[] CreateArray(ReadOnlySpan<int> values, out int bitLength)
+        {
             if (values.Length > int.MaxValue / BitsPerInt32)
             {
                 throw new ArgumentException(SR.Format(SR.Argument_ArrayTooLarge, BitsPerInt32), nameof(values));
             }
 
-            _bitLength = values.Length * BitsPerInt32;
-            _array = AllocateByteArray(_bitLength);
+            bitLength = values.Length * BitsPerInt32;
+            byte[] array = AllocateByteArray(bitLength);
 
             if (BitConverter.IsLittleEndian)
             {
-                MemoryMarshal.AsBytes(values).CopyTo(_array);
+                MemoryMarshal.AsBytes(values).CopyTo(array);
             }
             else
             {
-                BinaryPrimitives.ReverseEndianness(values, MemoryMarshal.Cast<byte, int>((Span<byte>)_array));
+                BinaryPrimitives.ReverseEndianness(values, MemoryMarshal.Cast<byte, int>((Span<byte>)array));
             }
+
+            return array;
         }
 
         /// <summary>
@@ -602,6 +697,8 @@ namespace System.Collections
                     }
                     intSpan[lastIndex] = ReverseIfBE(ReverseIfBE(intSpan[fromindex]) << shiftCount);
                 }
+
+                ClearHighExtraBits();
             }
             else
             {
@@ -737,14 +834,14 @@ namespace System.Collections
                 Vector128<byte> lowerShuffleMask_CopyToBoolArray = Vector128.Create(0, 0x01010101_01010101).AsByte();
                 Vector128<byte> upperShuffleMask_CopyToBoolArray = Vector128.Create(0x02020202_02020202, 0x03030303_03030303).AsByte();
 
-                if (Avx512BW.IsSupported && (uint)_bitLength >= Vector512<byte>.Count)
+                if (Vector512.IsHardwareAccelerated && (uint)_bitLength >= Vector512<byte>.Count)
                 {
                     Vector256<byte> upperShuffleMask_CopyToBoolArray256 = Vector256.Create(0x04040404_04040404, 0x05050505_05050505,
                                                                                              0x06060606_06060606, 0x07070707_07070707).AsByte();
                     Vector256<byte> lowerShuffleMask_CopyToBoolArray256 = Vector256.Create(lowerShuffleMask_CopyToBoolArray, upperShuffleMask_CopyToBoolArray);
                     Vector512<byte> shuffleMask = Vector512.Create(lowerShuffleMask_CopyToBoolArray256, upperShuffleMask_CopyToBoolArray256);
                     Vector512<byte> bitMask = Vector512.Create(0x80402010_08040201).AsByte();
-                    Vector512<byte> ones = Vector512.Create((byte)1);
+                    Vector512<byte> ones = Vector512<byte>.One;
 
                     fixed (bool* destination = &boolArray[index])
                     {
@@ -752,21 +849,21 @@ namespace System.Collections
                         {
                             ulong bits = (ulong)(uint)in32Span[(int)(i / (uint)BitsPerInt32)] + ((ulong)in32Span[(int)(i / (uint)BitsPerInt32) + 1] << BitsPerInt32);
                             Vector512<ulong> scalar = Vector512.Create(bits);
-                            Vector512<byte> shuffled = Avx512BW.Shuffle(scalar.AsByte(), shuffleMask);
-                            Vector512<byte> extracted = Avx512F.And(shuffled, bitMask);
+                            Vector512<byte> shuffled = Vector512.Shuffle(scalar.AsByte(), shuffleMask);
+                            Vector512<byte> extracted = shuffled & bitMask;
 
                             // The extracted bits can be anywhere between 0 and 255, so we normalise the value to either 0 or 1
                             // to ensure compatibility with "C# bool" (0 for false, 1 for true, rest undefined)
-                            Vector512<byte> normalized = Avx512BW.Min(extracted, ones);
-                            Avx512F.Store((byte*)destination + i, normalized);
+                            Vector512<byte> normalized = Vector512.Min(extracted, ones);
+                            normalized.Store((byte*)destination + i);
                         }
                     }
                 }
-                else if (Avx2.IsSupported && (uint)_bitLength >= Vector256<byte>.Count)
+                else if (Vector256.IsHardwareAccelerated && (uint)_bitLength >= Vector256<byte>.Count)
                 {
                     Vector256<byte> shuffleMask = Vector256.Create(lowerShuffleMask_CopyToBoolArray, upperShuffleMask_CopyToBoolArray);
                     Vector256<byte> bitMask = Vector256.Create(0x80402010_08040201).AsByte();
-                    Vector256<byte> ones = Vector256.Create((byte)1);
+                    Vector256<byte> ones = Vector256<byte>.One;
 
                     fixed (bool* destination = &boolArray[index])
                     {
@@ -774,21 +871,21 @@ namespace System.Collections
                         {
                             int bits = in32Span[(int)(i / (uint)BitsPerInt32)];
                             Vector256<int> scalar = Vector256.Create(bits);
-                            Vector256<byte> shuffled = Avx2.Shuffle(scalar.AsByte(), shuffleMask);
-                            Vector256<byte> extracted = Avx2.And(shuffled, bitMask);
+                            Vector256<byte> shuffled = Vector256.Shuffle(scalar.AsByte(), shuffleMask);
+                            Vector256<byte> extracted = shuffled & bitMask;
 
                             // The extracted bits can be anywhere between 0 and 255, so we normalise the value to either 0 or 1
                             // to ensure compatibility with "C# bool" (0 for false, 1 for true, rest undefined)
-                            Vector256<byte> normalized = Avx2.Min(extracted, ones);
-                            Avx.Store((byte*)destination + i, normalized);
+                            Vector256<byte> normalized = Vector256.Min(extracted, ones);
+                            normalized.Store((byte*)destination + i);
                         }
                     }
                 }
-                else if (Ssse3.IsSupported && ((uint)_bitLength >= Vector128<byte>.Count * 2u))
+                else if (Vector128.IsHardwareAccelerated && ((uint)_bitLength >= Vector128<byte>.Count * 2u))
                 {
                     Vector128<byte> lowerShuffleMask = lowerShuffleMask_CopyToBoolArray;
                     Vector128<byte> upperShuffleMask = upperShuffleMask_CopyToBoolArray;
-                    Vector128<byte> ones = Vector128.Create((byte)1);
+                    Vector128<byte> ones = Vector128<byte>.One;
                     Vector128<byte> bitMask128 = Vector128.Create(0x80402010_08040201).AsByte();
 
                     fixed (bool* destination = &boolArray[index])
@@ -798,56 +895,19 @@ namespace System.Collections
                             int bits = in32Span[(int)(i / (uint)BitsPerInt32)];
                             Vector128<int> scalar = Vector128.CreateScalarUnsafe(bits);
 
-                            Vector128<byte> shuffledLower = Ssse3.Shuffle(scalar.AsByte(), lowerShuffleMask);
-                            Vector128<byte> extractedLower = Sse2.And(shuffledLower, bitMask128);
-                            Vector128<byte> normalizedLower = Sse2.Min(extractedLower, ones);
-                            Sse2.Store((byte*)destination + i, normalizedLower);
+                            Vector128<byte> shuffledLower = Vector128.Shuffle(scalar.AsByte(), lowerShuffleMask);
+                            Vector128<byte> extractedLower = shuffledLower & bitMask128;
+                            Vector128<byte> normalizedLower = Vector128.Min(extractedLower, ones);
+                            normalizedLower.Store((byte*)destination + i);
 
-                            Vector128<byte> shuffledHigher = Ssse3.Shuffle(scalar.AsByte(), upperShuffleMask);
-                            Vector128<byte> extractedHigher = Sse2.And(shuffledHigher, bitMask128);
-                            Vector128<byte> normalizedHigher = Sse2.Min(extractedHigher, ones);
-                            Sse2.Store((byte*)destination + i + Vector128<byte>.Count, normalizedHigher);
+                            Vector128<byte> shuffledHigher = Vector128.Shuffle(scalar.AsByte(), upperShuffleMask);
+                            Vector128<byte> extractedHigher = shuffledHigher & bitMask128;
+                            Vector128<byte> normalizedHigher = Vector128.Min(extractedHigher, ones);
+                            normalizedHigher.Store((byte*)destination + i + Vector128<byte>.Count);
                         }
                     }
                 }
-                else if (AdvSimd.Arm64.IsSupported)
-                {
-                    Vector128<byte> ones = Vector128.Create((byte)1);
-                    Vector128<byte> bitMask128 = Vector128.Create(0x80402010_08040201).AsByte();
 
-                    fixed (bool* destination = &boolArray[index])
-                    {
-                        for (; (i + Vector128<byte>.Count * 2u) <= (uint)_bitLength; i += (uint)Vector128<byte>.Count * 2u)
-                        {
-                            int bits = in32Span[(int)(i / (uint)BitsPerInt32)];
-
-                            // Same logic as SSSE3 path, except we do not have Shuffle instruction.
-                            // (TableVectorLookup could be an alternative - dotnet/runtime#1277)
-                            // Instead we use chained ZIP1/2 instructions:
-                            // (A0 is the byte containing LSB, A3 is the byte containing MSB)
-                            // bits                                 - A0 A1 A2 A3
-                            // v1 = Vector128.Create                - A0 A1 A2 A3 A0 A1 A2 A3 A0 A1 A2 A3 A0 A1 A2 A3
-                            // v2 = ZipLow(v1, v1)                  - A0 A0 A1 A1 A2 A2 A3 A3 A0 A0 A1 A1 A2 A2 A3 A3
-                            // v3 = ZipLow(v2, v2)                  - A0 A0 A0 A0 A1 A1 A1 A1 A2 A2 A2 A2 A3 A3 A3 A3
-                            // shuffledLower = ZipLow(v3, v3)       - A0 A0 A0 A0 A0 A0 A0 A0 A1 A1 A1 A1 A1 A1 A1 A1
-                            // shuffledHigher = ZipHigh(v3, v3)     - A2 A2 A2 A2 A2 A2 A2 A2 A3 A3 A3 A3 A3 A3 A3 A3
-
-                            Vector128<byte> vector = Vector128.Create(bits).AsByte();
-                            vector = AdvSimd.Arm64.ZipLow(vector, vector);
-                            vector = AdvSimd.Arm64.ZipLow(vector, vector);
-
-                            Vector128<byte> shuffledLower = AdvSimd.Arm64.ZipLow(vector, vector);
-                            Vector128<byte> extractedLower = AdvSimd.And(shuffledLower, bitMask128);
-                            Vector128<byte> normalizedLower = AdvSimd.Min(extractedLower, ones);
-
-                            Vector128<byte> shuffledHigher = AdvSimd.Arm64.ZipHigh(vector, vector);
-                            Vector128<byte> extractedHigher = AdvSimd.And(shuffledHigher, bitMask128);
-                            Vector128<byte> normalizedHigher = AdvSimd.Min(extractedHigher, ones);
-
-                            AdvSimd.Arm64.StorePair((byte*)destination + i, normalizedLower, normalizedHigher);
-                        }
-                    }
-                }
 
             Remainder:
                 for (; i < (uint)_bitLength; i++)
@@ -914,6 +974,19 @@ namespace System.Collections
 
             byte mask = (byte)((1 << (int)extraBits) - 1);
             return (_array[byteCount] & mask) != 0;
+        }
+
+        /// <summary>Computes the number of bits that are set in the <see cref="BitArray"/>.</summary>
+        /// <returns>The number of set bits in the <see cref="BitArray"/>.</returns>
+        public int PopCount()
+        {
+            int count = 0;
+            foreach (int i in MemoryMarshal.Cast<byte, int>(_array))
+            {
+                count += int.PopCount(i);
+            }
+
+            return count;
         }
 
         /// <summary>Gets the number of elements contained in the <see cref="BitArray"/>.</summary>

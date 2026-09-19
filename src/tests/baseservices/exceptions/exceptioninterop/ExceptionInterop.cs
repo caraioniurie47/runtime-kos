@@ -24,9 +24,7 @@ public unsafe static class ExceptionInterop
     private static int s_nativeExceptionFromCatchCount;
     private static int s_managedExceptionFromCatchCount;
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void ThrowNativeExceptionAndCatchInFrame()
     {
         bool caughtException = false;
@@ -44,9 +42,7 @@ public unsafe static class ExceptionInterop
         Assert.True(caughtException);
     }
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void ThrowManagedExceptionThroughNativeAndCatchInFrame()
     {
         bool caughtException = false;
@@ -70,9 +66,7 @@ public unsafe static class ExceptionInterop
         }
     }
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void ThrowNativeExceptionAndCatchInFrameWithFilter()
     {
         bool caughtException = false;
@@ -98,9 +92,7 @@ public unsafe static class ExceptionInterop
         }
     }
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void ThrowNativeExceptionAndCatchInFrameWithFinally()
     {
         bool caughtException = false;
@@ -126,9 +118,7 @@ public unsafe static class ExceptionInterop
         Assert.True(caughtException);
     }
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void ThrowNativeExceptionInFrameWithFinallyCatchInOuterFrame()
     {
         bool caughtException = false;
@@ -222,9 +212,7 @@ public unsafe static class ExceptionInterop
         }
     }
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void PropagateAndRethrowCppException()
     {
         try
@@ -240,9 +228,7 @@ public unsafe static class ExceptionInterop
     [DllImport(nameof(ExceptionInteropNative))]
     public static extern void InvokeCallbackOnNewThread(delegate*unmanaged<void> callBack);
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void PropagateAndCatchCppException()
     {
         bool reportedUnhandledException = false;
@@ -258,9 +244,7 @@ public unsafe static class ExceptionInterop
         Assert.False(reportedUnhandledException, "Exception should not be reported as unhandled");
     }
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void ThrowNativeExceptionFromCatchInUnmanagedCallersOnlyCallback()
     {
         s_nativeExceptionFromCatchCount = 0;
@@ -279,9 +263,7 @@ public unsafe static class ExceptionInterop
         Assert.IsType<SEHException>(exception);
     }
 
-    [Fact]
-    [PlatformSpecific(TestPlatforms.Windows)]
-    [SkipOnMono("Exception interop not supported on Mono.")]
+    [ConditionalFact(typeof(TestLibrary.PlatformDetection), nameof(TestLibrary.PlatformDetection.IsExceptionInteropSupported))]
     public static void ThrowManagedExceptionFromCatchInUnmanagedCallersOnlyCallback()
     {
         s_managedExceptionFromCatchCount = 0;

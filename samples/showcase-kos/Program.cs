@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using System.Numerics;
 using System.Runtime;
 using System.Runtime.CompilerServices;
@@ -80,6 +82,133 @@ Section("Files and stdout", () =>
     o.WriteLine($"  stdout redirected: {Console.IsOutputRedirected}; the next line is written to Console.Out");
     Console.Out.WriteLine("  (this line was written to stdout)");
     Console.Out.Flush();
+});
+
+Section("TCP sockets", () =>
+{
+    // Sockets go to the network VFS program (VfsNet in kos-image/). KasperskyOS has neither epoll nor kqueue, so
+    // .NET has no socket event loop there: blocking calls work, the *Async socket methods do not.
+    Socket probe;
+    try
+    {
+        probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+    }
+    catch (TypeInitializationException e)
+    {
+        // The first socket starts System.Net.Sockets' event threads, which fail without epoll or kqueue.
+        Skip($"no socket event threads ({e.InnerException?.Message}); set DOTNET_SYSTEM_NET_SOCKETS_THREAD_COUNT=0, " +
+            "as kos-image/src/init.yaml.in does");
+        return;
+    }
+    catch (SocketException e) when (e.SocketErrorCode == SocketError.SocketError)
+    {
+        // Without a network VFS program libc's stub fails socket() with EIO, which has no SocketError value.
+        Skip($"no network ({e.Message}); the image needs a network VFS program, see HOWTO-KOS.md");
+        return;
+    }
+    probe.Dispose();
+
+    // KOS SDK 1.4.0.102 fails recv() with EINVAL for a 81920-byte buffer (65536 works), and 81920 is
+    // Stream.CopyTo's default, so the copies below pass a smaller buffer.
+    const int ReceiveBuffer = 64 * 1024;
+
+    // Loopback echo: a server thread copies everything back; the client sends from a second thread so that
+    // neither side blocks on a full socket buffer.
+    using var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    var endpoint = (IPEndPoint)listener.LocalEndpoint;
+    Exception? echoError = null;
+    var echo = new Thread(() =>
+    {
+        // An exception escaping a thread would end the process, not just this section.
+        try
+        {
+            using TcpClient peer = listener.AcceptTcpClient();
+            using NetworkStream stream = peer.GetStream();
+            stream.CopyTo(stream, ReceiveBuffer);
+        }
+        catch (Exception e)
+        {
+            echoError = e;
+        }
+    }) { IsBackground = true };
+    echo.Start();
+
+    byte[] payload = new byte[256 * 1024];
+    new Random(47).NextBytes(payload);
+    var clock = Stopwatch.StartNew();
+    using (var client = new TcpClient())
+    {
+        client.Connect(endpoint);
+        NetworkStream stream = client.GetStream();
+        Exception? sendError = null;
+        var sender = new Thread(() =>
+        {
+            try
+            {
+                stream.Write(payload);
+                client.Client.Shutdown(SocketShutdown.Send);
+            }
+            catch (Exception e)
+            {
+                sendError = e;
+            }
+        }) { IsBackground = true };
+        sender.Start();
+        var received = new MemoryStream();
+        stream.CopyTo(received, ReceiveBuffer);
+        sender.Join();
+        echo.Join();
+        if ((sendError ?? echoError) is Exception threadError)
+        {
+            throw new IOException($"the {(sendError is null ? "echo" : "sending")} thread failed", threadError);
+        }
+        o.WriteLine($"  loopback echo via {endpoint}: {received.Length / 1024} KiB back in {clock.ElapsedMilliseconds} ms");
+        Check(received.GetBuffer().AsSpan(0, (int)received.Length).SequenceEqual(payload), "the echoed bytes equal the bytes sent");
+    }
+
+    // A client on the host: only when the image forwards a port (kos-image's HOST_TCP_PORT option).
+    string? hostPort = Environment.GetEnvironmentVariable("HOST_TCP_PORT");
+    if (hostPort is null)
+    {
+        o.WriteLine("  HOST_TCP_PORT unset: no port forwarded from the host, no host client expected");
+        return;
+    }
+    using var hostListener = new TcpListener(IPAddress.Any, int.Parse(hostPort, CultureInfo.InvariantCulture));
+    hostListener.Start();
+    const int WaitSeconds = 120;
+    o.WriteLine($"  listening on {hostListener.LocalEndpoint} for a host client, up to {WaitSeconds} s " +
+        $"(on the host: nc localhost {hostPort})");
+    // Accept until a client sends a line: a connection can arrive already closed by the host side.
+    var deadline = Stopwatch.StartNew();
+    string? line = null;
+    while (line is null)
+    {
+        var remaining = TimeSpan.FromSeconds(WaitSeconds) - deadline.Elapsed;
+        Check(remaining > TimeSpan.Zero && hostListener.Server.Poll(remaining, SelectMode.SelectRead),
+            "a host client sent a line in time");
+        using TcpClient host = hostListener.AcceptTcpClient();
+        host.ReceiveTimeout = 30_000;
+        using var reader = new StreamReader(host.GetStream());
+        using var writer = new StreamWriter(host.GetStream()) { AutoFlush = true, NewLine = "\n" };
+        try
+        {
+            writer.WriteLine("hello from .NET on KasperskyOS; send a line");
+            line = reader.ReadLine();
+        }
+        catch (IOException e)
+        {
+            o.WriteLine($"  host connection from {host.Client.RemoteEndPoint} failed: {e.Message}");
+            continue;
+        }
+        if (line is null)
+        {
+            o.WriteLine($"  host connection from {host.Client.RemoteEndPoint} closed without a line");
+            continue;
+        }
+        o.WriteLine($"  host client {host.Client.RemoteEndPoint} sent: {line}");
+        writer.WriteLine($"KOS echo: {line}");
+    }
 });
 
 Section("Globalization with ICU", () =>
@@ -324,6 +453,18 @@ void Section(string name, Action body)
     {
         failed++;
         o.WriteLine($"--- FAIL  {name}: {e.GetType().FullName}: {e.Message}");
+        // A TypeInitializationException, for one, says nothing until its inner exception is shown.
+        for (Exception? current = e; current is not null; current = current.InnerException)
+        {
+            if (current != e)
+            {
+                o.WriteLine($"    inner: {current.GetType().FullName}: {current.Message}");
+            }
+            foreach (string frame in (current.StackTrace ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Take(8))
+            {
+                o.WriteLine($"      {frame.Trim()}");
+            }
+        }
     }
 }
 

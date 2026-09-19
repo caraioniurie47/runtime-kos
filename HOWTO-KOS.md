@@ -177,12 +177,16 @@ cd /home
 The image is a CMake project, built with the SDK's own CMake, which carries the `platform` modules.
 QEMU runs in the foreground and does not exit by itself; stop it with Ctrl+C.
 
-Besides the program, the image holds the SDK's prebuilt `VfsRamFs` program, which serves files and
-stdout to it over IPC: a RAM file system at `/tmp` and devices at `/dev`. It comes with the SDK's
-entropy program. `kos-image/src/init.yaml.in` sets `VFS_FILESYSTEM_BACKEND: client:kl.VfsRamFs` for the
-program and connects it to `kl.VfsRamFs`. The program has to link the client side, `libvfs_remote.a`,
-which each sample's `.csproj` adds as a `LinkerArg`. A program of your own needs both that item and
-this image project.
+Besides the program, the image holds three programs from the SDK and one of its own. The SDK's prebuilt
+`VfsRamFs` serves files and stdout to the program over IPC: a RAM file system at `/tmp` and devices at
+`/dev`. The SDK's prebuilt `VfsNet` serves sockets, with the SDK's network driver program; both come with
+the SDK's entropy program. `NetInit`, built from `kos-image/src/netinit.c`, gives the network interface
+`en0` the address QEMU user networking expects (`10.0.2.15/24`, gateway `10.0.2.2`) and exits, as the
+SDK's network examples do in their own programs. `kos-image/src/init.yaml.in` sets `VFS_FILESYSTEM_BACKEND: client:kl.VfsRamFs`
+and `VFS_NETWORK_BACKEND: client:kl.VfsNet` for the program, connects it to both, and sets
+`DOTNET_SYSTEM_NET_SOCKETS_THREAD_COUNT: "0"` (see Limitations). The program has to link the client
+side, `libvfs_remote.a`, which each sample's `.csproj` adds as a `LinkerArg`. A program of your own needs
+both that item and this image project.
 
 ### Image
 
@@ -202,19 +206,27 @@ $KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target sim
 After the KasperskyOS boot log, the program prints:
 
 ```text
-[hello.Hello][16:16][CRT0] Initing main app: statically-linked, PIE.
+[hello.Hello][19:19][CRT0] Initing main app: statically-linked, PIE.
 ...
-[hello.Hello][16:16][CRT0] VFS filesystem backend initialized with env(client:kl.VfsRamFs)
+[hello.Hello][19:19][CRT0] VFS filesystem backend initialized with env(client:kl.VfsRamFs)
+[hello.Hello][19:19][CRT0] VFS network backend initialized with env(client:kl.VfsNet)
+...
+[NetInit] en0 is 10.0.2.15/255.255.255.0, gateway 10.0.2.2
 Hello from .NET! Math.Min(4, 7)=4
 ```
 
 ## 10. The showcase sample
 
 `samples/showcase-kos` runs a set of sections, each ending in `PASS`, `SKIP` or `FAIL`: runtime
-information, files under `/tmp` and a line on `Console.Out`, culture-aware formatting and sorting, a
-`Parallel.For` Mandelbrot, async/await with
+information, files under `/tmp` and a line on `Console.Out`, TCP sockets, culture-aware formatting and
+sorting, a `Parallel.For` Mandelbrot, async/await with
 channels and timers, source-generated `System.Text.Json` and `Regex`, LINQ and generic math, the GC
 under allocation load, and exceptions with stack traces. It uses the HelloWorld image project.
+
+The sockets section echoes 256 KiB over loopback. Given `-D HOST_TCP_PORT=<port>` when the image is
+configured, the image project also forwards that TCP port from the host (QEMU `hostfwd`) and the section
+waits up to 120 seconds for a client from the host: it sends a greeting line, reads a line and answers
+`KOS echo: <line>`. Without the option it does not wait.
 
 `InvariantGlobalization=false` links ICU, so the globalization section runs; the binary grows from
 about 15 MB to about 52 MB. Without it the section reports `SKIP`.
@@ -239,10 +251,14 @@ $KOS_SDK/toolchain/bin/cmake --build /home/showcase-kos-image --target kos-qemu-
 $KOS_SDK/toolchain/bin/cmake --build /home/showcase-kos-image --target sim
 ```
 
+To try the host client, configure the image with `-D HOST_TCP_PORT=5047` added to the first `cmake`
+command above, rebuild it, and once the showcase prints `listening on 0.0.0.0:5047`, run `nc localhost
+5047` in a second WSL terminal and type a line.
+
 The last line it prints is the summary, for example:
 
 ```text
-SHOWCASE DONE: 10 passed, 0 skipped, 0 failed, 12948 ms
+SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 14130 ms
 ```
 
 ## Limitations
@@ -250,9 +266,20 @@ SHOWCASE DONE: 10 passed, 0 skipped, 0 failed, 12948 ms
 - **No hardware exceptions.** KasperskyOS delivers only `SIGTERM`, so the runtime registers no
   `SIGSEGV` or `SIGFPE` handler there, and a fault such as a null dereference does not become a
   managed exception.
-- **Files live in RAM, and there is no network.** `VfsRamFs` mounts a RAM file system at `/tmp`,
-  emptied at every boot; the showcase uses only `/tmp`, so other paths are untried. Sockets need a
-  network VFS program, such as the SDK's `VfsNet`, which these images do not include.
+- **Files live in RAM.** `VfsRamFs` mounts a RAM file system at `/tmp`, emptied at every boot; the
+  showcase uses only `/tmp`, so other paths are untried.
+- **Sockets: blocking calls only, and a variable.** KasperskyOS has neither epoll nor kqueue, so
+  System.Native has no socket event port. Creating the first socket starts `System.Net.Sockets`' event
+  threads, which then fail (`TypeInitializationException`, inner `ENOSYS`), unless
+  `DOTNET_SYSTEM_NET_SOCKETS_THREAD_COUNT` is `0`, as the image sets it. With it, blocking calls work
+  (`Socket`, `TcpListener`, `TcpClient`, `NetworkStream` reads and writes, `Socket.Poll`); the `*Async`
+  socket methods, and what is built on them such as `HttpClient`, are not expected to work and were not
+  tried. The image has no DNS or `/etc/hosts`; the showcase uses IP addresses only. In an image with
+  `VfsRamFs` but no `VfsNet`, the socket calls go to libc's stub: creating a socket throws
+  `SocketException` ("Unknown socket error"), and the showcase reports its sockets section as `SKIP`.
+- **Socket reads of more than 64 KiB fail.** On SDK 1.4.0.102 `recv()` fails with `EINVAL` for an
+  81920-byte buffer, and 65536 bytes work; `Stream.CopyTo`'s default buffer is 81920 bytes, so pass a
+  smaller one (`CopyTo(destination, 65536)`). Sends of 81920 bytes worked.
 - **Without a VFS program, no files or stdout.** In an image without one, each program's libc falls back
   to a stub ("VFS filesystem and network backends initialized with stub (related calls will return
   EIO)"): only stderr reaches the console, file calls and `Console.Out` throw `IOException`, and the

@@ -5,10 +5,13 @@ use nk.base._
 use EDL Einit
 use EDL kl.core.Core
 use EDL hello.Hello
+use EDL hello.NetInit
 
 use kl.core.DCM._
 use kl.EntropyEntity._
 use kl.VfsRamFs._
+use kl.VfsNet._
+use kl.drivers.DNetSrv._
 
 execute: kl.core.Execute
 

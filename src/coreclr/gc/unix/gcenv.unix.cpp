@@ -1132,6 +1132,19 @@ uint64_t GetAvailablePhysicalMemory()
     {
         available = info.free_memory;
     }
+#elif defined(__KOS__)
+    // KOS: no /proc/meminfo, and no _SC_AVPHYS_PAGES, so the Linux fallback below would read the total
+    // page count and the memory load would always be 0. If the call fails, report that same load of 0
+    // rather than 100.
+    rtl_int64_t freePages;
+    if (KnGroupStatGetParam(GROUP_PARAM_MEM_FREE, &freePages) == 0 && freePages >= 0)
+    {
+        available = (uint64_t)freePages * (uint64_t)g_pageSizeUnixInl;
+    }
+    else
+    {
+        available = g_totalPhysicalMemSize;
+    }
 #else // Linux
     static volatile bool tryReadMemInfo = true;
 

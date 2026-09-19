@@ -228,6 +228,8 @@ Section("Garbage collector under load", () =>
         $"gen1 {GC.CollectionCount(1) - before[1]}, gen2 {GC.CollectionCount(2) - before[2]}");
     o.WriteLine($"  heap {info.HeapSizeBytes / 1024} KiB; memory available to the GC " +
         $"{info.TotalAvailableMemoryBytes / (1024 * 1024)} MiB");
+    // The GC records the system's memory load in whole percent, so this is 0 below 1%.
+    o.WriteLine($"  system memory in use at the last GC {info.MemoryLoadBytes / (1024 * 1024)} MiB");
     Check(GC.CollectionCount(0) > before[0], "gen0 collections ran");
 });
 

@@ -211,6 +211,9 @@ static int SetGroups(uint32_t* userGroups, int32_t userGroupsLength, uint32_t* p
 
     return rv;
 #else // !HAVE_SETGROUPS_GRPH
+    (void)userGroups;
+    (void)userGroupsLength;
+    (void)processGroups;
     errno = ENOTSUP;
     return -1;
 #endif

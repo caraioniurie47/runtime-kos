@@ -83,21 +83,23 @@ if(DARWIN AND NOT DEFINED ANDROID_BUILD)
   endif()
 elseif(KOS)
   if(TARGET_ARCH_NAME MATCHES "^(arm64)$")
-    set_cache_value(HAVE_BROKEN_FIFO_KEVENT 1) #TODO-KOS check on kos
-    set_cache_value(HAVE_BROKEN_FIFO_SELECT 1) #TODO-KOS check on kos
-    set_cache_value(HAVE_CLOCK_REALTIME 1) #TODO-KOS check on kos
-    set_cache_value(HAVE_CLOCK_THREAD_CPUTIME 0) #TODO-KOS not supported on KOS? unistd.h
-    set_cache_value(HAVE_PROCFS_CTL 0) #TODO-KOS not used in code?
-    set_cache_value(HAVE_PROCFS_STAT 0) #TODO-KOS check on kos
-    set_cache_value(HAVE_PROCFS_STATM 0) #TODO-KOS new probe since the 2023 port (GC); no procfs, as HAVE_PROCFS_STAT
-    set_cache_value(HAVE_SCHED_GETCPU 0) #TODO-KOS not found in headers
-    set_cache_value(HAVE_SCHED_GET_PRIORITY 1) #TODO-KOS check on kos
-    set_cache_value(HAVE_SHM_OPEN_THAT_WORKS_WELL_ENOUGH_WITH_MMAP 0) #TODO-KOS check on kos
-    set_cache_value(HAVE_WORKING_CLOCK_GETTIME 1) #TODO-KOS check on kos
-    set_cache_value(HAVE_WORKING_GETTIMEOFDAY 1) #TODO-KOS check on kos
-    set_cache_value(MMAP_ANON_IGNORES_PROTECTION 0) #TODO-KOS check on kos
-    set_cache_value(ONE_SHARED_MAPPING_PER_FILEREGION_PER_PROCESS 1) #TODO-KOS check on kos
-    set_cache_value(REALPATH_SUPPORTS_NONEXISTENT_FILES 0) #TODO-KOS review, realpath stub in KOS?
+    # Read by the PAL's configure only; KOS builds compile no PAL object.
+    set_cache_value(HAVE_BROKEN_FIFO_KEVENT 1)
+    set_cache_value(HAVE_BROKEN_FIFO_SELECT 1)
+    set_cache_value(HAVE_CLOCK_THREAD_CPUTIME 0)
+    set_cache_value(HAVE_PROCFS_CTL 0)
+    set_cache_value(HAVE_PROCFS_STAT 0)
+    set_cache_value(HAVE_SCHED_GET_PRIORITY 1)
+    set_cache_value(HAVE_WORKING_CLOCK_GETTIME 1)
+    set_cache_value(HAVE_WORKING_GETTIMEOFDAY 1)
+    set_cache_value(MMAP_ANON_IGNORES_PROTECTION 0)
+    set_cache_value(ONE_SHARED_MAPPING_PER_FILEREGION_PER_PROCESS 1)
+    set_cache_value(REALPATH_SUPPORTS_NONEXISTENT_FILES 0)
+    # Read by the GC and System.Native (KOS CE SDK 1.4.0.102).
+    set_cache_value(HAVE_CLOCK_REALTIME 1) # CLOCK_REALTIME in time.h
+    set_cache_value(HAVE_PROCFS_STATM 0) # no /proc
+    set_cache_value(HAVE_SCHED_GETCPU 0) # neither declared nor in libc
+    set_cache_value(HAVE_SHM_OPEN_THAT_WORKS_WELL_ENOUGH_WITH_MMAP 0) # no shm_open in libc
   else()
     message(FATAL_ERROR "Arch is ${TARGET_ARCH_NAME}. Only arm64 is supported for KOS cross build!")
   endif()

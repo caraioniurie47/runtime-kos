@@ -64,7 +64,7 @@ namespace
         // This function is only called with the library name specified for a p/invoke, not any variations.
         // It must handle exact matches to the names specified. See Interop.Libraries.cs for each platform.
 #if !defined(_WIN32)
-#if !defined(__KOS__) // TODO-KOS
+#if !defined(__KOS__) // no System.Net.Security.Native is built for KasperskyOS
         if (strcmp(library_name, LIB_NAME("System.Net.Security.Native")) == 0)
         {
             return SecurityResolveDllImport(entry_point_name);
@@ -76,7 +76,7 @@ namespace
             return SystemResolveDllImport(entry_point_name);
         }
 
-#if !defined(TARGET_OSX) && !defined(__KOS__) // TODO-KOS
+#if !defined(TARGET_OSX) && !defined(__KOS__) // no OpenSSL library is built for KasperskyOS
         if (strcmp(library_name, LIB_NAME("System.Security.Cryptography.Native.OpenSsl")) == 0)
         {
             return CryptoResolveDllImport(entry_point_name);

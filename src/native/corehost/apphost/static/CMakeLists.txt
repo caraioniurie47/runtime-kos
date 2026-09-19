@@ -158,7 +158,7 @@ else()
     )
 
     if(CLR_CMAKE_TARGET_KOS)
-        # TODO-KOS: no System.Net.Security.Native and no OpenSSL
+        # No System.Net.Security.Native or System.Security.Cryptography.Native.OpenSsl is built for KasperskyOS.
     elseif(NOT CLR_CMAKE_TARGET_ANDROID)
         list(APPEND NATIVE_LIBS System.Net.Security.Native-Static)
 

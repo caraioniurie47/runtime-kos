@@ -125,6 +125,8 @@ if (CLR_CMAKE_TARGET_KOS)
         add_definitions(-D__aarch64__)
     endif(CLR_CMAKE_TARGET_ARCH_ARM64)
     include_directories (${CLR_SRC_NATIVE_DIR}/external/kos)
+    # The SDK's open2.h declares fortified open() overloads with the unused attribute.
+    add_compile_options(-Wno-used-but-marked-unused)
 endif (CLR_CMAKE_TARGET_KOS)
 
 include(${CMAKE_CURRENT_LIST_DIR}/extra_libs.cmake)

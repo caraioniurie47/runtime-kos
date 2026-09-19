@@ -429,9 +429,7 @@ PalCreateCrashDumpIfEnabled(int signal, siginfo_t* siginfo, void* context, void*
                     argv[argc++] = "--code";
                     argv[argc++] = signalCodeArg;
                 }
-#if HAVE_SIGINFO_T_ERRORNO // TODO-KOS: si_errno is not defined
                 signalErrnoArg = FormatInt(siginfo->si_errno);
-#endif
                 if (signalErrnoArg != nullptr)
                 {
                     argv[argc++] = "--errno";

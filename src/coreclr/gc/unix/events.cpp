@@ -61,7 +61,9 @@ public:
 
     bool Initialize()
     {
-        pthread_condattr_t attrs = {}; // TODO-KOS: empty init required on KOS!
+        // Zeroed: KOS CE SDK 1.4.0.102's pthread_condattr_init reads the attribute first and fails with EINVAL
+        // when it already holds the initialized-attribute marker.
+        pthread_condattr_t attrs = {};
         int st = pthread_condattr_init(&attrs);
         if (st != 0)
         {

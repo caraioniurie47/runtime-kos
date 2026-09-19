@@ -14,7 +14,9 @@
     <StripSymbols>false</StripSymbols>
     <Nullable>enable</Nullable>
     <IlcToolsPath>/home/ilc-tools-main</IlcToolsPath>
-    <IlcHostPackagePath>TODO</IlcHostPackagePath>
+    <!-- The compiler comes from IlcToolsPath, not a host ILCompiler package; a cross-compile still needs this set
+         (Microsoft.NETCore.Native.Publish.targets), and it is otherwise read only for static ICU or OpenSSL linking. -->
+    <IlcHostPackagePath>$(IlcToolsPath)</IlcHostPackagePath>
     <IlcVerboseLogging>false</IlcVerboseLogging>
     <!-- KOS CE SDK 1.4 and later ship clang instead of GCC; SysRoot is <SDK>/sysroot-aarch64-kos. -->
     <CppCompilerAndLinker Condition="'$(CppCompilerAndLinker)' == '' and Exists('$(SysRoot)/../toolchain/bin/aarch64-kos-clang++')">aarch64-kos-clang++</CppCompilerAndLinker>

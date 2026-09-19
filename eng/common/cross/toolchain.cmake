@@ -27,7 +27,6 @@ elseif(EXISTS ${CROSS_ROOTFS}/boot/system/develop/headers/config/HaikuConfig.h)
   set(CMAKE_SYSTEM_NAME Haiku)
   set(HAIKU 1)
 else()
-  # TODO-KOS
   set(CMAKE_SYSTEM_NAME Linux)
   set(LINUX 1)
 endif()

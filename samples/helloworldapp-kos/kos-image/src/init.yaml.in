@@ -5,9 +5,6 @@ entities:
   env:
     VFS_FILESYSTEM_BACKEND: client:kl.VfsRamFs
     VFS_NETWORK_BACKEND: client:kl.VfsNet
-    # KasperskyOS has neither epoll nor kqueue, so System.Net.Sockets cannot create its event loop threads, and
-    # creating the first socket fails; with no event threads, blocking socket calls work.
-    DOTNET_SYSTEM_NET_SOCKETS_THREAD_COUNT: "0"
     @HOST_TCP_PORT_ENV@
   connections:
   - target: kl.VfsRamFs

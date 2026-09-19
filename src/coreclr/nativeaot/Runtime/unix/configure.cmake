@@ -62,7 +62,6 @@ set(CMAKE_EXTRA_INCLUDE_FILES)
 set(CMAKE_EXTRA_INCLUDE_FILES signal.h)
 check_type_size(siginfo_t SIGINFO_T)
 set(CMAKE_EXTRA_INCLUDE_FILES)
-check_struct_has_member ("siginfo_t" si_errno signal.h HAVE_SIGINFO_T_ERRORNO)
 
 check_cxx_source_compiles("
 #include <lwp.h>

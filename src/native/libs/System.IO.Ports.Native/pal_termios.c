@@ -499,7 +499,7 @@ int32_t SystemIoPortsNative_TermiosReset(intptr_t handle, int32_t speed, int32_t
     if (HandshakeHard == handshake)
     {
 #ifndef CRTSCTS
-        // TODO-KOS: hardware flow is not supported
+        // No hardware flow control: KasperskyOS (CE SDK 1.4.0.102) termios.h has no CRTSCTS.
         errno = EINVAL;
         return -1;
 #endif

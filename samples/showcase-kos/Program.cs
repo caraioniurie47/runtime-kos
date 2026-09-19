@@ -76,6 +76,10 @@ Section("Files and stdout", () =>
     o.WriteLine($"  {directory} lists {string.Join(", ", listed)}");
     Check(listed.AsSpan().SequenceEqual(expectedListing), "the directory lists the renamed file and the new one");
 
+    string[] mountPoints = [.. DriveInfo.GetDrives().Select(drive => drive.Name)];
+    o.WriteLine($"  mount points: {string.Join(", ", mountPoints)}");
+    Check(mountPoints.Contains(Path.GetTempPath().TrimEnd('/')), "the temporary directory's file system is listed");
+
     Directory.Delete(directory, recursive: true);
     Check(!Directory.Exists(directory), "the directory is gone after Directory.Delete");
 
@@ -84,132 +88,7 @@ Section("Files and stdout", () =>
     Console.Out.Flush();
 });
 
-Section("TCP sockets", () =>
-{
-    // Sockets go to the network VFS program (VfsNet in kos-image/). KasperskyOS has neither epoll nor kqueue, so
-    // .NET has no socket event loop there: blocking calls work, the *Async socket methods do not.
-    Socket probe;
-    try
-    {
-        probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-    }
-    catch (TypeInitializationException e)
-    {
-        // The first socket starts System.Net.Sockets' event threads, which fail without epoll or kqueue.
-        Skip($"no socket event threads ({e.InnerException?.Message}); set DOTNET_SYSTEM_NET_SOCKETS_THREAD_COUNT=0, " +
-            "as kos-image/src/init.yaml.in does");
-        return;
-    }
-    catch (SocketException e) when (e.SocketErrorCode == SocketError.SocketError)
-    {
-        // Without a network VFS program libc's stub fails socket() with EIO, which has no SocketError value.
-        Skip($"no network ({e.Message}); the image needs a network VFS program, see HOWTO-KOS.md");
-        return;
-    }
-    probe.Dispose();
-
-    // KOS SDK 1.4.0.102 fails recv() with EINVAL for a 81920-byte buffer (65536 works), and 81920 is
-    // Stream.CopyTo's default, so the copies below pass a smaller buffer.
-    const int ReceiveBuffer = 64 * 1024;
-
-    // Loopback echo: a server thread copies everything back; the client sends from a second thread so that
-    // neither side blocks on a full socket buffer.
-    using var listener = new TcpListener(IPAddress.Loopback, 0);
-    listener.Start();
-    var endpoint = (IPEndPoint)listener.LocalEndpoint;
-    Exception? echoError = null;
-    var echo = new Thread(() =>
-    {
-        // An exception escaping a thread would end the process, not just this section.
-        try
-        {
-            using TcpClient peer = listener.AcceptTcpClient();
-            using NetworkStream stream = peer.GetStream();
-            stream.CopyTo(stream, ReceiveBuffer);
-        }
-        catch (Exception e)
-        {
-            echoError = e;
-        }
-    }) { IsBackground = true };
-    echo.Start();
-
-    byte[] payload = new byte[256 * 1024];
-    new Random(47).NextBytes(payload);
-    var clock = Stopwatch.StartNew();
-    using (var client = new TcpClient())
-    {
-        client.Connect(endpoint);
-        NetworkStream stream = client.GetStream();
-        Exception? sendError = null;
-        var sender = new Thread(() =>
-        {
-            try
-            {
-                stream.Write(payload);
-                client.Client.Shutdown(SocketShutdown.Send);
-            }
-            catch (Exception e)
-            {
-                sendError = e;
-            }
-        }) { IsBackground = true };
-        sender.Start();
-        var received = new MemoryStream();
-        stream.CopyTo(received, ReceiveBuffer);
-        sender.Join();
-        echo.Join();
-        if ((sendError ?? echoError) is Exception threadError)
-        {
-            throw new IOException($"the {(sendError is null ? "echo" : "sending")} thread failed", threadError);
-        }
-        o.WriteLine($"  loopback echo via {endpoint}: {received.Length / 1024} KiB back in {clock.ElapsedMilliseconds} ms");
-        Check(received.GetBuffer().AsSpan(0, (int)received.Length).SequenceEqual(payload), "the echoed bytes equal the bytes sent");
-    }
-
-    // A client on the host: only when the image forwards a port (kos-image's HOST_TCP_PORT option).
-    string? hostPort = Environment.GetEnvironmentVariable("HOST_TCP_PORT");
-    if (hostPort is null)
-    {
-        o.WriteLine("  HOST_TCP_PORT unset: no port forwarded from the host, no host client expected");
-        return;
-    }
-    using var hostListener = new TcpListener(IPAddress.Any, int.Parse(hostPort, CultureInfo.InvariantCulture));
-    hostListener.Start();
-    const int WaitSeconds = 120;
-    o.WriteLine($"  listening on {hostListener.LocalEndpoint} for a host client, up to {WaitSeconds} s " +
-        $"(on the host: nc localhost {hostPort})");
-    // Accept until a client sends a line: a connection can arrive already closed by the host side.
-    var deadline = Stopwatch.StartNew();
-    string? line = null;
-    while (line is null)
-    {
-        var remaining = TimeSpan.FromSeconds(WaitSeconds) - deadline.Elapsed;
-        Check(remaining > TimeSpan.Zero && hostListener.Server.Poll(remaining, SelectMode.SelectRead),
-            "a host client sent a line in time");
-        using TcpClient host = hostListener.AcceptTcpClient();
-        host.ReceiveTimeout = 30_000;
-        using var reader = new StreamReader(host.GetStream());
-        using var writer = new StreamWriter(host.GetStream()) { AutoFlush = true, NewLine = "\n" };
-        try
-        {
-            writer.WriteLine("hello from .NET on KasperskyOS; send a line");
-            line = reader.ReadLine();
-        }
-        catch (IOException e)
-        {
-            o.WriteLine($"  host connection from {host.Client.RemoteEndPoint} failed: {e.Message}");
-            continue;
-        }
-        if (line is null)
-        {
-            o.WriteLine($"  host connection from {host.Client.RemoteEndPoint} closed without a line");
-            continue;
-        }
-        o.WriteLine($"  host client {host.Client.RemoteEndPoint} sent: {line}");
-        writer.WriteLine($"KOS echo: {line}");
-    }
-});
+Section("TCP sockets", () => TcpTour(o).GetAwaiter().GetResult());
 
 Section("Globalization with ICU", () =>
 {
@@ -512,6 +391,131 @@ static async Task AsyncTour(TextWriter o)
     }
     o.WriteLine($"  PeriodicTimer: {ticks} ticks of 100 ms in {clock.ElapsedMilliseconds} ms");
     Check(clock.ElapsedMilliseconds >= 450, "the timer does not fire early");
+}
+
+static async Task TcpTour(TextWriter o)
+{
+    // Sockets go to the network VFS program (VfsNet in kos-image/).
+    try
+    {
+        new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp).Dispose();
+    }
+    catch (SocketException e) when (e.SocketErrorCode == SocketError.SocketError)
+    {
+        // Without a network VFS program libc's stub fails socket() with EIO, which has no SocketError value.
+        Skip($"no network ({e.Message}); the image needs a network VFS program, see HOWTO-KOS.md");
+    }
+
+    // Loopback echo with the async API: the server copies everything back, the client sends and receives at once.
+    using var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    var endpoint = (IPEndPoint)listener.LocalEndpoint;
+    Task echo = Task.Run(async () =>
+    {
+        using TcpClient peer = await listener.AcceptTcpClientAsync();
+        using NetworkStream stream = peer.GetStream();
+        await stream.CopyToAsync(stream);
+    });
+
+    byte[] payload = new byte[256 * 1024];
+    new Random(47).NextBytes(payload);
+    var clock = Stopwatch.StartNew();
+    using (var client = new TcpClient())
+    {
+        await client.ConnectAsync(endpoint);
+        NetworkStream stream = client.GetStream();
+        Task send = Task.Run(async () =>
+        {
+            await stream.WriteAsync(payload);
+            client.Client.Shutdown(SocketShutdown.Send);
+        });
+        var received = new MemoryStream();
+        await stream.CopyToAsync(received);
+        await Task.WhenAll(send, echo);
+        o.WriteLine($"  async loopback echo via {endpoint}: {received.Length / 1024} KiB back in {clock.ElapsedMilliseconds} ms");
+        Check(received.GetBuffer().AsSpan(0, (int)received.Length).SequenceEqual(payload), "the echoed bytes equal the bytes sent");
+    }
+
+    // Blocking calls, with a receive buffer larger than one VFS IPC message (65536 bytes).
+    using (var server = new TcpListener(IPAddress.Loopback, 0))
+    {
+        server.Start();
+        using var client = new TcpClient();
+        client.Connect((IPEndPoint)server.LocalEndpoint);
+        using TcpClient peer = server.AcceptTcpClient();
+        byte[] message = new byte[100_000];
+        new Random(11).NextBytes(message);
+        // Sent from another thread: the message may not fit the socket buffers until it is read.
+        Task send = Task.Run(() =>
+        {
+            client.Client.Send(message);
+            client.Client.Shutdown(SocketShutdown.Send);
+        });
+        var buffer = new byte[81920];
+        int total = 0, largest = 0, count;
+        var back = new MemoryStream();
+        while ((count = peer.Client.Receive(buffer)) > 0)
+        {
+            back.Write(buffer, 0, count);
+            total += count;
+            largest = Math.Max(largest, count);
+        }
+        await send;
+        o.WriteLine($"  blocking Receive into an 81920-byte buffer: {total} bytes, at most {largest} per call");
+        Check(back.GetBuffer().AsSpan(0, (int)back.Length).SequenceEqual(message), "the bytes received equal the bytes sent");
+    }
+
+    // A client on the host: only when the image forwards a port (kos-image's HOST_TCP_PORT option).
+    string? hostPort = Environment.GetEnvironmentVariable("HOST_TCP_PORT");
+    if (hostPort is null)
+    {
+        o.WriteLine("  HOST_TCP_PORT unset: no port forwarded from the host, no host client expected");
+        return;
+    }
+    using var hostListener = new TcpListener(IPAddress.Any, int.Parse(hostPort, CultureInfo.InvariantCulture));
+    hostListener.Start();
+    const int WaitSeconds = 120;
+    o.WriteLine($"  listening on {hostListener.LocalEndpoint} for a host client, up to {WaitSeconds} s " +
+        $"(on the host: nc localhost {hostPort})");
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(WaitSeconds));
+    // Accept until a client sends a line: a connection can arrive already closed by the host side.
+    while (true)
+    {
+        TcpClient host;
+        try
+        {
+            host = await hostListener.AcceptTcpClientAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            Check(false, $"a host client sent a line within {WaitSeconds} s");
+            return;
+        }
+        using (host)
+        {
+            using var reader = new StreamReader(host.GetStream());
+            using var writer = new StreamWriter(host.GetStream()) { AutoFlush = true, NewLine = "\n" };
+            string? line;
+            try
+            {
+                await writer.WriteLineAsync("hello from .NET on KasperskyOS; send a line");
+                line = await reader.ReadLineAsync(timeout.Token);
+            }
+            catch (IOException e)
+            {
+                o.WriteLine($"  host connection from {host.Client.RemoteEndPoint} failed: {e.Message}");
+                continue;
+            }
+            if (line is null)
+            {
+                o.WriteLine($"  host connection from {host.Client.RemoteEndPoint} closed without a line");
+                continue;
+            }
+            o.WriteLine($"  host client {host.Client.RemoteEndPoint} sent: {line}");
+            await writer.WriteLineAsync($"KOS echo: {line}");
+            return;
+        }
+    }
 }
 
 static bool IsPrime(int n)

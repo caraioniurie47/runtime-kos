@@ -41,6 +41,12 @@
 #if HAVE_STRINGS_H && defined(__KOS__)
 #include <strings.h> // strcasecmp is declared here
 #endif
+#if defined(__KOS__)
+// Socket reads go over IPC to the network VFS program. On SDK 1.4.0.102 recv() fails with EINVAL for an 81920-byte
+// buffer and works with 65536 bytes, the size of _VFS_GENERAL_IPC_BUFFER_SIZE in the SDK's vfs/defs.h, so reads ask
+// for at most that; a stream socket read may return fewer bytes than asked anyway.
+enum { KOS_MAX_RECEIVE_LENGTH = 65536 };
+#endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #if HAVE_SYS_SOCKIO_H
@@ -145,17 +151,6 @@ struct in_pktinfo
     struct in_addr ipi_addr;
 };
 #define IP_PKTINFO IP_RECVDSTADDR
-#endif
-
-#if !HAVE_IN6_PKTINFO
-// TODO-KOS: CHECK
-// On platforms, such as KOS, where in6_pktinfo
-// is not available, fallback to custom definition
-// with required members.
-struct in6_pktinfo
-{
-    struct in6_addr ipi6_addr;
-};
 #endif
 
 #if !defined(IPV6_ADD_MEMBERSHIP) && defined(IPV6_JOIN_GROUP)
@@ -716,6 +711,8 @@ int32_t SystemNative_GetDomainName(uint8_t* name, int32_t nameLength)
     return 0;
 #else
     // GetDomainName is not supported on this platform.
+    (void)name;
+    (void)nameLength;
     errno = ENOTSUP;
     return -1;
 #endif
@@ -1069,7 +1066,6 @@ static int32_t GetIPv4PacketInformation(struct cmsghdr* controlMessage, IPPacket
     return 1;
 }
 
-#if HAVE_IN6_PKTINFO
 static int32_t GetIPv6PacketInformation(struct cmsghdr* controlMessage, IPPacketInformation* packetInfo)
 {
     assert(controlMessage != NULL);
@@ -1088,7 +1084,6 @@ static int32_t GetIPv6PacketInformation(struct cmsghdr* controlMessage, IPPacket
 
     return 1;
 }
-#endif
 
 static struct cmsghdr* GET_CMSG_NXTHDR(struct msghdr* mhdr, struct cmsghdr* cmsg)
 {
@@ -1137,12 +1132,10 @@ SystemNative_TryGetIPPacketInformation(MessageHeader* messageHeader, int32_t isI
         for (; controlMessage != NULL && controlMessage->cmsg_len > 0;
              controlMessage = GET_CMSG_NXTHDR(&header, controlMessage))
         {
-#if HAVE_IN6_PKTINFO // TODO-KOS: IPV6_PKTINFO is not declared
             if (controlMessage->cmsg_level == IPPROTO_IPV6 && controlMessage->cmsg_type == IPV6_PKTINFO)
             {
                 return GetIPv6PacketInformation(controlMessage, packetInfo);
             }
-#endif
         }
     }
 
@@ -1556,6 +1549,10 @@ int32_t SystemNative_Receive(intptr_t socket, void* buffer, int32_t bufferLen, i
         return Error_ENOTSUP;
     }
 
+#if defined(__KOS__)
+    bufferLen = Min(bufferLen, KOS_MAX_RECEIVE_LENGTH);
+#endif
+
     ssize_t res;
     while ((res = recv(fd, buffer, (size_t)bufferLen, socketFlags)) < 0 && errno == EINTR);
 
@@ -1648,7 +1645,35 @@ int32_t SystemNative_ReceiveMessage(intptr_t socket, MessageHeader* messageHeade
     struct msghdr header;
     ConvertMessageHeaderToMsghdr(&header, messageHeader, fd);
 
+#if defined(__KOS__)
+    // Receive into at most KOS_MAX_RECEIVE_LENGTH bytes: drop the buffers past it and shorten the one it ends in,
+    // restoring that length afterwards.
+    struct iovec* shortened = NULL;
+    size_t shortenedLength = 0;
+    size_t total = 0;
+    for (size_t i = 0; i < (size_t)header.msg_iovlen; i++)
+    {
+        struct iovec* iov = &header.msg_iov[i];
+        if (iov->iov_len > (size_t)KOS_MAX_RECEIVE_LENGTH - total)
+        {
+            shortened = iov;
+            shortenedLength = iov->iov_len;
+            iov->iov_len = (size_t)KOS_MAX_RECEIVE_LENGTH - total;
+            header.msg_iovlen = (__typeof__(header.msg_iovlen))(i + 1);
+            break;
+        }
+        total += iov->iov_len;
+    }
+#endif
+
     while ((res = recvmsg(fd, &header, socketFlags)) < 0 && errno == EINTR);
+
+#if defined(__KOS__)
+    if (shortened != NULL)
+    {
+        shortened->iov_len = shortenedLength;
+    }
+#endif
 
     assert(header.msg_name == messageHeader->SocketAddress); // should still be the same location as set in ConvertMessageHeaderToMsghdr
     assert(header.msg_control == messageHeader->ControlBuffer);
@@ -2999,7 +3024,7 @@ int32_t SystemNative_GetSocketType(intptr_t socket, int32_t* addressFamily, int3
     return Error_SUCCESS;
 }
 
-int sockatmark_helper(int s)
+static int sockatmark_helper(int s)
 {
 #ifdef SIOCATMARK
     int val;
@@ -3449,7 +3474,486 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
     return Error_SUCCESS;
 }
 
-#else // !HAVE_KQUEUE !HAVE_EPOLL
+#elif defined(__KOS__)
+
+// KasperskyOS has neither epoll nor kqueue, only poll(). A port is a table of registered sockets that the waiting
+// thread polls. The engine expects edge-triggered events (EPOLLET, EV_CLEAR), while poll() is level-triggered and
+// would report a readable or writable socket again at once. So once a bit is reported it is left out of the wait:
+// a zero-timeout poll re-arms it when the socket is no longer ready for it, and a bit still ready after
+// KOS_SOCKET_EVENT_REARM_MS is reported again. Extra events are harmless (an operation retries and waits again);
+// the re-report bounds the delay when the socket became ready again between two checks. There is no descriptor
+// to wake a wait, so a registration made meanwhile is polled after at most KOS_SOCKET_EVENT_WAIT_MS. Closed
+// descriptors are dropped, as epoll drops them; a descriptor registered again replaces its entry.
+//
+// KasperskyOS's poll() (SDK 1.4.0.102) differs from POSIX: a closed descriptor fails the whole call with EBADF instead
+// of reporting POLLNVAL; while another thread closes a polled descriptor the call can also fail with EINVAL or
+// EACCES; and more than KOS_POLL_MAX_NFDS entries fail with EINVAL, even when every descriptor is -1.
+
+#include <poll.h>
+#include <time.h>
+
+static const size_t SocketEventBufferElementSize = sizeof(SocketEvent);
+
+enum
+{
+    KOS_SOCKET_EVENT_MAX_PORTS = 16,
+    KOS_SOCKET_EVENT_WAIT_MS = 10,
+    KOS_SOCKET_EVENT_REARM_MS = 50,
+    KOS_POLL_MAX_NFDS = 512,
+};
+
+typedef struct
+{
+    int fd;
+    uintptr_t data;
+    uint64_t generation; // distinguishes a registration from a later one of the same descriptor
+    short interest;     // POLLIN and POLLOUT
+    short reported;     // bits reported and not re-armed since
+    int64_t reportedAt; // milliseconds, CLOCK_MONOTONIC
+    int closed;         // POLLNVAL seen (in snapshots only)
+} KosSocketRegistration;
+
+typedef struct
+{
+    pthread_mutex_t lock;
+    KosSocketRegistration* entries; // guarded by lock
+    int count;
+    int capacity;
+    KosSocketRegistration* snapshot; // the waiting thread's copy
+    struct pollfd* pollFds;
+    int scratchCapacity;
+    uint64_t nextGeneration; // guarded by lock
+} KosSocketEventPort;
+
+static pthread_mutex_t g_kosSocketEventPortsLock = PTHREAD_MUTEX_INITIALIZER;
+static KosSocketEventPort* g_kosSocketEventPorts[KOS_SOCKET_EVENT_MAX_PORTS];
+
+static KosSocketEventPort* GetKosSocketEventPort(int32_t port)
+{
+    if (port < 0 || port >= KOS_SOCKET_EVENT_MAX_PORTS)
+    {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&g_kosSocketEventPortsLock);
+    KosSocketEventPort* result = g_kosSocketEventPorts[port];
+    pthread_mutex_unlock(&g_kosSocketEventPortsLock);
+    return result;
+}
+
+static int64_t KosMonotonicMilliseconds(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static short GetKosPollEvents(SocketEvents events)
+{
+    return (short)((((events & SocketEvents_SA_READ) != 0) ? POLLIN : 0) | (((events & SocketEvents_SA_WRITE) != 0) ? POLLOUT : 0));
+}
+
+// The requested bits that revents makes ready; hang-up and error make every requested bit ready, as the
+// operations then find the condition (the epoll port turns EPOLLHUP into EPOLLIN | EPOLLOUT likewise).
+static short GetKosReadyBits(short requested, short revents)
+{
+    if ((revents & (POLLHUP | POLLERR)) != 0)
+    {
+        return requested;
+    }
+
+    return (short)(requested & revents);
+}
+
+static void SetKosSocketEvent(SocketEvent* sae, uintptr_t data, short readyBits)
+{
+    memset(sae, 0, sizeof(SocketEvent));
+    sae->Data = data;
+    sae->Events = (((readyBits & POLLIN) != 0) ? SocketEvents_SA_READ : 0) | (((readyBits & POLLOUT) != 0) ? SocketEvents_SA_WRITE : 0);
+}
+
+static void KosSleepMilliseconds(int milliseconds)
+{
+    struct timespec pause = { milliseconds / 1000, (long)(milliseconds % 1000) * 1000000L };
+    while (nanosleep(&pause, &pause) < 0 && errno == EINTR);
+}
+
+// poll() in calls of at most KOS_POLL_MAX_NFDS entries. Above that the chunks are polled without waiting, and the
+// wait is a sleep when none is ready.
+static int KosPollChunks(struct pollfd* pollFds, int n, int timeout)
+{
+    int ready;
+    if (n <= KOS_POLL_MAX_NFDS)
+    {
+        while ((ready = poll(pollFds, (nfds_t)n, timeout)) < 0 && errno == EINTR);
+        return ready;
+    }
+
+    for (int attempt = 0;; attempt++)
+    {
+        ready = 0;
+        for (int start = 0; start < n; start += KOS_POLL_MAX_NFDS)
+        {
+            int chunk = Min(n - start, KOS_POLL_MAX_NFDS);
+            int result;
+            while ((result = poll(pollFds + start, (nfds_t)chunk, 0)) < 0 && errno == EINTR);
+            if (result < 0)
+            {
+                return -1;
+            }
+            ready += result;
+        }
+        if (ready > 0 || timeout == 0 || attempt == 1)
+        {
+            return ready;
+        }
+        KosSleepMilliseconds(timeout);
+    }
+}
+
+// poll() over the entries whose pollFds[i].fd is not -1; never fails. When poll() fails, a descriptor was closed, or
+// is being closed by another thread: poll each one alone, mark closed and leave out those reporting EBADF or POLLNVAL,
+// leave out of this call those failing otherwise (the next wait polls them again), and poll the rest. If that fails
+// too, report nothing ready after sleeping for the timeout.
+static int KosPollRegistrations(KosSocketRegistration* snapshot, struct pollfd* pollFds, int n, int timeout)
+{
+    int ready = KosPollChunks(pollFds, n, timeout);
+    if (ready >= 0)
+    {
+        return ready;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        if (pollFds[i].fd == -1)
+        {
+            continue;
+        }
+        struct pollfd single = { pollFds[i].fd, pollFds[i].events, 0 };
+        int result;
+        while ((result = poll(&single, 1, 0)) < 0 && errno == EINTR);
+        if ((result < 0 && errno == EBADF) || (result > 0 && (single.revents & POLLNVAL) != 0))
+        {
+            snapshot[i].closed = 1;
+            pollFds[i].fd = -1;
+        }
+        else if (result < 0)
+        {
+            pollFds[i].fd = -1;
+        }
+    }
+
+    ready = KosPollChunks(pollFds, n, timeout);
+    if (ready >= 0)
+    {
+        return ready;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        pollFds[i].revents = 0;
+    }
+    if (timeout > 0)
+    {
+        KosSleepMilliseconds(timeout);
+    }
+    return 0;
+}
+
+static int32_t CreateSocketEventPortInner(int32_t* port)
+{
+    assert(port != NULL);
+    *port = -1;
+
+    KosSocketEventPort* p = (KosSocketEventPort*)calloc(1, sizeof(KosSocketEventPort));
+    if (p == NULL)
+    {
+        return Error_ENOMEM;
+    }
+
+    int error = pthread_mutex_init(&p->lock, NULL);
+    if (error != 0)
+    {
+        free(p);
+        return SystemNative_ConvertErrorPlatformToPal(error);
+    }
+
+    pthread_mutex_lock(&g_kosSocketEventPortsLock);
+    for (int i = 0; i < KOS_SOCKET_EVENT_MAX_PORTS; i++)
+    {
+        if (g_kosSocketEventPorts[i] == NULL)
+        {
+            g_kosSocketEventPorts[i] = p;
+            *port = i;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_kosSocketEventPortsLock);
+
+    if (*port == -1)
+    {
+        pthread_mutex_destroy(&p->lock);
+        free(p);
+        return Error_EMFILE;
+    }
+
+    return Error_SUCCESS;
+}
+
+static int32_t CloseSocketEventPortInner(int32_t port)
+{
+    if (port < 0 || port >= KOS_SOCKET_EVENT_MAX_PORTS)
+    {
+        return Error_EBADF;
+    }
+
+    pthread_mutex_lock(&g_kosSocketEventPortsLock);
+    KosSocketEventPort* p = g_kosSocketEventPorts[port];
+    g_kosSocketEventPorts[port] = NULL;
+    pthread_mutex_unlock(&g_kosSocketEventPortsLock);
+
+    if (p == NULL)
+    {
+        return Error_EBADF;
+    }
+
+    pthread_mutex_destroy(&p->lock);
+    free(p->entries);
+    free(p->snapshot);
+    free(p->pollFds);
+    free(p);
+    return Error_SUCCESS;
+}
+
+static int32_t TryChangeSocketEventRegistrationInner(
+    int32_t port, int32_t socket, SocketEvents currentEvents, SocketEvents newEvents, uintptr_t data)
+{
+    assert(currentEvents != newEvents);
+    (void)currentEvents;
+
+    KosSocketEventPort* p = GetKosSocketEventPort(port);
+    if (p == NULL)
+    {
+        return Error_EBADF;
+    }
+
+    int32_t result = Error_SUCCESS;
+    pthread_mutex_lock(&p->lock);
+
+    int index = -1;
+    for (int i = 0; i < p->count; i++)
+    {
+        if (p->entries[i].fd == socket)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if (newEvents == SocketEvents_SA_NONE)
+    {
+        if (index != -1)
+        {
+            p->entries[index] = p->entries[--p->count];
+        }
+    }
+    else
+    {
+        if (index == -1)
+        {
+            if (p->count == p->capacity)
+            {
+                int capacity = p->capacity == 0 ? 16 : p->capacity * 2;
+                KosSocketRegistration* entries = (KosSocketRegistration*)realloc(p->entries, (size_t)capacity * sizeof(KosSocketRegistration));
+                if (entries == NULL)
+                {
+                    result = Error_ENOMEM;
+                    goto done;
+                }
+                p->entries = entries;
+                p->capacity = capacity;
+            }
+            index = p->count++;
+        }
+
+        KosSocketRegistration* entry = &p->entries[index];
+        memset(entry, 0, sizeof(KosSocketRegistration));
+        entry->fd = socket;
+        entry->data = data;
+        entry->generation = ++p->nextGeneration;
+        entry->interest = GetKosPollEvents(newEvents);
+    }
+
+done:
+    pthread_mutex_unlock(&p->lock);
+    return result;
+}
+
+static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32_t* count)
+{
+    assert(buffer != NULL);
+    assert(count != NULL);
+    assert(*count >= 0);
+
+    KosSocketEventPort* p = GetKosSocketEventPort(port);
+    if (p == NULL)
+    {
+        *count = 0;
+        return Error_EBADF;
+    }
+
+    while (true)
+    {
+        // Copy the registrations; other threads register sockets while this one waits.
+        pthread_mutex_lock(&p->lock);
+        int n = p->count;
+        if (n > p->scratchCapacity)
+        {
+            KosSocketRegistration* snapshot = (KosSocketRegistration*)realloc(p->snapshot, (size_t)n * sizeof(KosSocketRegistration));
+            if (snapshot != NULL)
+            {
+                p->snapshot = snapshot;
+            }
+            struct pollfd* pollFds = (struct pollfd*)realloc(p->pollFds, (size_t)n * sizeof(struct pollfd));
+            if (pollFds != NULL)
+            {
+                p->pollFds = pollFds;
+            }
+            if (snapshot == NULL || pollFds == NULL)
+            {
+                pthread_mutex_unlock(&p->lock);
+                *count = 0;
+                return Error_ENOMEM;
+            }
+            p->scratchCapacity = n;
+        }
+        if (n > 0)
+        {
+            memcpy(p->snapshot, p->entries, (size_t)n * sizeof(KosSocketRegistration));
+        }
+        pthread_mutex_unlock(&p->lock);
+
+        KosSocketRegistration* snapshot = p->snapshot;
+        struct pollfd* pollFds = p->pollFds;
+        int64_t now = KosMonotonicMilliseconds();
+        int numEvents = 0;
+
+        // Reported bits: re-arm those no longer ready, report again those ready for KOS_SOCKET_EVENT_REARM_MS.
+        int polled = 0;
+        for (int i = 0; i < n; i++)
+        {
+            pollFds[i].fd = snapshot[i].reported != 0 ? snapshot[i].fd : -1;
+            pollFds[i].events = snapshot[i].reported;
+            pollFds[i].revents = 0;
+            polled += snapshot[i].reported != 0 ? 1 : 0;
+        }
+        if (polled > 0 && KosPollRegistrations(snapshot, pollFds, n, 0) >= 0)
+        {
+            // With no descriptor ready every revents is 0, and every reported bit is re-armed.
+            for (int i = 0; i < n; i++)
+            {
+                KosSocketRegistration* entry = &snapshot[i];
+                if ((pollFds[i].revents & POLLNVAL) != 0)
+                {
+                    entry->closed = 1;
+                    continue;
+                }
+                if (pollFds[i].fd == -1)
+                {
+                    continue;
+                }
+
+                short stillReady = GetKosReadyBits(entry->reported, pollFds[i].revents);
+                entry->reported = stillReady;
+                if (stillReady != 0 && now - entry->reportedAt >= KOS_SOCKET_EVENT_REARM_MS && numEvents < *count)
+                {
+                    SetKosSocketEvent(&buffer[numEvents++], entry->data, stillReady);
+                    entry->reportedAt = now;
+                }
+            }
+        }
+
+        // The bits not reported: wait for them, briefly, or not at all when there is already something to return.
+        polled = 0;
+        for (int i = 0; i < n; i++)
+        {
+            short events = snapshot[i].closed ? 0 : (short)(snapshot[i].interest & ~snapshot[i].reported);
+            pollFds[i].fd = events != 0 ? snapshot[i].fd : -1;
+            pollFds[i].events = events;
+            pollFds[i].revents = 0;
+            polled += events != 0 ? 1 : 0;
+        }
+        int timeout = numEvents > 0 ? 0 : KOS_SOCKET_EVENT_WAIT_MS;
+        int ready = 0;
+        if (polled > 0)
+        {
+            ready = KosPollRegistrations(snapshot, pollFds, n, timeout);
+        }
+        else if (timeout > 0)
+        {
+            KosSleepMilliseconds(timeout);
+        }
+
+        if (ready > 0)
+        {
+            now = KosMonotonicMilliseconds();
+            for (int i = 0; i < n && numEvents < *count; i++)
+            {
+                KosSocketRegistration* entry = &snapshot[i];
+                if ((pollFds[i].revents & POLLNVAL) != 0)
+                {
+                    entry->closed = 1;
+                    continue;
+                }
+                if (pollFds[i].fd == -1)
+                {
+                    continue;
+                }
+
+                short readyBits = GetKosReadyBits(pollFds[i].events, pollFds[i].revents);
+                if (readyBits != 0)
+                {
+                    SetKosSocketEvent(&buffer[numEvents++], entry->data, readyBits);
+                    entry->reported = (short)(entry->reported | readyBits);
+                    entry->reportedAt = now;
+                }
+            }
+        }
+
+        // Store the new state in the registrations that are still the ones copied.
+        pthread_mutex_lock(&p->lock);
+        for (int i = 0; i < n; i++)
+        {
+            KosSocketRegistration* copy = &snapshot[i];
+            for (int j = 0; j < p->count; j++)
+            {
+                KosSocketRegistration* entry = &p->entries[j];
+                if (entry->generation == copy->generation)
+                {
+                    if (copy->closed)
+                    {
+                        p->entries[j] = p->entries[--p->count];
+                    }
+                    else
+                    {
+                        entry->reported = copy->reported;
+                        entry->reportedAt = copy->reportedAt;
+                    }
+                    break;
+                }
+            }
+        }
+        pthread_mutex_unlock(&p->lock);
+
+        if (numEvents > 0)
+        {
+            *count = numEvents;
+            return Error_SUCCESS;
+        }
+    }
+}
+
+#else // !HAVE_KQUEUE !HAVE_EPOLL !__KOS__
 
 static const size_t SocketEventBufferElementSize = 0;
 

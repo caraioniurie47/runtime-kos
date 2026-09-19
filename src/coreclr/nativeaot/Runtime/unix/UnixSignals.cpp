@@ -12,7 +12,7 @@
 // Add handler for hardware exception signal
 bool AddSignalHandler(int signal, SignalHandler handler, struct sigaction* previousAction)
 {
-#if !defined(__KOS__) // TODO-KOS
+#if !defined(__KOS__) // KasperskyOS sends processes only SIGTERM
     struct sigaction newAction;
 
     newAction.sa_flags = SA_RESTART;
@@ -52,7 +52,7 @@ bool AddSignalHandler(int signal, SignalHandler handler, struct sigaction* previ
 // Restore original handler for hardware exception signal
 void RestoreSignalHandler(int signal_id, struct sigaction *previousAction)
 {
-#if !defined(__KOS__) // TODO-KOS
+#if !defined(__KOS__) // KasperskyOS sends processes only SIGTERM
     if (-1 == sigaction(signal_id, previousAction, NULL))
     {
         ASSERT_UNCONDITIONALLY("RestoreSignalHandler: sigaction() call failed");

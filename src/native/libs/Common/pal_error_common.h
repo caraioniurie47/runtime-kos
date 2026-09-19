@@ -266,10 +266,8 @@ inline static int32_t ConvertErrorPlatformToPal(int32_t platformErrno)
             return Error_ENOTEMPTY;
 #endif
 #ifdef ENOTRECOVERABLE // not available in NetBSD
-#if ENOTRECOVERABLE != EHOSTDOWN // TODO-KOS
         case ENOTRECOVERABLE:
             return Error_ENOTRECOVERABLE;
-#endif
 #endif
         case ENOTSOCK:
             return Error_ENOTSOCK;
@@ -282,10 +280,8 @@ inline static int32_t ConvertErrorPlatformToPal(int32_t platformErrno)
         case EOVERFLOW:
             return Error_EOVERFLOW;
 #ifdef EOWNERDEAD // not available in NetBSD
-#if EOWNERDEAD != EUSERS // TODO-KOS
         case EOWNERDEAD:
             return Error_EOWNERDEAD;
-#endif
 #endif
         case EPERM:
             return Error_EPERM;

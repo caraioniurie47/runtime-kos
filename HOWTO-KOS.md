@@ -183,8 +183,7 @@ Besides the program, the image holds three programs from the SDK and one of its 
 the SDK's entropy program. `NetInit`, built from `kos-image/src/netinit.c`, gives the network interface
 `en0` the address QEMU user networking expects (`10.0.2.15/24`, gateway `10.0.2.2`) and exits, as the
 SDK's network examples do in their own programs. `kos-image/src/init.yaml.in` sets `VFS_FILESYSTEM_BACKEND: client:kl.VfsRamFs`
-and `VFS_NETWORK_BACKEND: client:kl.VfsNet` for the program, connects it to both, and sets
-`DOTNET_SYSTEM_NET_SOCKETS_THREAD_COUNT: "0"` (see Limitations). The program has to link the client
+and `VFS_NETWORK_BACKEND: client:kl.VfsNet` for the program and connects it to both. The program has to link the client
 side, `libvfs_remote.a`, which each sample's `.csproj` adds as a `LinkerArg`. A program of your own needs
 both that item and this image project.
 
@@ -223,7 +222,8 @@ sorting, a `Parallel.For` Mandelbrot, async/await with
 channels and timers, source-generated `System.Text.Json` and `Regex`, LINQ and generic math, the GC
 under allocation load, and exceptions with stack traces. It uses the HelloWorld image project.
 
-The sockets section echoes 256 KiB over loopback. Given `-D HOST_TCP_PORT=<port>` when the image is
+The sockets section echoes 256 KiB over loopback with the `*Async` socket methods, then receives a
+100,000-byte message with blocking `Socket.Receive` calls into an 81920-byte buffer. Given `-D HOST_TCP_PORT=<port>` when the image is
 configured, the image project also forwards that TCP port from the host (QEMU `hostfwd`) and the section
 waits up to 120 seconds for a client from the host: it sends a greeting line, reads a line and answers
 `KOS echo: <line>`. Without the option it does not wait.
@@ -258,7 +258,7 @@ command above, rebuild it, and once the showcase prints `listening on 0.0.0.0:50
 The last line it prints is the summary, for example:
 
 ```text
-SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 14130 ms
+SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 16421 ms
 ```
 
 ## Limitations
@@ -268,18 +268,16 @@ SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 14130 ms
   managed exception.
 - **Files live in RAM.** `VfsRamFs` mounts a RAM file system at `/tmp`, emptied at every boot; the
   showcase uses only `/tmp`, so other paths are untried.
-- **Sockets: blocking calls only, and a variable.** KasperskyOS has neither epoll nor kqueue, so
-  System.Native has no socket event port. Creating the first socket starts `System.Net.Sockets`' event
-  threads, which then fail (`TypeInitializationException`, inner `ENOSYS`), unless
-  `DOTNET_SYSTEM_NET_SOCKETS_THREAD_COUNT` is `0`, as the image sets it. With it, blocking calls work
-  (`Socket`, `TcpListener`, `TcpClient`, `NetworkStream` reads and writes, `Socket.Poll`); the `*Async`
-  socket methods, and what is built on them such as `HttpClient`, are not expected to work and were not
-  tried. The image has no DNS or `/etc/hosts`; the showcase uses IP addresses only. In an image with
-  `VfsRamFs` but no `VfsNet`, the socket calls go to libc's stub: creating a socket throws
+- **Sockets: TCP over IP addresses is what was tried.** KasperskyOS has neither epoll nor kqueue, so
+  System.Native's socket event port for it is built on `poll()`: once the first socket is created, each
+  socket event thread wakes at least every 10 ms, and a socket registered meanwhile is polled up to
+  10 ms later. That `poll()` takes at most 512 descriptors per call; the port polls more in chunks,
+  which nothing has exercised yet. The showcase runs `Socket`, `TcpListener`, `TcpClient` and `NetworkStream`, blocking and
+  `*Async`; UDP, and what is built on top such as `HttpClient`, were not tried. The image has no DNS or
+  `/etc/hosts`. On SDK 1.4.0.102 `recv()` fails with `EINVAL` for an 81920-byte buffer and works with
+  65536 bytes, so System.Native asks for at most 65536 bytes per read. In an
+  image with `VfsRamFs` but no `VfsNet`, the socket calls go to libc's stub: creating a socket throws
   `SocketException` ("Unknown socket error"), and the showcase reports its sockets section as `SKIP`.
-- **Socket reads of more than 64 KiB fail.** On SDK 1.4.0.102 `recv()` fails with `EINVAL` for an
-  81920-byte buffer, and 65536 bytes work; `Stream.CopyTo`'s default buffer is 81920 bytes, so pass a
-  smaller one (`CopyTo(destination, 65536)`). Sends of 81920 bytes worked.
 - **Without a VFS program, no files or stdout.** In an image without one, each program's libc falls back
   to a stub ("VFS filesystem and network backends initialized with stub (related calls will return
   EIO)"): only stderr reaches the console, file calls and `Console.Out` throw `IOException`, and the

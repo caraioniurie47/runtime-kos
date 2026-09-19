@@ -43,7 +43,12 @@ void* SystemNative_LoadLibrary(const char* filename)
 
 void* SystemNative_GetLoadLibraryError(void)
 {
-    return (void*)dlerror();
+#if defined(__KOS__)
+    const char* error = dlerror(); // KOS CE SDK 1.4.0.102 declares const char* dlerror(void)
+    return (void*)(uintptr_t)error;
+#else
+    return dlerror();
+#endif
 }
 
 void* SystemNative_GetProcAddress(void* handle, const char* symbol)

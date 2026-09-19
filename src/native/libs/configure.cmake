@@ -111,31 +111,6 @@ check_c_source_compiles(
 
 # /in_pktinfo
 
-# in6_pktinfo: Find whether this struct exists
-check_include_files(
-    "sys/socket.h;linux/ipv6.h"
-    HAVE_LINUX_IPV6_H)
-
-if (HAVE_LINUX_IPV6_H)
-    set (SOCKET_INCLUDES linux/ipv6.h)
-else ()
-    set (SOCKET_INCLUDES netinet/in.h)
-endif ()
-
-check_c_source_compiles(
-    "
-    #include <sys/socket.h>
-    #include <${SOCKET_INCLUDES}>
-    int main(void)
-    {
-        struct in6_pktinfo pktinfo;
-        return 0;
-    }
-    "
-    HAVE_IN6_PKTINFO)
-
-# /in6_pktinfo
-
 check_c_source_compiles(
     "
     #include <sys/vfs.h>
@@ -885,9 +860,7 @@ check_c_source_compiles(
     HAVE_MKSTEMP)
 
 if (NOT HAVE_MKSTEMPS AND NOT HAVE_MKSTEMP AND NOT CLR_CMAKE_TARGET_WASI)
-    if (NOT CLR_CMAKE_TARGET_KOS) # TODO-KOS
-        message(FATAL_ERROR "Cannot find mkstemps nor mkstemp on this platform.")
-    endif()
+    message(FATAL_ERROR "Cannot find mkstemps nor mkstemp on this platform.")
 endif()
 
 check_c_source_compiles(
@@ -1174,7 +1147,7 @@ set (HAVE_INOTIFY 0)
 if (HAVE_INOTIFY_INIT AND HAVE_INOTIFY_ADD_WATCH AND HAVE_INOTIFY_RM_WATCH)
     set (HAVE_INOTIFY 1)
 elseif (CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI)
-    if (NOT CLR_CMAKE_TARGET_KOS) # TODO-KOS
+    if (NOT CLR_CMAKE_TARGET_KOS) # KasperskyOS has no inotify (no sys/inotify.h in CE SDK 1.4.0.102)
         message(FATAL_ERROR "Cannot find inotify functions on a Linux platform.")
     endif()
 endif()

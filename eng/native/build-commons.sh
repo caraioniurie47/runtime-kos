@@ -288,7 +288,7 @@ usage()
     echo "-clangx.y: optional argument to build using clang version x.y."
     echo "-cmakeargs: user-settable additional arguments passed to CMake."
     echo "-configureonly: do not perform any builds; just configure the build."
-    echo "-kos: TODO-KOS - replace with platform RID."
+    echo "-kos: build for KasperskyOS (with -cross and ROOTFS_DIR set to the KOS CE SDK)."
     echo "-cross: optional argument to signify cross compilation,"
     echo "        will use ROOTFS_DIR environment variable if set."
     echo "-gcc: optional argument to build using gcc in PATH."

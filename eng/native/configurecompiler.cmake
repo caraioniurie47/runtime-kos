@@ -663,9 +663,7 @@ if (CLR_CMAKE_HOST_UNIX OR CLR_CMAKE_HOST_WASI)
 
   # Suppress warnings-as-errors in release branches to reduce servicing churn
   if (PRERELEASE)
-    if (NOT CLR_CMAKE_TARGET_KOS) # TODO-KOS: __security_cookie generates GCC warning
-      add_compile_options(-Werror)
-    endif (NOT CLR_CMAKE_TARGET_KOS)
+    add_compile_options(-Werror)
   endif(PRERELEASE)
 
   # Disabled common warnings

@@ -25,7 +25,9 @@
 #include <mntent.h>
 #endif
 #include <sys/statvfs.h>
+#if !defined(__KOS__)
 #define STRING_BUFFER_SIZE 8192
+#endif
 
 #ifdef __HAIKU__
 #include <dirent.h>
@@ -205,10 +207,29 @@ int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
     return 0;
 }
 #elif defined(__KOS__)
-    // TODO-KOS: MountPoints enum. KOS has neither getfsstat/getmntinfo nor mntent.h (getvfsstat is declared).
-    (void)onFound;
-    (void)context;
-    return 0;
+    // KasperskyOS has neither getfsstat/getmntinfo nor mntent.h; getvfsstat lists the file systems the VFS
+    // programs have mounted.
+    int count = getvfsstat(NULL, 0, ST_NOWAIT);
+    if (count <= 0)
+    {
+        return count;
+    }
+
+    struct statvfs* mounts = (struct statvfs*)calloc((size_t)count, sizeof(struct statvfs));
+    if (mounts == NULL)
+    {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    count = getvfsstat(mounts, (size_t)count * sizeof(struct statvfs), ST_NOWAIT);
+    for (int i = 0; i < count; i++)
+    {
+        onFound(context, mounts[i].f_mntonname);
+    }
+
+    free(mounts);
+    return count < 0 ? -1 : 0;
 }
 #else
 #error "Don't know how to enumerate mount points on this platform"

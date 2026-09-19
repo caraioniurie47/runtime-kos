@@ -826,6 +826,8 @@ int32_t SystemNative_FLock(intptr_t fd, int32_t operation)
 #endif /* TARGET_WASI */
     return result;
 #else // !HAVE_SYS_FILE_H
+    (void)fd;
+    (void)operation;
     errno = ENOTSUP;
     return -1;
 #endif // HAVE_SYS_FILE_H

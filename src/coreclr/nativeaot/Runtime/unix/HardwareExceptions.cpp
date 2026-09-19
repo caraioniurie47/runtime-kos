@@ -322,7 +322,7 @@ uint32_t GetExceptionCodeForSignal(const siginfo_t *siginfo, const void *context
     // IMPORTANT NOTE: This function must not call any signal unsafe functions
     // since it is called from signal handlers.
 
-#if defined(__KOS__) // TODO-KOS
+#if defined(__KOS__) // KasperskyOS sends processes only SIGTERM, so no hardware exception handler is installed
     return 0;
 #else
 #ifdef ILL_ILLOPC

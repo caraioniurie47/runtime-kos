@@ -80,10 +80,6 @@
 #include <OS.h>
 #endif
 
-#if defined(__KOS__)
-volatile int PalInterlockedCompareExchange128_Lock = 0;
-#endif
-
 using std::nullptr_t;
 
 #define INVALID_HANDLE_VALUE    ((HANDLE)(intptr_t)-1)

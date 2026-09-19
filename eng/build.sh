@@ -20,7 +20,7 @@ usage()
   echo "  --arch (-a)                     Target platform: x86, x64, arm, armv6, armel, arm64, loongarch64, riscv64, s390x, ppc64le or wasm."
   echo "                                  [Default: Your machine's architecture.]"
   echo "  --binaryLog (-bl)               Output binary log."
-  echo "  --kos                           TODO-KOS: replace with platform RID."
+  echo "  --kos                           Build for KasperskyOS (arm64, with --cross and ROOTFS_DIR=<KOS CE SDK>)."
   echo "  --icudir                        Optional argument that overrides the ICU dir."
   echo "  --cross                         Optional argument to signify cross compilation."
   echo "  --configuration (-c)            Build configuration: Debug, Release or Checked."

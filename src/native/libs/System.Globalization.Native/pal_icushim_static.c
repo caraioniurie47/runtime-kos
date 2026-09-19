@@ -248,6 +248,10 @@ int32_t GlobalizationNative_LoadICU(void)
 void GlobalizationNative_InitICUFunctions(void* icuuc, void* icuin, const char* version, const char* suffix)
 {
     // no-op for static
+    (void)icuuc;
+    (void)icuin;
+    (void)version;
+    (void)suffix;
 }
 
 int32_t GlobalizationNative_GetICUVersion(void)

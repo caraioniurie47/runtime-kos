@@ -7,6 +7,8 @@ use EDL kl.core.Core
 use EDL hello.Hello
 
 use kl.core.DCM._
+use kl.EntropyEntity._
+use kl.VfsRamFs._
 
 execute: kl.core.Execute
 

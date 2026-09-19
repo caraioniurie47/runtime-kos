@@ -30,6 +30,14 @@
     <PackageReference Include="Microsoft.DotNet.ILCompiler; runtime.linux-arm64.Microsoft.DotNet.ILCompiler" Version="$(KosNetVersion)" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The SDK's VFS client (libvfs_remote.a): with VFS_FILESYSTEM_BACKEND=client:<VFS program> files and stdout
+         go to that program over IPC. Whole archive, as the SDK's vfs::client target links it: it registers itself.
+         Pair it with an image that has a VFS program, as kos-image/ does: without one, startup waits about 11 s
+         for a VFS server before falling back to the stub. -->
+    <LinkerArg Include="-Wl,--whole-archive,-lvfs_remote,--no-whole-archive" />
+  </ItemGroup>
+
   <!-- The NativeAOT runtime (runtime libraries, framework) ships in this pack. ProcessFrameworkReferences asks to
        download the SDK's own version of it; download the local one instead and point ILC at it below. -->
   <Target Name="_KosDownloadLocalNativeAotRuntimePack" AfterTargets="ProcessFrameworkReferences">

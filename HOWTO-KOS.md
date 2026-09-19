@@ -177,6 +177,13 @@ cd /home
 The image is a CMake project, built with the SDK's own CMake, which carries the `platform` modules.
 QEMU runs in the foreground and does not exit by itself; stop it with Ctrl+C.
 
+Besides the program, the image holds the SDK's prebuilt `VfsRamFs` program, which serves files and
+stdout to it over IPC: a RAM file system at `/tmp` and devices at `/dev`. It comes with the SDK's
+entropy program. `kos-image/src/init.yaml.in` sets `VFS_FILESYSTEM_BACKEND: client:kl.VfsRamFs` for the
+program and connects it to `kl.VfsRamFs`. The program has to link the client side, `libvfs_remote.a`,
+which each sample's `.csproj` adds as a `LinkerArg`. A program of your own needs both that item and
+this image project.
+
 ### Image
 
 ```sh
@@ -195,15 +202,17 @@ $KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target sim
 After the KasperskyOS boot log, the program prints:
 
 ```text
-[hello.Hello][14:14][CRT0] Initing main app: statically-linked, PIE.
+[hello.Hello][16:16][CRT0] Initing main app: statically-linked, PIE.
 ...
+[hello.Hello][16:16][CRT0] VFS filesystem backend initialized with env(client:kl.VfsRamFs)
 Hello from .NET! Math.Min(4, 7)=4
 ```
 
 ## 10. The showcase sample
 
 `samples/showcase-kos` runs a set of sections, each ending in `PASS`, `SKIP` or `FAIL`: runtime
-information, culture-aware formatting and sorting, a `Parallel.For` Mandelbrot, async/await with
+information, files under `/tmp` and a line on `Console.Out`, culture-aware formatting and sorting, a
+`Parallel.For` Mandelbrot, async/await with
 channels and timers, source-generated `System.Text.Json` and `Regex`, LINQ and generic math, the GC
 under allocation load, and exceptions with stack traces. It uses the HelloWorld image project.
 
@@ -233,7 +242,7 @@ $KOS_SDK/toolchain/bin/cmake --build /home/showcase-kos-image --target sim
 The last line it prints is the summary, for example:
 
 ```text
-SHOWCASE DONE: 9 passed, 0 skipped, 0 failed, 9261 ms
+SHOWCASE DONE: 10 passed, 0 skipped, 0 failed, 12948 ms
 ```
 
 ## Limitations
@@ -241,9 +250,14 @@ SHOWCASE DONE: 9 passed, 0 skipped, 0 failed, 9261 ms
 - **No hardware exceptions.** KasperskyOS delivers only `SIGTERM`, so the runtime registers no
   `SIGSEGV` or `SIGFPE` handler there, and a fault such as a null dereference does not become a
   managed exception.
-- **No file system, network or stdout in these images.** The program starts with "VFS filesystem and
-  network backends initialized with stub (related calls will return EIO)": only stderr reaches the
-  console, and writing to `Console.Out` throws `IOException`. A VFS component in the image is needed
-  for files and sockets; none was tried.
+- **Files live in RAM, and there is no network.** `VfsRamFs` mounts a RAM file system at `/tmp`,
+  emptied at every boot; the showcase uses only `/tmp`, so other paths are untried. Sockets need a
+  network VFS program, such as the SDK's `VfsNet`, which these images do not include.
+- **Without a VFS program, no files or stdout.** In an image without one, each program's libc falls back
+  to a stub ("VFS filesystem and network backends initialized with stub (related calls will return
+  EIO)"): only stderr reaches the console, file calls and `Console.Out` throw `IOException`, and the
+  showcase reports its files section as `SKIP`. A program linked with `libvfs_remote.a` first tries to
+  reach a VFS server, then logs `Can't establish IPC connetion to VFS server` and falls back to the stub
+  about 11 seconds later.
 - **ICU adds about 37 MB to the unstripped binary**; see step 10.
 - **No cryptography or `System.Net.Security` native libraries** are built or linked.

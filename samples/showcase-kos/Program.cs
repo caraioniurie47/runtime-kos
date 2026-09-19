@@ -11,24 +11,12 @@ using System.Threading.Channels;
 
 // A tour of .NET NativeAOT on KasperskyOS. Each section runs on its own and ends with a PASS or FAIL
 // line, so one missing platform feature does not hide the rest. Output goes to stderr, which the
-// KasperskyOS console shows.
+// KasperskyOS console shows without a VFS program in the image; stdout and files need one.
 
 TextWriter o = Console.Error;
 var total = Stopwatch.StartNew();
 int passed = 0, skipped = 0, failed = 0;
 bool invariantGlobalization = AppContext.TryGetSwitch("System.Globalization.Invariant", out bool invariant) && invariant;
-
-// On KasperskyOS under QEMU only stderr reaches the console; writing to stdout throws.
-string stdout;
-try
-{
-    Console.Out.WriteLine("(this line was written to stdout)");
-    stdout = "writable";
-}
-catch (IOException e)
-{
-    stdout = $"not writable: {e.Message}";
-}
 
 o.WriteLine();
 o.WriteLine("  +------------------------------------------+");
@@ -49,8 +37,49 @@ Section("Runtime", () =>
     o.WriteLine($"  GC            server {GCSettings.IsServerGC}, latency mode {GCSettings.LatencyMode}");
     o.WriteLine($"  UTC now       {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
     o.WriteLine($"  Globalization {(invariantGlobalization ? "invariant (no ICU)" : "ICU")}");
-    o.WriteLine($"  stdout        {stdout}");
     Check(RuntimeInformation.ProcessArchitecture == Architecture.Arm64, "arm64 process");
+});
+
+Section("Files and stdout", () =>
+{
+    // Without a VFS program each task's libc uses a stub whose file calls fail with EIO (5 in the SDK's
+    // sys/errno.h); .NET puts the errno in IOException.HResult.
+    const int EIO = 5;
+    string directory = Path.Combine(Path.GetTempPath(), "showcase-kos");
+    try
+    {
+        Directory.CreateDirectory(directory);
+    }
+    catch (IOException e) when (e.HResult == EIO)
+    {
+        Skip($"no file system ({e.Message}); the image needs a VFS program, see HOWTO-KOS.md");
+    }
+
+    string path = Path.Combine(directory, "readings.txt");
+    string[] lines = ["temperature 21.5", "humidity 48.25", "Zürich ✓"];
+    File.WriteAllLines(path, lines);
+    using (var stream = new FileStream(path, FileMode.Append, FileAccess.Write))
+    {
+        stream.Write("pressure 1013\n"u8);
+    }
+    string[] back = File.ReadAllLines(path);
+    string[] expected = [.. lines, "pressure 1013"];
+    o.WriteLine($"  wrote and read {path}: {back.Length} lines, {new FileInfo(path).Length} bytes");
+    Check(back.AsSpan().SequenceEqual(expected), "the lines read back equal the lines written, UTF-8 included");
+
+    File.Move(path, Path.Combine(directory, "readings-old.txt"));
+    File.WriteAllText(Path.Combine(directory, "notes.txt"), "second file");
+    string[] listed = [.. Directory.EnumerateFiles(directory).Select(file => Path.GetFileName(file)).Order()];
+    string[] expectedListing = ["notes.txt", "readings-old.txt"];
+    o.WriteLine($"  {directory} lists {string.Join(", ", listed)}");
+    Check(listed.AsSpan().SequenceEqual(expectedListing), "the directory lists the renamed file and the new one");
+
+    Directory.Delete(directory, recursive: true);
+    Check(!Directory.Exists(directory), "the directory is gone after Directory.Delete");
+
+    o.WriteLine($"  stdout redirected: {Console.IsOutputRedirected}; the next line is written to Console.Out");
+    Console.Out.WriteLine("  (this line was written to stdout)");
+    Console.Out.Flush();
 });
 
 Section("Globalization with ICU", () =>

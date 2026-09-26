@@ -341,8 +341,10 @@ KasperskyOS console.
   flow, and methods compiled fully interruptible (debuggable code).
 - **Files live in RAM.** `VfsRamFs` mounts a RAM file system at `/tmp`, emptied at every boot; the
   showcase uses only `/tmp`, so other paths are untried.
-- **The program has no path.** It is loaded from the image and there is no procfs, so
-  `AppContext.BaseDirectory` is empty (by the source, `Environment.ProcessPath` is null too). A file looked
+- **The program knows only its image name, not a path.** It is loaded from the image and there is no procfs;
+  `KnTaskGetPath` gives the executable's name as the image holds it (`NetInit` for a program started as
+  `hello.NetInit`), not a path in the file system. So `AppContext.BaseDirectory` is empty (by the source,
+  `Environment.ProcessPath` is null too). A file looked
   up "beside the app" resolves against the working directory, `/`. Files the app needs at run time go
   into the image's ROMFS, which keeps file names only (no directories) and which the app sees only where a
   VFS program mounts it (`romfs /romfs romfs ro` among VfsRamFs's `EXTRA_ARGS`, as the test images do), or

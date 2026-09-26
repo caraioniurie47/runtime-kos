@@ -18,7 +18,7 @@ namespace System.Net.Sockets.Tests
     public class SendPacketsAsync : IDisposable
     {
         // TODO-KOS(6g): documented IPv6 API, stack built without IPv6
-        // Every test here serves and connects on IPv6Loopback. A class-level skip prints no reason.
+        // Every test here serves and connects on IPv6Loopback. A class condition leaves the tests out of the results.
         public static bool IsSupported => PlatformDetection.IsMultithreadingSupported && Socket.OSSupportsIPv6;
 
         private readonly ITestOutputHelper _log;

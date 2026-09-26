@@ -11,9 +11,13 @@ namespace System.Net.Sockets.Tests
 {
     using Configuration = System.Net.Test.Common.Configuration;
 
-    [ConditionalClass(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
+    [ConditionalClass(typeof(DnsEndPointTest), nameof(IsSupported))]
     public class DnsEndPointTest : DualModeBase
     {
+        // TODO-KOS(6g): documented IPv6 API, stack built without IPv6
+        // DualModeBase asserts IPv6 support in its constructor, so a test cannot skip itself. A class condition leaves the tests out of the results.
+        public static bool IsSupported => PlatformDetection.IsMultithreadingSupported && Socket.OSSupportsIPv6;
+
         private void OnConnectAsyncCompleted(object sender, SocketAsyncEventArgs args)
         {
             ManualResetEvent complete = (ManualResetEvent)args.UserToken;
@@ -367,7 +371,6 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void Socket_StaticConnectAsync_IPv6MappedIPv4_Success()
         {
-            SocketTestExtensions.SkipIfIPv6Unsupported(true); // connects a dual-mode socket
             using SocketTestServer server = SocketTestServer.SocketTestServerFactory(SocketImplementationType.Async, IPAddress.Loopback, out int port);
 
             SocketAsyncEventArgs args = new SocketAsyncEventArgs();

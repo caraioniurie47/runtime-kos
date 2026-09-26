@@ -11,6 +11,9 @@ namespace System.Net.Sockets.Tests
     /// <summary>
     /// Summary description for AgnosticListenerTest
     /// </summary>
+    // TODO-KOS(6g): documented IPv6 API, stack built without IPv6
+    // The constructor asserts IPv6 support, so a test cannot skip itself. A class condition leaves the tests out of the results.
+    [ConditionalClass(typeof(Socket), nameof(Socket.OSSupportsIPv6))]
     public class AgnosticListenerTest
     {
         public AgnosticListenerTest(ITestOutputHelper _log)
@@ -105,7 +108,6 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void StaticCreate_Success()
         {
-            SocketTestExtensions.SkipIfIPv6Unsupported(true); // TcpListener.Create makes a dual-mode listener
             TcpListener listener = TcpListener.Create(0);
 
             IPEndPoint ep = (IPEndPoint)listener.LocalEndpoint;

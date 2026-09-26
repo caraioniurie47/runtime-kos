@@ -77,12 +77,22 @@ target_link_libraries (NetInit vfs::client)
 # vfs::client would add the SDK's default VFS program; VfsNet serves NetInit instead.
 set_target_properties (NetInit PROPERTIES vfs::entity_REPLACEMENT "")
 
+# VfsNet resolves host names for its clients, from /etc/hosts or DNS; without a hosts file not even `localhost`
+# resolves. As in the SDK's examples/net_with_separate_vfs, the image's ROMFS carries one and VfsNet mounts it at /etc
+# (besides the devfs the SDK gives it by default).
+set_target_properties (precompiled_vfs::VfsNet PROPERTIES EXTRA_ARGS "
+    - -l
+    - devfs /dev devfs 0
+    - -l
+    - romfs /etc romfs ro")
+
 build_kos_qemu_image (kos-qemu-image
                       EINIT_ENTITY EinitQemu
                       CONNECTIONS_CFG "src/init.yaml.in"
                       SECURITY_PSL "src/security.psl"
                       ${HOST_PORTS_QEMU}
-                      IMAGE_FILES Hello NetInit precompiled_vfs::VfsRamFs precompiled_vfs::VfsNet)
+                      IMAGE_FILES Hello NetInit precompiled_vfs::VfsRamFs precompiled_vfs::VfsNet
+                                  ${CMAKE_SOURCE_DIR}/resources/romfs/etc/hosts)
 # An IMPORTED target cannot carry the dependency, so attach it to the image targets.
 add_dependencies (kos-qemu-image hello_edl_files)
 add_dependencies (EinitQemu hello_edl_files)

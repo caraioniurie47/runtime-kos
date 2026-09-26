@@ -1,0 +1,2 @@
+# /etc/hosts for VfsNet, which resolves names for the image's programs (IPv4 only: KasperskyOS has no IPv6).
+127.0.0.1	localhost

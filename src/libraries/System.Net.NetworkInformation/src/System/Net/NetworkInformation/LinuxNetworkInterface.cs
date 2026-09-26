@@ -58,7 +58,8 @@ namespace System.Net.NetworkInformation
                     DnsSuffix = StringParsingHelpers.ParseDnsSuffixFromResolvConfFile(resolverConfig);
                     DnsAddresses = new InternalIPAddressCollection(StringParsingHelpers.ParseDnsAddressesFromResolvConfFile(resolverConfig));
                 }
-                catch (Exception e) when (e is FileNotFoundException || e is UnauthorizedAccessException)
+                // KOS-NOT-LINUX: a KasperskyOS program's file system can have no /etc (DirectoryNotFoundException)
+                catch (Exception e) when (e is FileNotFoundException || e is DirectoryNotFoundException || e is UnauthorizedAccessException)
                 {
                     DnsAddresses = new InternalIPAddressCollection();
                 }

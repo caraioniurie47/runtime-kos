@@ -90,7 +90,8 @@ namespace System.Net.NetworkInformation
             {
                 return StringParsingHelpers.ParseDnsSuffixFromResolvConfFile(File.ReadAllText(NetworkFiles.EtcResolvConfFile));
             }
-            catch (FileNotFoundException)
+            // KOS-NOT-LINUX: a KasperskyOS program's file system can have no /etc (DirectoryNotFoundException)
+            catch (Exception e) when (e is FileNotFoundException || e is DirectoryNotFoundException)
             {
                 return null;
             }
@@ -103,7 +104,8 @@ namespace System.Net.NetworkInformation
                 List<IPAddress> internalAddresses = StringParsingHelpers.ParseDnsAddressesFromResolvConfFile(File.ReadAllText(NetworkFiles.EtcResolvConfFile));
                 return new InternalIPAddressCollection(internalAddresses);
             }
-            catch (FileNotFoundException)
+            // KOS-NOT-LINUX: a KasperskyOS program's file system can have no /etc (DirectoryNotFoundException)
+            catch (Exception e) when (e is FileNotFoundException || e is DirectoryNotFoundException)
             {
                 return new InternalIPAddressCollection();
             }

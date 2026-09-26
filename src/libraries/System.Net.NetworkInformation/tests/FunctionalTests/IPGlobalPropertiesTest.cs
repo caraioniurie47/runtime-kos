@@ -32,7 +32,8 @@ namespace System.Net.NetworkInformation.Tests
             _log = output;
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/net/tcp, /proc/net/udp)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.Android, "Expected behavior is different on Android")]
         [SkipOnPlatform(TestPlatforms.OpenBSD, "TCP/UDP connection enumeration is unsupported on OpenBSD")]
         public void IPGlobalProperties_AccessAllMethods_NoErrors()
@@ -127,7 +128,8 @@ namespace System.Net.NetworkInformation.Tests
             Assert.Throws<PlatformNotSupportedException>(() => statistics.NumberOfRoutes);
         }
 
-        [Theory]
+        // KOS-NOT-LINUX: no procfs (/proc/net/tcp)
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [MemberData(nameof(Loopbacks))]
         [SkipOnPlatform(TestPlatforms.Android, "Unsupported on Android")]
         [SkipOnPlatform(TestPlatforms.OpenBSD, "TCP connection enumeration is unsupported on OpenBSD")]
@@ -144,7 +146,8 @@ namespace System.Net.NetworkInformation.Tests
             }
         }
 
-        [Theory]
+        // KOS-NOT-LINUX: no procfs (/proc/net/udp)
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [MemberData(nameof(Loopbacks))]
         [SkipOnPlatform(TestPlatforms.Android, "Unsupported on Android")]
         [SkipOnPlatform(TestPlatforms.OpenBSD, "UDP listener enumeration is unsupported on OpenBSD")]
@@ -160,7 +163,8 @@ namespace System.Net.NetworkInformation.Tests
             }
         }
 
-        [Theory]
+        // KOS-NOT-LINUX: no procfs (/proc/net/tcp)
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(~(TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.Android | TestPlatforms.OpenBSD))]
         [MemberData(nameof(Loopbacks))]
         public async Task IPGlobalProperties_TcpActiveConnections_Succeed(IPAddress address)
@@ -191,7 +195,8 @@ namespace System.Net.NetworkInformation.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/net/tcp)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.Android, "Unsupported on Android")]
         [SkipOnPlatform(TestPlatforms.OpenBSD, "TCP connection enumeration is unsupported on OpenBSD")]
         public void IPGlobalProperties_TcpActiveConnections_NotListening()

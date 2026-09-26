@@ -219,7 +219,8 @@ namespace System.Net.NetworkInformation.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/net/dev)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux)]  // Some APIs are not supported on Linux
         [SkipOnPlatform(TestPlatforms.LinuxBionic, "Bionic is not normal Linux, has no normal /proc")]
         public void BasicTest_GetIPInterfaceStatistics_Success_Linux()

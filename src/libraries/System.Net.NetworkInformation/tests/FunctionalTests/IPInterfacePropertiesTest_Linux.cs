@@ -56,8 +56,16 @@ namespace System.Net.NetworkInformation.Tests
                         _log.WriteLine("-- " + dns.ToString());
                     }
 
-                    Assert.NotNull(ipProperties.DnsSuffix);
-                    _log.WriteLine("- Dns Suffix: " + ipProperties.DnsSuffix);
+                    if (PlatformDetection.IsKasperskyOS)
+                    {
+                        // KOS-NOT-LINUX: no /etc/resolv.conf, so no DNS suffix to report
+                        Assert.Throws<PlatformNotSupportedException>(() => ipProperties.DnsSuffix);
+                    }
+                    else
+                    {
+                        Assert.NotNull(ipProperties.DnsSuffix);
+                        _log.WriteLine("- Dns Suffix: " + ipProperties.DnsSuffix);
+                    }
 
                     Assert.NotNull(ipProperties.GatewayAddresses);
                     _log.WriteLine("- Gateway Addresses: " + ipProperties.GatewayAddresses.Count);
@@ -206,7 +214,9 @@ namespace System.Net.NetworkInformation.Tests
 
                 _log.WriteLine("Loopback IPv4 index: " + NetworkInterface.LoopbackInterfaceIndex);
 
-                NetworkInterface loopback = NetworkInterface.GetAllNetworkInterfaces().First(ni => ni.Name == "lo");
+                // KOS-NOT-LINUX: the loopback interface has its BSD name, lo0
+                string loopbackName = PlatformDetection.IsKasperskyOS ? "lo0" : "lo";
+                NetworkInterface loopback = NetworkInterface.GetAllNetworkInterfaces().First(ni => ni.Name == loopbackName);
                 Assert.NotNull(loopback);
 
                 foreach (UnicastIPAddressInformation unicast in loopback.GetIPProperties().UnicastAddresses)
@@ -231,7 +241,9 @@ namespace System.Net.NetworkInformation.Tests
 
                 _log.WriteLine("Loopback IPv6 index: " + NetworkInterface.IPv6LoopbackInterfaceIndex);
 
-                NetworkInterface loopback = NetworkInterface.GetAllNetworkInterfaces().First(ni => ni.Name == "lo");
+                // KOS-NOT-LINUX: the loopback interface has its BSD name, lo0
+                string loopbackName = PlatformDetection.IsKasperskyOS ? "lo0" : "lo";
+                NetworkInterface loopback = NetworkInterface.GetAllNetworkInterfaces().First(ni => ni.Name == loopbackName);
                 Assert.NotNull(loopback);
 
                 foreach (UnicastIPAddressInformation unicast in loopback.GetIPProperties().UnicastAddresses)

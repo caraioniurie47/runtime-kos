@@ -798,6 +798,23 @@ int32_t SystemNative_FChMod(intptr_t fd, int32_t mode)
 #endif /* HAVE_FCHMOD */
 }
 
+#if defined(__KOS__)
+// KasperskyOS (CE SDK 1.4.0.102) fails pread, pwrite, ftruncate and fsync with ENOSYS on /dev/null and on pipes,
+// where Linux gives the error callers expect of a file that cannot seek or be truncated or synced. Report a
+// non-regular file's ENOSYS as that error (ESPIPE for pread and pwrite, EINVAL for ftruncate and fsync).
+static void KosNonRegularFileError(int fileDescriptor, int error)
+{
+    int savedErrno = errno;
+    struct stat_ st;
+    if (savedErrno == ENOSYS && fstat_(fileDescriptor, &st) == 0 && !S_ISREG(st.st_mode))
+    {
+        errno = error;
+        return;
+    }
+    errno = savedErrno;
+}
+#endif // __KOS__
+
 int32_t SystemNative_FSync(intptr_t fd)
 {
     int fileDescriptor = ToFileDescriptor(fd);
@@ -815,6 +832,9 @@ int32_t SystemNative_FSync(intptr_t fd)
     // For genuine I/O errors (e.g., EIO), fsync will also fail and propagate the error.
 #endif
     while ((result = fsync(fileDescriptor)) < 0 && errno == EINTR);
+#if defined(__KOS__)
+    if (result < 0) KosNonRegularFileError(fileDescriptor, EINVAL);
+#endif
     return result;
 }
 
@@ -1252,6 +1272,9 @@ int32_t SystemNative_FTruncate(intptr_t fd, int64_t length)
 #endif
             ToFileDescriptor(fd),
             (off_t)length)) < 0 && errno == EINTR);
+#if defined(__KOS__)
+    if (result < 0) KosNonRegularFileError(ToFileDescriptor(fd), EINVAL);
+#endif
     return result;
 }
 
@@ -2036,6 +2059,9 @@ int32_t SystemNative_PRead(intptr_t fd, void* buffer, int32_t bufferSize, int64_
 
     ssize_t count;
     while ((count = pread(ToFileDescriptor(fd), buffer, (uint32_t)bufferSize, (off_t)fileOffset)) < 0 && errno == EINTR);
+#if defined(__KOS__)
+    if (count < 0) KosNonRegularFileError(ToFileDescriptor(fd), ESPIPE);
+#endif
 
     assert(count >= -1 && count <= bufferSize);
     return (int32_t)count;
@@ -2048,6 +2074,9 @@ int32_t SystemNative_PWrite(intptr_t fd, void* buffer, int32_t bufferSize, int64
 
     ssize_t count;
     while ((count = pwrite(ToFileDescriptor(fd), buffer, (uint32_t)bufferSize, (off_t)fileOffset)) < 0 && errno == EINTR);
+#if defined(__KOS__)
+    if (count < 0) KosNonRegularFileError(ToFileDescriptor(fd), ESPIPE);
+#endif
 
     assert(count >= -1 && count <= bufferSize);
     return (int32_t)count;
@@ -2156,6 +2185,9 @@ int64_t SystemNative_PReadV(intptr_t fd, IOVector* vectors, int32_t vectorCount,
 
         if (current < 0)
         {
+#if defined(__KOS__)
+            KosNonRegularFileError(fileDescriptor, ESPIPE);
+#endif
             // if previous calls were successful, we return what we got so far
             // otherwise, we return the error code
             return count > 0 ? count : current;
@@ -2237,6 +2269,9 @@ int64_t SystemNative_PWriteV(intptr_t fd, IOVector* vectors, int32_t vectorCount
 
         if (current < 0)
         {
+#if defined(__KOS__)
+            KosNonRegularFileError(fileDescriptor, ESPIPE);
+#endif
             // if previous calls were successful, we return what we got so far
             // otherwise, we return the error code
             return count > 0 ? count : current;

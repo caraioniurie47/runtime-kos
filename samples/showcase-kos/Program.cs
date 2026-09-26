@@ -345,6 +345,59 @@ Section("Exceptions, filters and stack traces", () =>
     }
 });
 
+Section("Null dereference in managed code", () =>
+{
+    // KasperskyOS has no SIGSEGV. The runtime's process exception handler turns the page fault into a
+    // NullReferenceException thrown from the faulting method, as the SIGSEGV handler does elsewhere.
+    var live = new Holder { Value = 47 };
+    Check(ReadValue(live) == 47, "a read through a live reference returns its value");
+
+    long sum = 0;
+    for (int i = 1; i <= 3; i++)
+    {
+        try
+        {
+            sum += ReadValue(null);
+            Check(false, "a read through null throws");
+        }
+        catch (NullReferenceException e)
+        {
+            sum += 10 * i;
+            if (i == 1)
+            {
+                o.WriteLine($"  read through null -> {e.GetType().Name}");
+            }
+        }
+    }
+    Check(sum == 60,"three reads through null in a row each throw, and the loop's locals survive");
+
+    try
+    {
+        StoreRef(null, live);
+        Check(false, "a reference store through null throws");
+    }
+    catch (NullReferenceException)
+    {
+        o.WriteLine("  reference store through null -> NullReferenceException");
+    }
+
+    bool threadCaught = false;
+    var worker = new Thread(() =>
+    {
+        try
+        {
+            ReadValue(null);
+        }
+        catch (NullReferenceException)
+        {
+            threadCaught = true;
+        }
+    });
+    worker.Start();
+    worker.Join();
+    Check(threadCaught, "a read through null on a new thread throws NullReferenceException there");
+});
+
 o.WriteLine();
 o.WriteLine($"SHOWCASE DONE: {passed} passed, {skipped} skipped, {failed} failed, {total.ElapsedMilliseconds} ms");
 return failed == 0 ? 0 : 1;
@@ -590,7 +643,20 @@ static int ParseNumber(string text)
     }
 }
 
+// Not inlined, so that the null reaches a real load or store.
+[MethodImpl(MethodImplOptions.NoInlining)]
+static int ReadValue(Holder? holder) => holder!.Value;
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+static void StoreRef(Holder? holder, object value) => holder!.Ref = value;
+
 record Reading(string Sensor, double Value, DateTime At, string[] Tags);
+
+sealed class Holder
+{
+    public int Value;
+    public object? Ref;
+}
 
 sealed class SectionSkippedException(string reason) : Exception(reason);
 

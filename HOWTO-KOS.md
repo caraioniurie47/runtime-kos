@@ -300,9 +300,14 @@ KasperskyOS console.
 
 ## Limitations
 
-- **No hardware exceptions.** KasperskyOS delivers only `SIGTERM`, so the runtime registers no
-  `SIGSEGV` or `SIGFPE` handler there, and a fault such as a null dereference does not become a
-  managed exception.
+- **Hardware exceptions: null dereferences only.** KasperskyOS delivers no `SIGSEGV`, so the runtime
+  registers a process-wide fault handler with `KnTaskSetExceptionHandler` instead. A null dereference
+  in managed code becomes a `NullReferenceException`, on any thread. A fault the runtime does not
+  claim, such as one in native code, goes to the handler registered before it and otherwise ends the
+  task as it did before. A stack overflow still ends the task, because the handler runs on the stack
+  that overflowed. Integer division by zero never needed a signal: on arm64 the compiler emits an
+  explicit check, so `DivideByZeroException` has always been thrown (the showcase's exceptions section
+  prints it).
 - **Garbage collection waits for GC polls.** Without signals the runtime cannot interrupt a thread
   running managed code, so a collection waits until each such thread checks for a pending suspension:
   at a GC poll or on return from a P/Invoke. The KOS build targets make the compiler put a GC poll in

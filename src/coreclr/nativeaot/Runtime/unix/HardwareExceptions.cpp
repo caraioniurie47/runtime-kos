@@ -21,6 +21,11 @@
 #include <mach/task.h>
 #endif
 
+#if defined(__KOS__)
+#include <coresrv/task/task_api.h>
+#include <thread/tcbpage.h>
+#endif
+
 #if !HAVE_SIGINFO_T
 #error Cannot handle hardware exceptions on this platform
 #endif
@@ -322,7 +327,7 @@ uint32_t GetExceptionCodeForSignal(const siginfo_t *siginfo, const void *context
     // IMPORTANT NOTE: This function must not call any signal unsafe functions
     // since it is called from signal handlers.
 
-#if defined(__KOS__) // KasperskyOS sends processes only SIGTERM, so no hardware exception handler is installed
+#if defined(__KOS__) // KasperskyOS sends processes only SIGTERM; faults arrive through KosExceptionHandler
     return 0;
 #else
 #ifdef ILL_ILLOPC
@@ -590,10 +595,108 @@ void SIGFPEHandler(int code, siginfo_t *siginfo, void *context)
     PalCreateCrashDumpIfEnabled(code, siginfo, context);
 }
 
+#if defined(__KOS__) && defined(HOST_ARM64)
+
+// KOS has no SIGSEGV. The kernel runs the process-wide handler set by KnTaskSetExceptionHandler on the faulting
+// thread, below its stack pointer, and libkos's RtlExceptionPrologue then resumes at the faulting PC whatever the
+// handler does. So to redirect as RedirectNativeContext does, the handler restores an edited copy of the trap frame
+// itself and never returns. That skips nothing: RtlExceptionHandler's TCB bookkeeping is already in its post-return
+// state while a handler runs, and the return path makes no syscall (SDK 1.4.0.102 disassembly; a probe redirected
+// three consecutive faults on one thread and one on a second thread with every register but x16 intact).
+// Not restored: x16 (carries the target), NZCV, and FP/SIMD state beyond the d8-d15 the C ABI preserves.
+// A fault taken while this handler runs overwrites the frame it is working from, as a nested SIGSEGV does on Linux.
+
+static_assert(offsetof(HalTrapFrame, gpregs) == 0 && offsetof(HalTrapFrame, sp_usr) == 240 &&
+              offsetof(HalTrapFrame, lr_usr) == 248 && offsetof(HalTrapFrame, pc) == 272,
+              "KosRestoreTrapFrame uses these offsets");
+
+// Loads x0-x29, sp and x30 from the frame and jumps to its pc through x16.
+extern "C" [[noreturn]] void KosRestoreTrapFrame(const HalTrapFrame* frame);
+asm(
+    "    .text\n"
+    "    .p2align 2\n"
+    "    .globl KosRestoreTrapFrame\n"
+    "    .hidden KosRestoreTrapFrame\n"
+    "    .type KosRestoreTrapFrame, %function\n"
+    "KosRestoreTrapFrame:\n"
+    "    ldr  x1,  [x0, #240]\n"
+    "    mov  sp,  x1\n"
+    "    ldr  x30, [x0, #248]\n"
+    "    ldr  x16, [x0, #272]\n"
+    "    ldp  x2,  x3,  [x0, #16]\n"
+    "    ldp  x4,  x5,  [x0, #32]\n"
+    "    ldp  x6,  x7,  [x0, #48]\n"
+    "    ldp  x8,  x9,  [x0, #64]\n"
+    "    ldp  x10, x11, [x0, #80]\n"
+    "    ldp  x12, x13, [x0, #96]\n"
+    "    ldp  x14, x15, [x0, #112]\n"
+    "    ldr  x17,      [x0, #136]\n"
+    "    ldp  x18, x19, [x0, #144]\n"
+    "    ldp  x20, x21, [x0, #160]\n"
+    "    ldp  x22, x23, [x0, #176]\n"
+    "    ldp  x24, x25, [x0, #192]\n"
+    "    ldp  x26, x27, [x0, #208]\n"
+    "    ldp  x28, x29, [x0, #224]\n"
+    "    ldp  x0,  x1,  [x0]\n"
+    "    br   x16\n"
+    "    .size KosRestoreTrapFrame, . - KosRestoreTrapFrame\n");
+
+static TaskExceptionHandler g_previousKosExceptionHandler = NULL;
+
+// Thread-local so that it outlives the handler's stack once KosRestoreTrapFrame has moved sp.
+static PLATFORM_THREAD_LOCAL HalTrapFrame t_kosRedirectFrame;
+
+static int KosExceptionHandler(ExceptionInfo* info)
+{
+    if (info->type == EXCEPTION_PAGE_FAULT && g_hardwareExceptionHandler != NULL)
+    {
+        HalTrapFrame* frame = &t_kosRedirectFrame;
+        RtlGetLastTrapFrame(frame);
+
+        PAL_LIMITED_CONTEXT palContext;
+        palContext.IP = (uintptr_t)frame->pc;
+        palContext.SP = (uintptr_t)frame->sp_usr;
+        palContext.FP = (uintptr_t)frame->gpregs[29];
+        palContext.LR = (uintptr_t)frame->lr_usr;
+        palContext.X19 = (uintptr_t)frame->gpregs[19];
+        palContext.X20 = (uintptr_t)frame->gpregs[20];
+        palContext.X21 = (uintptr_t)frame->gpregs[21];
+        palContext.X22 = (uintptr_t)frame->gpregs[22];
+        palContext.X23 = (uintptr_t)frame->gpregs[23];
+        palContext.X24 = (uintptr_t)frame->gpregs[24];
+        palContext.X25 = (uintptr_t)frame->gpregs[25];
+        palContext.X26 = (uintptr_t)frame->gpregs[26];
+        palContext.X27 = (uintptr_t)frame->gpregs[27];
+        palContext.X28 = (uintptr_t)frame->gpregs[28];
+
+        uintptr_t arg0Reg;
+        uintptr_t arg1Reg;
+        int32_t disposition = g_hardwareExceptionHandler(EXCEPTION_ACCESS_VIOLATION, (uintptr_t)info->fault.addr,
+                                                         &palContext, &arg0Reg, &arg1Reg);
+        if (disposition == EXCEPTION_CONTINUE_EXECUTION)
+        {
+            // The registers RedirectNativeContext writes back.
+            frame->pc = palContext.IP;
+            frame->sp_usr = palContext.SP;
+            frame->gpregs[29] = palContext.FP;
+            frame->lr_usr = palContext.LR;
+            frame->gpregs[0] = arg0Reg;
+            frame->gpregs[1] = arg1Reg;
+            KosRestoreTrapFrame(frame);
+        }
+    }
+
+    return g_previousKosExceptionHandler != NULL ? g_previousKosExceptionHandler(info) : 0;
+}
+
+#endif // __KOS__ && HOST_ARM64
+
 // Initialize hardware exception handling
 bool InitializeHardwareExceptionHandling()
 {
-#if !defined(__KOS__)
+#if defined(__KOS__) && defined(HOST_ARM64)
+    g_previousKosExceptionHandler = KnTaskSetExceptionHandler(KosExceptionHandler);
+#elif !defined(__KOS__)
     if (!AddSignalHandler(SIGSEGV, SIGSEGVHandler, &g_previousSIGSEGV))
     {
         return false;

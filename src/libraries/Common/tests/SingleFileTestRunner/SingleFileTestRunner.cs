@@ -219,6 +219,19 @@ public class SingleFileTestRunner : XunitTestFramework
         // its own check, and records are paced.
         if (resultsWriter != null)
         {
+            // -countmethods: how many tests each test method ran, passes included, to compare a run's total with
+            // another platform's results.xml without sending every test's name over the console.
+            if (args.Contains("-countmethods", StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (IGrouping<string, XElement> method in resultsXmlAssembly.Descendants("test")
+                    .GroupBy(t => (string)t.Attribute("type") + "." + (string)t.Attribute("method"))
+                    .OrderBy(g => g.Key, StringComparer.Ordinal))
+                {
+                    resultsWriter.WriteLine($"[COUNT] {method.Key} {method.Count()}");
+                    System.Threading.Thread.Sleep(5);
+                }
+            }
+
             resultsWriter.WriteLine("=== NON-PASSING TEST RESULTS BEGIN ===");
             foreach (XElement element in resultsXmlAssembly.Descendants("test").Where(t => (string)t.Attribute("result") != "Pass")
                 .Concat(resultsXmlAssembly.Descendants("error")))

@@ -1173,6 +1173,14 @@ int32_t SystemNative_SetRLimit(RLimitResources resourceType, const RLimit* limit
 
 int32_t SystemNative_Kill(int32_t pid, int32_t signal)
 {
+#if defined(__KOS__) // KOS-DOC(posix_uns_ifaces): kill() sends only SIGTERM and ignores pid; signal 0 fails EINVAL
+    // .NET asks kill(pid, 0) whether a process it did not start is alive (ProcessWaitState.Unix.cs) and counts
+    // EINVAL as exited. The calling process is alive by definition; other pids keep kill's answer.
+    if (signal == 0 && pid == getpid())
+    {
+        return 0;
+    }
+#endif
     return kill(pid, signal);
 }
 

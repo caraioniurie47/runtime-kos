@@ -121,6 +121,7 @@ namespace System.Net.Sockets.Tests
         [MemberData(nameof(SendFile_MemberData))]
         public async Task IncludeFile_Success(IPAddress listenAt, bool sendPreAndPostBuffers, int bytesToSend)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(listenAt.AddressFamily == AddressFamily.InterNetworkV6);
             const int ListenBacklog = 1;
             const int TestTimeout = 30000;
 

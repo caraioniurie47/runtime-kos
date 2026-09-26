@@ -433,9 +433,9 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support FastOpen")]
         public async Task ConnectAsync_WithData_OK(bool useFastOpen, int size)
         {
-            if (useFastOpen && PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater)
+            if (useFastOpen && ((PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater) || PlatformDetection.IsKasperskyOS))
             {
-                // Old Windows versions do not support fast open and SetSocketOption fails with error.
+                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none.
                 throw new SkipTestException("TCP fast open is not supported");
             }
 
@@ -529,9 +529,9 @@ namespace System.Net.Sockets.Tests
         [InlineData(true, 10_000)]      // This should be too big to fit completely to first packet.
         public async Task Connect_WithData_OK(bool useFastOpen, int size)
         {
-            if (useFastOpen && PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater)
+            if (useFastOpen && ((PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater) || PlatformDetection.IsKasperskyOS))
             {
-                // Old Windows versions do not support fast open and SetSocketOption fails with error.
+                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none.
                 throw new SkipTestException("TCP fast open is not supported");
             }
 

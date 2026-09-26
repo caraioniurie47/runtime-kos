@@ -46,7 +46,8 @@ namespace System.Net.Sockets.Tests
         private static readonly IList<ArraySegment<byte>> s_buffers = new List<ArraySegment<byte>> { new ArraySegment<byte>(s_buffer) };
         private static readonly SocketAsyncEventArgs s_eventArgs = new SocketAsyncEventArgs();
         private static readonly Socket s_ipv4Socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        private static readonly Socket s_ipv6Socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
+        // Null without IPv6 (KasperskyOS), so that only the tests that use it fail rather than the type initializer.
+        private static readonly Socket s_ipv6Socket = Socket.OSSupportsIPv6 ? new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) : null;
 
         private static void TheAsyncCallback(IAsyncResult ar)
         {

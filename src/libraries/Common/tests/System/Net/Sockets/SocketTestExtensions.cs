@@ -14,11 +14,29 @@ namespace System.Net.Sockets.Tests
             return ((IPEndPoint)socket.LocalEndPoint).Port;
         }
 
+        // Skips a test case that needs IPv6 where the OS has none (KasperskyOS).
+        public static void SkipIfIPv6Unsupported(bool usesIPv6)
+        {
+            if (usesIPv6 && !Socket.OSSupportsIPv6)
+            {
+                throw Xunit.Sdk.SkipException.ForSkip("IPv6 is not supported");
+            }
+        }
+
         // Binds to an OS-assigned port.
         public static TcpListener CreateAndStartTcpListenerOnAnonymousPort(out int port)
         {
-            TcpListener listener = new TcpListener(IPAddress.IPv6Any, 0);
-            listener.Server.DualMode = true;
+            TcpListener listener;
+            if (Socket.OSSupportsIPv6)
+            {
+                listener = new TcpListener(IPAddress.IPv6Any, 0);
+                listener.Server.DualMode = true;
+            }
+            else
+            {
+                // KasperskyOS has no IPv6.
+                listener = new TcpListener(IPAddress.Any, 0);
+            }
 
             listener.Start();
             port = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -124,6 +142,14 @@ namespace System.Net.Sockets.Tests
                 int port = ((IPEndPoint)MainSocket.LocalEndPoint).Port;
                 IPEndPoint shadowEndPoint = new IPEndPoint(shadowAddress, port);
 
+                // Without the other address family (KasperskyOS has no IPv6) there is nothing to block.
+                if (shadowAddress.AddressFamily == AddressFamily.InterNetworkV6 ? !Socket.OSSupportsIPv6 : !Socket.OSSupportsIPv4)
+                {
+                    Port = port;
+                    success = true;
+                    break;
+                }
+
                 try
                 {
                     _shadowSocket = new Socket(shadowAddress.AddressFamily, MainSocket.SocketType, MainSocket.ProtocolType);
@@ -151,7 +177,7 @@ namespace System.Net.Sockets.Tests
         public void Dispose()
         {
             MainSocket.Dispose();
-            _shadowSocket.Dispose();
+            _shadowSocket?.Dispose();
         }
 
         // Socket.Bind() auto-enables SO_REUSEADDR on Unix to allow Bind() during TIME_WAIT to emulate Windows behavior, see SystemNative_Bind() in 'pal_networking.c'.

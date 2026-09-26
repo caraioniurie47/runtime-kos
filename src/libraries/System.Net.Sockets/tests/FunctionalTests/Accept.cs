@@ -303,6 +303,7 @@ namespace System.Net.Sockets.Tests
         [ActiveIssue("https://github.com/dotnet/runtime/issues/73536", TestPlatforms.iOS | TestPlatforms.tvOS)]
         public async Task AcceptGetsCanceledByDispose(IPAddress loopback, bool owning)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(loopback.AddressFamily == AddressFamily.InterNetworkV6);
             // Aborting sync operations for non-owning handles is not supported on Unix.
             if (!owning && UsesSync && !PlatformDetection.IsWindows)
             {

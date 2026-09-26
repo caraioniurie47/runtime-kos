@@ -105,6 +105,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support PortBlocker")]
         public async Task ReceiveSent_TCP_Success(bool ipv6)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(ipv6);
             if (ipv6 && PlatformDetection.IsApplePlatform)
             {
                 // [ActiveIssue("https://github.com/dotnet/runtime/issues/47335")]
@@ -134,6 +135,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task ReceiveSent_UDP_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             const int Offset = 10;
             const int DatagramSize = 256;
             const int DatagramsToSend = 16;
@@ -229,6 +231,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task ReceiveSent_SocketAddress_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             const int DatagramSize = 256;
             const int DatagramsToSend = 16;
 
@@ -273,6 +276,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task ReceiveSent_SocketAddressAsync_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             const int DatagramSize = 256;
             const int DatagramsToSend = 16;
 

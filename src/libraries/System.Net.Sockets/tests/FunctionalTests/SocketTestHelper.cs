@@ -585,25 +585,29 @@ namespace System.Net.Sockets.Tests
 
     public abstract class MemberDatas
     {
-        public static readonly object[][] Loopbacks = new[]
+        public static readonly object[][] Loopbacks = Supported(new[]
         {
             new object[] { IPAddress.Loopback },
             new object[] { IPAddress.IPv6Loopback },
-        };
+        });
 
-        public static readonly object[][] LoopbacksAndBuffers = new object[][]
+        public static readonly object[][] LoopbacksAndBuffers = Supported(new object[][]
         {
             new object[] { IPAddress.IPv6Loopback, true },
             new object[] { IPAddress.IPv6Loopback, false },
             new object[] { IPAddress.Loopback, true },
             new object[] { IPAddress.Loopback, false },
-        };
+        });
 
-        public static readonly object[][] LoopbacksAndAny = new object[][]
+        public static readonly object[][] LoopbacksAndAny = Supported(new object[][]
         {
             new object[] { IPAddress.IPv6Loopback, IPAddress.IPv6Any },
             new object[] { IPAddress.Loopback, IPAddress.Any },
-        };
+        });
+
+        // Without IPv6 (KasperskyOS), the rows whose first address is IPv6 are left out.
+        private static object[][] Supported(object[][] rows) =>
+            Socket.OSSupportsIPv6 ? rows : Array.FindAll(rows, row => ((IPAddress)row[0]).AddressFamily != AddressFamily.InterNetworkV6);
     }
 
     //

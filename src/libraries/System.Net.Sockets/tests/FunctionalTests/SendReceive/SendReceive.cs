@@ -770,7 +770,7 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: SendBufferSize, ReceiveBufferSize = 0 fail with EINVAL, as on BSD-like stacks
         [SkipOnPlatform(TestPlatforms.OSX | TestPlatforms.FreeBSD, "SendBufferSize, ReceiveBufferSize = 0 not supported on BSD like stacks.")]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52124", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/107981", TestPlatforms.Wasi)]
@@ -956,6 +956,8 @@ namespace System.Net.Sockets.Tests
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52124", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         public async Task UdpReceiveGetsCanceledByDispose(IPAddress address, bool owning)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(address.AddressFamily == AddressFamily.InterNetworkV6);
+
             // Aborting sync operations for non-owning handles is not supported on Unix.
             if (!owning && UsesSync && !PlatformDetection.IsWindows)
             {
@@ -1034,6 +1036,8 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support PortBlocker")]
         public async Task TcpReceiveSendGetsCanceledByDispose(bool receiveOrSend, bool ipv6Server, bool dualModeClient, bool owning)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(ipv6Server || dualModeClient);
+
             // Aborting sync operations for non-owning handles is not supported on Unix.
             if (!owning && UsesSync && !PlatformDetection.IsWindows)
             {

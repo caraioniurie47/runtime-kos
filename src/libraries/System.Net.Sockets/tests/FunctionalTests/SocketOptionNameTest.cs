@@ -430,9 +430,9 @@ namespace System.Net.Sockets.Tests
         [ConditionalFact]
         public async Task TcpFastOpen_Roundrip_Succeeds()
         {
-            if (PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater)
+            if ((PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater) || PlatformDetection.IsKasperskyOS)
             {
-                // Old Windows versions do not support fast open and SetSocketOption fails with error.
+                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none.
                 throw new SkipTestException("TCP fast open is not supported");
             }
 
@@ -468,7 +468,14 @@ namespace System.Net.Sockets.Tests
             // that allow binding the same address.
             int SOL_SOCKET = -1;
             int option = -1;
-            if (OperatingSystem.IsLinux())
+            if (PlatformDetection.IsKasperskyOS)
+            {
+                // KasperskyOS (Linux to .NET): BSD's option numbers, and no SO_REUSEPORT.
+                SOL_SOCKET = 0xffff;
+                const int SO_REUSEADDR = 0x0004;
+                option = SO_REUSEADDR;
+            }
+            else if (OperatingSystem.IsLinux())
             {
                 // Linux: use SO_REUSEADDR to allow binding the same address.
                 SOL_SOCKET = 1;
@@ -553,7 +560,8 @@ namespace System.Net.Sockets.Tests
 
             if (OperatingSystem.IsWindows() ||
                 OperatingSystem.IsFreeBSD() ||
-                OperatingSystem.IsMacOS())
+                OperatingSystem.IsMacOS() ||
+                PlatformDetection.IsKasperskyOS) // Linux to .NET, with BSD's option numbers
             {
                 SOL_SOCKET = 0xffff;
                 SO_RCVBUF = 0x1002;

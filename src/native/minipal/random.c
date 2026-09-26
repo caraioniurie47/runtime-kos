@@ -3,11 +3,7 @@
 
 #include "minipalconfig.h"
 
-#if defined(__KOS__)
-#include <stdlib_rand.h>
-#else
 #include <stdlib.h>
-#endif
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>

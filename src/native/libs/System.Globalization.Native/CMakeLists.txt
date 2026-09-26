@@ -22,10 +22,6 @@ if(CLR_CMAKE_TARGET_UNIX OR CLR_CMAKE_TARGET_WASI)
     add_compile_options(-Wno-extra-semi-stmt)
     add_compile_options(-Wno-unknown-warning-option)
 
-    if (CLR_CMAKE_TARGET_KOS)
-        add_compile_options(-Wno-deprecated-declarations)
-    endif()
-
     # The mobile configurations in particular bring their own ICU, so skip
     if (NOT CLR_CMAKE_TARGET_ANDROID AND NOT CLR_CMAKE_TARGET_APPLE_MOBILE AND NOT DEFINED CMAKE_ICU_DIR AND NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI)
         if (CLR_CMAKE_TARGET_OSX)

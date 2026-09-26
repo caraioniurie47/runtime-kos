@@ -13,6 +13,11 @@ else()
 
     if (CLR_CMAKE_TARGET_UNIX)
         set(CMAKE_REQUIRED_INCLUDES ${UCURR_H} ${ICU_HOMEBREW_INC_PATH})
+        # A static ICU (CMAKE_ICU_DIR, as on KasperskyOS) leaves UCURR_H unset, and CMakeLists.txt adds its include
+        # directory only after this file: without it the checks below cannot find the ICU headers and report 0.
+        if (DEFINED CMAKE_ICU_DIR)
+            list(APPEND CMAKE_REQUIRED_INCLUDES ${CMAKE_ICU_DIR}/include)
+        endif()
 
         CHECK_C_SOURCE_COMPILES("
             #include <unicode/udat.h>

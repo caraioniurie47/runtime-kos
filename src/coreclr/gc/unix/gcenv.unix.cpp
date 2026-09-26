@@ -568,18 +568,15 @@ bool GCToOSInterface::VirtualDecommit(void* address, size_t size)
     // be zeroed-out.
 #if defined(__KOS__)
     // KasperskyOS fails MAP_FIXED over an existing mapping with ENOSYS, and neither MADV_DONTNEED nor MADV_FREE
-    // frees pages (SDK 1.4.0.102), so unmap the range and reserve it again at the same address, which returns the
-    // pages and gives zeroed ones when it is committed again. MAP_FIXED_NOREPLACE keeps the reservation contiguous:
-    // without it a remap elsewhere would leave this range unmapped, and a later commit would fault (measured).
-    bool bRetVal = false;
-    if (munmap(address, size) == 0)
+    // frees pages (SDK 1.4.0.102). Unmapping the range and mapping it again is not safe either: in between, another
+    // thread's mmap can take the range (KOS reuses the lowest free range), and the GC later wrote into memory that
+    // was no longer its own (a heap write faulted). So keep the mapping: zero the pages, which the GC expects of
+    // re-committed memory, and make them inaccessible. The pages are not returned to the system.
+    bool bRetVal = mprotect(address, size, PROT_READ | PROT_WRITE) == 0;
+    if (bRetVal)
     {
-        void* pRemapped = mmap(address, size, PROT_NONE, MAP_FIXED_NOREPLACE | MAP_ANON | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
-        bRetVal = pRemapped == address;
-        if (!bRetVal && pRemapped != MAP_FAILED)
-        {
-            munmap(pRemapped, size);
-        }
+        memset(address, 0, size);
+        bRetVal = mprotect(address, size, PROT_NONE) == 0;
     }
 #else
     int mmapFlags = MAP_FIXED | MAP_ANON | MAP_PRIVATE;

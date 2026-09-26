@@ -82,7 +82,9 @@ public class SingleFileTestRunner : XunitTestFramework
 
         var discoverySink = new TestDiscoverySink();
         var discoverer = xunitTestFx.CreateDiscoverer(asmInfo);
-        discoverer.Find(false, discoverySink, TestFrameworkOptions.ForDiscovery(assemblyConfig));
+        // Reporting on stderr: name each class as discovery reaches it, since discovery runs theory data.
+        discoverer.Find(false, resultsWriter == null ? discoverySink : new ClassReportingSink(discoverySink, report),
+            TestFrameworkOptions.ForDiscovery(assemblyConfig));
         discoverySink.Finished.WaitOne();
 
         string testResultsDirectory = Environment.GetEnvironmentVariable("TEST_RESULTS_DIR");
@@ -176,8 +178,24 @@ public class SingleFileTestRunner : XunitTestFramework
         }
 
         var filteredTestCases = discoverySink.TestCases.Where(filters.Filter).ToList();
+        if (resultsWriter != null)
+        {
+            report($"Discovered {discoverySink.TestCases.Count} test cases, running {filteredTestCases.Count}");
+        }
         var executor = xunitTestFx.CreateExecutor(asmName);
-        executor.RunTests(filteredTestCases, resultsSink, TestFrameworkOptions.ForExecution(assemblyConfig));
+#pragma warning disable CS0618 // Delegating*Sink types are marked obsolete
+        // Reporting on stderr (see resultsWriter): also name the tests still running after two minutes, every two
+        // minutes, so that a hung test can be told from a slow one on a device reached only through its console.
+        IExecutionSink executionSink = resultsWriter == null ? resultsSink :
+            new DelegatingLongRunningTestDetectionSink(resultsSink, TimeSpan.FromMinutes(2), summary =>
+            {
+                foreach (KeyValuePair<ITestCase, TimeSpan> running in summary.TestCases)
+                {
+                    report($"[LONG] {running.Key.DisplayName} running {running.Value:hh\\:mm\\:ss}");
+                }
+            });
+#pragma warning restore CS0618
+        executor.RunTests(filteredTestCases, executionSink, TestFrameworkOptions.ForExecution(assemblyConfig));
 
         resultsSink.Finished.WaitOne();
 
@@ -224,6 +242,34 @@ internal class ConsoleDiagnosticMessageSink : IMessageSink
             return true;
         }
         return false;
+    }
+}
+
+// Forwards discovery messages, naming each test class as discovery reaches it.
+internal class ClassReportingSink : IMessageSink
+{
+    private readonly IMessageSink _inner;
+    private readonly Action<string> _report;
+    private string _lastClass;
+
+    public ClassReportingSink(IMessageSink inner, Action<string> report)
+    {
+        _inner = inner;
+        _report = report;
+    }
+
+    public bool OnMessage(IMessageSinkMessage message)
+    {
+        if (message is ITestCaseDiscoveryMessage discovered)
+        {
+            string className = discovered.TestCase.TestMethod.TestClass.Class.Name;
+            if (className != _lastClass)
+            {
+                _lastClass = className;
+                _report($"[DISC] {className}");
+            }
+        }
+        return _inner.OnMessage(message);
     }
 }
 #pragma warning restore xUnit3000

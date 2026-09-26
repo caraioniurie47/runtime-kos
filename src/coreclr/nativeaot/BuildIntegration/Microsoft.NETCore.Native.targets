@@ -301,7 +301,7 @@ The .NET Foundation licenses this file to you under the MIT license.
       <IlcArg Include="--methodbodyfolding:$(_IlcMethodBodyFoldingValue)" />
       <IlcArg Condition="$(Optimize) == 'true' and $(OptimizationPreference) == 'Size'" Include="--Os" />
       <IlcArg Condition="$(Optimize) == 'true' and $(OptimizationPreference) == 'Speed'" Include="--Ot" />
-      <IlcArg Condition="'$(_linuxLibcFlavor)' == 'bionic' or '$(TargetsKOS)' == 'true'" Include="--noinlinetls" />
+      <IlcArg Condition="'$(_linuxLibcFlavor)' == 'bionic'" Include="--noinlinetls" />
       <!-- TODO-KOS(11): KOS can't interrupt a thread running managed code (no signals), so loops without calls poll for GC -->
       <IlcArg Condition="'$(TargetsKOS)' == 'true'" Include="--codegenopt:JitGCPollLoops=1" />
       <IlcArg Condition="$(IlcInstructionSet) != ''" Include="--instruction-set:$(IlcInstructionSet)" />

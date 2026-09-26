@@ -218,8 +218,12 @@ static struct sigaction* OrigActionFor(int sig)
 
 static void RestoreSignalHandler(int sig)
 {
+#if defined(__KOS__) // see InstallSignalHandler
+    (void)sig;
+#else
     g_handlerIsInstalled[sig - 1] = false;
     sigaction(sig, OrigActionFor(sig), NULL);
+#endif
 }
 
 static void SignalHandler(int sig, siginfo_t* siginfo, void* context)
@@ -443,6 +447,16 @@ static void CloseSignalHandlingPipe(void)
 
 static bool InstallSignalHandler(int sig, int flags)
 {
+#if defined(__KOS__)
+    // KasperskyOS delivers no signal but SIGTERM to a process, and SystemNative_InitializeTerminalAndSignalHandling
+    // (pal_console.c) sets up no signal handling there: no tables, pipe or handler thread. A handler is reported
+    // installed and never runs, so registrations (Console.CancelKeyPress, PosixSignalRegistration) succeed and never
+    // fire; SIGTERM keeps its default action.
+    (void)sig;
+    (void)flags;
+    (void)&SignalHandler; // otherwise unused
+    return true;
+#else
     int rv;
     struct sigaction* orig = OrigActionFor(sig);
     bool* isInstalled = &g_handlerIsInstalled[sig - 1];
@@ -496,6 +510,7 @@ static bool InstallSignalHandler(int sig, int flags)
     }
     *isInstalled = true;
     return true;
+#endif // __KOS__
 }
 
 void SystemNative_SetTerminalInvalidationHandler(TerminalInvalidationCallback callback)
@@ -651,7 +666,9 @@ int32_t SystemNative_EnablePosixSignalHandling(int signalCode)
     {
         installed = InstallSignalHandler(signalCode, SA_RESTART);
 
+#if !defined(__KOS__) // no tables on KOS, see InstallSignalHandler
         g_hasPosixSignalRegistrations[signalCode - 1] = installed;
+#endif
     }
     pthread_mutex_unlock(&lock);
 
@@ -664,7 +681,9 @@ void SystemNative_DisablePosixSignalHandling(int signalCode)
 
     pthread_mutex_lock(&lock);
     {
+#if !defined(__KOS__) // no tables on KOS, see InstallSignalHandler
         g_hasPosixSignalRegistrations[signalCode - 1] = false;
+#endif
 
         // Don't restore handler when something other than posix handling needs the signal.
         if (
@@ -719,11 +738,13 @@ void UninstallTTOUHandlerForConsole(void)
         g_consoleTtouHandler = NULL;
 
         RestoreSignalHandler(SIGTTOU);
+#if !defined(__KOS__) // no tables on KOS, see InstallSignalHandler
         if (g_hasPosixSignalRegistrations[SIGTTOU - 1])
         {
             installed = InstallSignalHandler(SIGTTOU, SA_RESTART);
             assert(installed);
         }
+#endif
     }
     pthread_mutex_unlock(&lock);
 }

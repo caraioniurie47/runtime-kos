@@ -10,7 +10,8 @@ namespace System.Diagnostics.Tests
 {
     public partial class ProcessModuleTests : ProcessTestBase
     {
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (modules come from /proc/<pid>/maps)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void TestModuleProperties()
         {

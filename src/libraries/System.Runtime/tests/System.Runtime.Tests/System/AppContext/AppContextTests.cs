@@ -30,7 +30,8 @@ namespace System.Tests
             AssertExtensions.Throws<ArgumentNullException>("name", () => AppContext.SetData(null, 123));
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs, so no program path (/proc/self/exe) and BaseDirectory is empty
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         public void BaseDirectory_PathRooted()
         {
             Assert.True(Path.IsPathRooted(AppContext.BaseDirectory), "BaseDirectory should be a rooted path");

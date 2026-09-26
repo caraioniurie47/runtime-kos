@@ -156,11 +156,14 @@ namespace System.IO.Tests
         // But depending on the OS version, it might actually return it.
         // Since we don't want to have unstable tests, it's better to not run it on macOS at all.
         [PlatformSpecific(TestPlatforms.Windows | TestPlatforms.Linux)]
-        [Theory]
+        [ConditionalTheory]
         [InlineData(FileMode.Create)]
         [InlineData(FileMode.CreateNew)]
         public void WhenDiskIsFullTheErrorMessageContainsAllDetails(FileMode mode)
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6e): posix_fallocate returns -1 instead of an error number");
+
             const long tooMuch = 1024L * 1024L * 1024L * 1024L * 1024L * 1024L; // 1 Exbibyte .. we are assuming this is not available
             string filePath = GetTestFilePath();
 

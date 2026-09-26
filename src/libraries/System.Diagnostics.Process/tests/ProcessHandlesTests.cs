@@ -17,7 +17,8 @@ namespace System.Diagnostics.Tests
     [SkipOnPlatform(TestPlatforms.Android | TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst, "sh is not available in the mobile platform sandbox")]
     public partial class ProcessHandlesTests : ProcessTestBase
     {
-        [Theory]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [InlineData(true, false)]
         [InlineData(true, true)]
         [InlineData(false, false)]
@@ -53,7 +54,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Theory]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [InlineData(true, false)]
         [InlineData(true, true)]
         [InlineData(false, false)]
@@ -96,7 +98,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Theory]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [InlineData(true, false)]
         [InlineData(true, true)]
         [InlineData(false, false)]
@@ -133,7 +136,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Theory]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [InlineData(true, false)]
         [InlineData(true, true)]
         [InlineData(false, false)]
@@ -163,7 +167,8 @@ namespace System.Diagnostics.Tests
             Assert.Equal(42, process.ExitCode);
         }
 
-        [Theory]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [InlineData(false)]
         [InlineData(true)]
         public async Task CanImplementPiping(bool restrictHandles)

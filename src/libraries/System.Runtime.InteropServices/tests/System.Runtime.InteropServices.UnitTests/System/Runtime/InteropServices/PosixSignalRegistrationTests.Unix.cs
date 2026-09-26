@@ -107,7 +107,8 @@ namespace System.Tests
             }, s.ToString()).Dispose();
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile))]
+        // KOS-DOC(posix_uns_ifaces): the kernel delivers no signals, and kill() ignores its pid
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile), nameof(PlatformDetection.IsNotKasperskyOS))]
         public void SignalHandlerWorksForSecondRegistration()
         {
             PosixSignal signal = PosixSignal.SIGCONT;
@@ -131,7 +132,8 @@ namespace System.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile))]
+        // KOS-DOC(posix_uns_ifaces): the kernel delivers no signals, and kill() ignores its pid
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile), nameof(PlatformDetection.IsNotKasperskyOS))]
         public void SignalHandlersCalledInReverseOrder()
         {
             PosixSignal signal = PosixSignal.SIGCONT;
@@ -166,7 +168,8 @@ namespace System.Tests
             Assert.True(entered);
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile))]
+        // KOS-DOC(posix_uns_ifaces): the kernel delivers no signals, and kill() ignores its pid
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile), nameof(PlatformDetection.IsNotKasperskyOS))]
         public void SignalHandlerNotCalledWhenDisposed()
         {
             PosixSignal signal = PosixSignal.SIGCONT;
@@ -180,7 +183,8 @@ namespace System.Tests
             Thread.Sleep(100);
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile), nameof(PlatformDetection.IsPreciseGcSupported))]
+        // KOS-DOC(posix_uns_ifaces): the kernel delivers no signals, and kill() ignores its pid
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotMobile), nameof(PlatformDetection.IsPreciseGcSupported), nameof(PlatformDetection.IsNotKasperskyOS))]
         public void SignalHandlerNotCalledWhenFinalized()
         {
             PosixSignal signal = PosixSignal.SIGCONT;

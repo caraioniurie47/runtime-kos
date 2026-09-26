@@ -29,6 +29,9 @@ namespace System.Tests
         [MemberData(nameof(UninstallableSignals))]
         public void Create_UninstallableSignal_Throws(PosixSignal signal)
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6r): sigaction installs a handler for SIGKILL and SIGSTOP");
+
             Assert.Throws<IOException>(() => PosixSignalRegistration.Create(signal, ctx => { }));
         }
 

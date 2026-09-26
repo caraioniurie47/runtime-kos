@@ -426,10 +426,13 @@ namespace System.Security.Cryptography.X509Certificates.Tests
             }
         }
 
-        [Fact]
+        [ConditionalFact]
         [SkipOnPlatform(PlatformSupport.MobileAppleCrypto, "Root certificate store is not accessible")]
         public static void MachineRootStore_NonEmpty()
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS-IMAGE: no CA certificates in the image");
+
             // This test will fail on systems where the administrator has gone out of their
             // way to prune the trusted CA list down below this threshold.
             //

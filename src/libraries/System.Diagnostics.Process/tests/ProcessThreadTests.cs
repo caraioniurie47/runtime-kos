@@ -46,7 +46,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void TestThreadCount()
         {
@@ -108,7 +109,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>/stat)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux | TestPlatforms.Windows)] // OSX and FreeBSD throw PNSE from StartTime
         public async Task TestStartTimeProperty()
         {
@@ -165,7 +167,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void TestStartAddressProperty()
         {

@@ -34,6 +34,9 @@ namespace System.Net.Security.Tests
         [ConditionalFact(typeof(SslStreamCertificateTrustTest), nameof(SupportsSendingCustomCANamesInTls))]
         public async Task SslStream_SendCertificateTrust_CertificateStore()
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS-IMAGE: no CA certificates in the image");
+
             using X509Store store = new X509Store("Root", StoreLocation.LocalMachine);
 
             SslCertificateTrust trust = SslCertificateTrust.CreateForX509Store(store, sendTrustInHandshake: true);

@@ -44,7 +44,8 @@ namespace System.Diagnostics.Tests
             Assert.Equal(IntPtr.Zero, _process.MainWindowHandle);
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>, read before the machine name check)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         public void TestProcessOnRemoteMachineUnix()
         {
             Process currentProcess = Process.GetCurrentProcess();
@@ -53,7 +54,8 @@ namespace System.Diagnostics.Tests
             Assert.Throws<PlatformNotSupportedException>(() => Process.GetProcessById(currentProcess.Id, "127.0.0.1"));
         }
 
-        [Theory]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>, read before the machine name check)
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [MemberData(nameof(MachineName_Remote_TestData))]
         public void GetProcessesByName_RemoteMachineNameUnix_ThrowsPlatformNotSupportedException(string machineName)
         {
@@ -61,7 +63,8 @@ namespace System.Diagnostics.Tests
             Assert.Throws<PlatformNotSupportedException>(() => Process.GetProcessesByName(currentProcess.ProcessName, machineName));
         }
 
-        [Fact]
+        // KOS-DOC(posix_uns_ifaces): kill() ignores its pid, so kill(1, 0) cannot find pid 1
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         public void TestRootGetProcessById()
         {
             Process p = Process.GetProcessById(1);
@@ -330,7 +333,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Fact]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux)]
         public void ProcessStart_UseShellExecute_OnUnix_Executable_PassesArguments()
         {
@@ -392,7 +396,8 @@ namespace System.Diagnostics.Tests
             }, verb ?? "<null>", isValid.ToString(), options).Dispose();
         }
 
-        [Fact]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux)]
         public void ProcessStart_OnLinux_UsesSpecifiedProgram()
         {
@@ -419,7 +424,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Fact]
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux)]
         public void ProcessStart_OnLinux_UsesSpecifiedProgramUsingArgumentList()
         {

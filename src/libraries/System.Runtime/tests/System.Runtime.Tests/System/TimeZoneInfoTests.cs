@@ -18,6 +18,8 @@ using System.Reflection;
 
 namespace System.Tests
 {
+    // TODO-KOS-IMAGE: no time zone database in the image; the class's type initializer needs Europe/London
+    [ConditionalClass(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
     public static partial class TimeZoneInfoTests
     {
         private static TimeZoneInfo s_regLocal;

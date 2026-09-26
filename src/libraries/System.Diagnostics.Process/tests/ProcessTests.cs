@@ -609,9 +609,10 @@ namespace System.Diagnostics.Tests
             }
         }
 
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
         [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotWindowsServerCore),
             nameof(PlatformDetection.IsNotWindowsNanoServer), nameof(PlatformDetection.IsNotWindowsIoTCore),
-            nameof(PlatformDetection.IsNotAppSandbox))]
+            nameof(PlatformDetection.IsNotAppSandbox), nameof(PlatformDetection.IsNotKasperskyOS))]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/34685", TestPlatforms.Windows, TargetFrameworkMonikers.Netcoreapp, TestRuntimes.Mono)]
         [InlineData(true), InlineData(false)]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst, "Not supported on iOS, tvOS and MacCatalyst.")]
@@ -683,9 +684,10 @@ namespace System.Diagnostics.Tests
             }, path, options).Dispose();
         }
 
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotWindowsServerCore),
             nameof(PlatformDetection.IsNotWindowsNanoServer), nameof(PlatformDetection.IsNotWindowsIoTCore),
-            nameof(PlatformDetection.IsNotAppSandbox))]
+            nameof(PlatformDetection.IsNotAppSandbox), nameof(PlatformDetection.IsNotKasperskyOS))]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/34685", TestPlatforms.Windows, TargetFrameworkMonikers.Netcoreapp, TestRuntimes.Mono)]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst, "Not supported on iOS, tvOS and MacCatalyst.")]
         [SkipOnPlatform(TestPlatforms.Android, "Android doesn't allow executing custom shell scripts")]
@@ -1526,7 +1528,8 @@ namespace System.Diagnostics.Tests
             GC.KeepAlive(handle);
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void TestGetProcesses()
         {
@@ -1592,7 +1595,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Theory]
+        // KOS-NOT-LINUX: no procfs (/proc)
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [InlineData(null)]
         [InlineData("")]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
@@ -1607,7 +1611,8 @@ namespace System.Diagnostics.Tests
             Assert.InRange(processes.Length, expectedCount, int.MaxValue); // should contain current process and some number of additional processes
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void GetProcessesByName_ProcessName_ReturnsExpected()
         {
@@ -1669,7 +1674,8 @@ namespace System.Diagnostics.Tests
             yield return new object[] { "\\" + Guid.NewGuid().ToString("N") };
         }
 
-        [Theory]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>)
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [MemberData(nameof(MachineName_TestData))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void GetProcessesByName_ProcessNameMachineName_ReturnsExpected(string machineName)
@@ -1697,7 +1703,8 @@ namespace System.Diagnostics.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void GetProcessesByName_NoSuchProcess_ReturnsEmpty()
         {
@@ -1705,7 +1712,8 @@ namespace System.Diagnostics.Tests
             Assert.Empty(Process.GetProcessesByName(processName));
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>, read before the argument check)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void GetProcessesByName_NullMachineName_ThrowsArgumentNullException()
         {
@@ -1713,7 +1721,8 @@ namespace System.Diagnostics.Tests
             AssertExtensions.Throws<ArgumentNullException>("machineName", () => Process.GetProcessesByName(currentProcess.ProcessName, null));
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>, read before the argument check)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "libproc is not supported on iOS/tvOS")]
         public void GetProcessesByName_EmptyMachineName_ThrowsArgumentException()
         {
@@ -2001,7 +2010,8 @@ namespace System.Diagnostics.Tests
             Assert.Throws<ObjectDisposedException>(() => process.CancelErrorRead());
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no procfs (/proc/<pid>)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux | TestPlatforms.Windows)]  // Expected process HandleCounts differs on OSX
         public void TestHandleCount()
         {
@@ -2519,8 +2529,9 @@ namespace System.Diagnostics.Tests
             Assert.True(p.HasExited);
         }
 
+        // KOS-DOC(posix_uns_ifaces): no fork or exec, so no child process
         [PlatformSpecific(TestPlatforms.AnyUnix)]
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52852", TestPlatforms.MacCatalyst)]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/53095", TestPlatforms.Android)]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/29383", TestPlatforms.OSX)]

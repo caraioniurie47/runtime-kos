@@ -50,9 +50,12 @@ namespace Tests.System
             public static TimeProvider FromLocalTimeZone(TimeZoneInfo zoneInfo) => new ZonedTimeProvider(zoneInfo);
         }
 
-        [Fact]
+        [ConditionalFact]
         public void TestSystemProviderWithTimeZone()
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS-IMAGE: no time zone database in the image");
+
             Assert.Equal(TimeZoneInfo.Local.Id, TimeProvider.System.LocalTimeZone.Id);
 
 #if NETFRAMEWORK

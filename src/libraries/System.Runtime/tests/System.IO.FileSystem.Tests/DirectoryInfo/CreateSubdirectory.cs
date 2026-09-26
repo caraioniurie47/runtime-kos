@@ -243,10 +243,13 @@ namespace System.IO.Tests
             }
         }
 
-        [Fact]
+        [ConditionalFact]
         [PlatformSpecific(TestPlatforms.Linux)]
         public void CreateSubdirectory_RootDriveSubfolder_ThrowsUnauthorizedAccessException_Linux()
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6d): uid 0 without superuser rights, yet / is writable");
+
             DirectoryInfo rootDirectory = new DirectoryInfo("/");
             string testFolderName = GetTestFileName();
 

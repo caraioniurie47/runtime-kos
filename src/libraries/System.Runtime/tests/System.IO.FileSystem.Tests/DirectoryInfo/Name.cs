@@ -13,10 +13,13 @@ namespace System.IO.Tests
             AssertExtensions.Throws<ArgumentNullException>("path", () => new DirectoryInfo(null));
         }
 
-        [Fact]
+        [ConditionalFact]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/127786", typeof(PlatformDetection), nameof(PlatformDetection.IsAppleMobile), nameof(PlatformDetection.IsNativeAot))]
         public void CurrentDirectory()
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS-IMAGE: the test image runs the tests in /, whose name is not empty");
+
             var info = new DirectoryInfo(".");
             Assert.Equal(Path.GetFileName(Directory.GetCurrentDirectory()), info.Name);
         }

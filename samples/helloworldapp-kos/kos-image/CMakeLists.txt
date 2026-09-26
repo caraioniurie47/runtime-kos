@@ -54,6 +54,18 @@ endif ()
 find_package (precompiled_vfs REQUIRED)
 find_package (vfs REQUIRED)
 
+# KOS-DOC(limitations_and_known_problems): a VFS program serves each client with at most 5 threads
+# A socket call that blocks (a synchronous Receive, Accept, a Send to a full socket) holds one of VfsNet's threads for
+# this program until it returns; with 5 of them held, every other socket call of the program waits, poll() included,
+# and the program stalls for good. VFS_SERVER_MAX_THREADS_PER_CLIENT raises the limit. The rest is VfsNet's default
+# environment (the SDK's precompiled_vfsConfig.cmake), which this property replaces.
+set (VFSNET_MAX_THREADS_PER_CLIENT "64" CACHE STRING "Threads VfsNet serves this image's programs with, each")
+set_target_properties (precompiled_vfs::VfsNet PROPERTIES EXTRA_ENV "
+    VFS_NETWORK_BACKEND: server:kl.VfsNet
+    VFS_FILESYSTEM_BACKEND: server:kl.VfsNet
+    DEFAULT_DNS_SERVER: 8.8.8.8
+    VFS_SERVER_MAX_THREADS_PER_CLIENT: \"${VFSNET_MAX_THREADS_PER_CLIENT}\"")
+
 set (NK_RESOURCES ${CMAKE_SOURCE_DIR}/resources/xdl)
 nk_include_directories (${NK_RESOURCES})
 

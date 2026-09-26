@@ -37,6 +37,11 @@ namespace System
         public static bool IsQemuLinux => IsLinux && Environment.GetEnvironmentVariable("DOTNET_RUNNING_UNDER_QEMU") != null;
         public static bool IsNotQemuLinux => !IsQemuLinux;
 
+        // KasperskyOS runs .NET as linux-arm64; System.Native reports the SDK's product name there
+        // ("KasperskyOS-Community-Edition-Qemu 1.4.0.102"), not uname's.
+        public static bool IsKasperskyOS => IsLinux && RuntimeInformation.OSDescription.StartsWith("KasperskyOS", StringComparison.Ordinal);
+        public static bool IsNotKasperskyOS => !IsKasperskyOS;
+
         // OSX family
         public static bool IsApplePlatform => IsOSX || IsiOS || IstvOS || IsMacCatalyst;
         public static bool IsOSX => RuntimeInformation.IsOSPlatform(OSPlatform.OSX);

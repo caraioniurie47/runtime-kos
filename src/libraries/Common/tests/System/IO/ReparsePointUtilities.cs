@@ -172,7 +172,7 @@ public static partial class MountHelper
 #if NETFRAMEWORK
         return true;
 #else
-        return !(OperatingSystem.IsIOS() || OperatingSystem.IsTvOS() || OperatingSystem.IsMacCatalyst() || OperatingSystem.IsBrowser() || OperatingSystem.IsWasi()); // OSes that don't support Process.Start()
+        return !(OperatingSystem.IsIOS() || OperatingSystem.IsTvOS() || OperatingSystem.IsMacCatalyst() || OperatingSystem.IsBrowser() || OperatingSystem.IsWasi() || PlatformDetection.IsKasperskyOS); // OSes that don't support Process.Start()
 #endif
     }
 

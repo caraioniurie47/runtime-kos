@@ -12,7 +12,8 @@ using Xunit;
 [SkipOnPlatform(TestPlatforms.Android | TestPlatforms.Browser | TestPlatforms.iOS | TestPlatforms.MacCatalyst | TestPlatforms.tvOS, "Not supported on Android, Browser, iOS, MacCatalyst, or tvOS.")]
 public class TermInfoTests
 {
-    [Fact]
+    // KasperskyOS has no terminfo database
+    [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
     [PlatformSpecific(TestPlatforms.AnyUnix)]  // Tests TermInfo
     public void VerifyInstalledTermInfosParse()
     {

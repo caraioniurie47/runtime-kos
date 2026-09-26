@@ -25,7 +25,15 @@ public class SingleFileTestRunner : XunitTestFramework
     public static int Main(string[] args)
     {
         var asm = typeof(SingleFileTestRunner).Assembly;
-        Console.WriteLine("Running assembly:" + asm.FullName);
+
+        // Where the console is the only way results leave the device (KasperskyOS under QEMU), the runner reports on a
+        // standard error stream of its own: tests may replace or dispose Console.Out and Console.Error.
+        TextWriter resultsWriter = Environment.GetEnvironmentVariable("DOTNET_TEST_RESULTS_TO_STDERR") == "1" ?
+            TextWriter.Synchronized(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true }) :
+            null;
+        Action<string> report = resultsWriter != null ? resultsWriter.WriteLine : Console.WriteLine;
+
+        report("Running assembly:" + asm.FullName);
 
         // The current RemoteExecutor implementation is not compatible with the SingleFileTestRunner.
         Environment.SetEnvironmentVariable("DOTNET_REMOTEEXECUTOR_SUPPORTED", "0");
@@ -48,17 +56,17 @@ public class SingleFileTestRunner : XunitTestFramework
 #pragma warning disable CS0618 // Delegating*Sink types are marked obsolete
         var summarySink = new DelegatingExecutionSummarySink(testSink,
             () => false,
-            (completed, summary) => Console.WriteLine($"Tests run: {summary.Total}, Errors: {summary.Errors}, Failures: {summary.Failed}, Skipped: {summary.Skipped}. Time: {TimeSpan.FromSeconds((double)summary.Time).TotalSeconds}s"));
+            (completed, summary) => report($"Tests run: {summary.Total}, Errors: {summary.Errors}, Failures: {summary.Failed}, Skipped: {summary.Skipped}. Time: {TimeSpan.FromSeconds((double)summary.Time).TotalSeconds}s"));
         var resultsXmlAssembly = new XElement("assembly");
         var resultsSink = new DelegatingXmlCreationSink(summarySink, resultsXmlAssembly);
 #pragma warning restore CS0618
 
-        testSink.Execution.TestSkippedEvent += args => { Console.WriteLine($"[SKIP] {args.Message.Test.DisplayName}"); };
-        testSink.Execution.TestFailedEvent += args => { Console.WriteLine($"[FAIL] {args.Message.Test.DisplayName}{Environment.NewLine}{Xunit.ExceptionUtility.CombineMessages(args.Message)}{Environment.NewLine}{Xunit.ExceptionUtility.CombineStackTraces(args.Message)}"); };
+        testSink.Execution.TestSkippedEvent += args => { report($"[SKIP] {args.Message.Test.DisplayName}"); };
+        testSink.Execution.TestFailedEvent += args => { report($"[FAIL] {args.Message.Test.DisplayName}{Environment.NewLine}{Xunit.ExceptionUtility.CombineMessages(args.Message)}{Environment.NewLine}{Xunit.ExceptionUtility.CombineStackTraces(args.Message)}"); };
 
         testSink.Execution.TestAssemblyFinishedEvent += args =>
         {
-            Console.WriteLine($"Finished {args.Message.TestAssembly.Assembly}{Environment.NewLine}");
+            report($"Finished {args.Message.TestAssembly.Assembly}{Environment.NewLine}");
             testsFinished.SetResult();
         };
 
@@ -177,6 +185,27 @@ public class SingleFileTestRunner : XunitTestFramework
         if(xmlResultFileName != null)
         {
             resultsXmlAssembly.Save(xmlResultFileName);
+        }
+
+        // The results that are not passes, one record per line: "@@R <length> <FNV-1a 64 hex> <base64 of the element's
+        // UTF-8 XML>". The console may drop bytes under load (KasperskyOS under QEMU, 2026-09-23), so each record carries
+        // its own check, and records are paced.
+        if (resultsWriter != null)
+        {
+            resultsWriter.WriteLine("=== NON-PASSING TEST RESULTS BEGIN ===");
+            foreach (XElement element in resultsXmlAssembly.Descendants("test").Where(t => (string)t.Attribute("result") != "Pass")
+                .Concat(resultsXmlAssembly.Descendants("error")))
+            {
+                byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(element.ToString(SaveOptions.DisableFormatting));
+                ulong hash = 14695981039346656037;
+                foreach (byte b in utf8)
+                {
+                    hash = unchecked((hash ^ b) * 1099511628211);
+                }
+                resultsWriter.WriteLine($"@@R {utf8.Length} {hash:x16} {Convert.ToBase64String(utf8)}");
+                System.Threading.Thread.Sleep(5);
+            }
+            resultsWriter.WriteLine($"=== NON-PASSING TEST RESULTS END: total {resultsSink.ExecutionSummary.Total}, failed {resultsSink.ExecutionSummary.Failed}, errors {resultsSink.ExecutionSummary.Errors}, skipped {resultsSink.ExecutionSummary.Skipped} ===");
         }
 
         var failed = resultsSink.ExecutionSummary.Failed > 0 || resultsSink.ExecutionSummary.Errors > 0;

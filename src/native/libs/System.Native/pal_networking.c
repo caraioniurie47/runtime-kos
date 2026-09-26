@@ -1437,6 +1437,14 @@ int32_t SystemNative_SetLingerOption(intptr_t socket, LingerOption* option)
         // Windows and Linux do not return errors in this case, so we'll simulate success on OSX as well.
         err = 0;
     }
+#elif defined(__KOS__)
+    if (err != 0 && errno == ECONNRESET) // TODO-KOS(10b): setsockopt() fails with ECONNRESET after the peer's reset
+    {
+        // KasperskyOS fails SO_LINGER with ECONNRESET once the peer has reset the connection (SDK 1.4.0.102), where
+        // Linux succeeds. A socket's close then skipped close() and leaked the descriptor; as on OSX above, there is
+        // nothing to linger for, so report success.
+        err = 0;
+    }
 #endif
 
     return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);

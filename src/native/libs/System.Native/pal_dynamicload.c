@@ -44,7 +44,7 @@ void* SystemNative_LoadLibrary(const char* filename)
 void* SystemNative_GetLoadLibraryError(void)
 {
 #if defined(__KOS__)
-    const char* error = dlerror(); // KOS CE SDK 1.4.0.102 declares const char* dlerror(void)
+    const char* error = dlerror(); // TODO-KOS(4b): dlerror() is declared const char*
     return (void*)(uintptr_t)error;
 #else
     return dlerror();

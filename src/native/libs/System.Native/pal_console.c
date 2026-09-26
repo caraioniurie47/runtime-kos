@@ -458,7 +458,7 @@ static void InitializeTerminalCore(void)
 
 int32_t SystemNative_InitializeTerminalAndSignalHandling(void)
 {
-    #if defined(__KOS__) // no signal support
+    #if defined(__KOS__) // KOS-DOC(posix_uns_ifaces): only SIGTERM can be sent
     return true;
     #else
     static int32_t initialized = 0;

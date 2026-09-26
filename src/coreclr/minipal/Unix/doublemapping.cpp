@@ -15,7 +15,7 @@
 #include <limits.h>
 #include <errno.h>
 #include <sys/resource.h>
-// KOS defines TARGET_LINUX but has neither linux/memfd.h nor sys/syscall.h.
+// KOS-NOT-LINUX: KOS defines TARGET_LINUX but has neither linux/memfd.h nor sys/syscall.h.
 #if defined(TARGET_LINUX) && !defined(MFD_CLOEXEC) && !defined(__KOS__)
 #include <linux/memfd.h>
 #include <sys/syscall.h> // __NR_memfd_create

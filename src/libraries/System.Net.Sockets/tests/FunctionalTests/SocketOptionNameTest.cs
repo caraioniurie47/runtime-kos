@@ -432,7 +432,7 @@ namespace System.Net.Sockets.Tests
         {
             if ((PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater) || PlatformDetection.IsKasperskyOS)
             {
-                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none.
+                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none (KOS-NOT-LINUX).
                 throw new SkipTestException("TCP fast open is not supported");
             }
 
@@ -470,7 +470,7 @@ namespace System.Net.Sockets.Tests
             int option = -1;
             if (PlatformDetection.IsKasperskyOS)
             {
-                // KasperskyOS (Linux to .NET): BSD's option numbers, and no SO_REUSEPORT.
+                // KOS-NOT-LINUX: KasperskyOS (Linux to .NET) has BSD's option numbers, and no SO_REUSEPORT.
                 SOL_SOCKET = 0xffff;
                 const int SO_REUSEADDR = 0x0004;
                 option = SO_REUSEADDR;
@@ -561,7 +561,7 @@ namespace System.Net.Sockets.Tests
             if (OperatingSystem.IsWindows() ||
                 OperatingSystem.IsFreeBSD() ||
                 OperatingSystem.IsMacOS() ||
-                PlatformDetection.IsKasperskyOS) // Linux to .NET, with BSD's option numbers
+                PlatformDetection.IsKasperskyOS) // KOS-NOT-LINUX: Linux to .NET, with BSD's option numbers
             {
                 SOL_SOCKET = 0xffff;
                 SO_RCVBUF = 0x1002;

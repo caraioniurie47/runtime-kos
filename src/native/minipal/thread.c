@@ -112,7 +112,7 @@ int minipal_set_thread_name(pthread_t thread, const char* name)
 #elif defined(__HAIKU__)
     return rename_thread(get_pthread_thread_id(thread), threadName);
 #elif defined(__KOS__)
-    // KOS has the NetBSD signature: the name is a printf format taking one argument.
+    // KOS-NOT-LINUX: KOS has the NetBSD signature: the name is a printf format taking one argument.
     return pthread_setname_np(thread, "%s", (void*)threadName);
 #else
     return pthread_setname_np(thread, threadName);

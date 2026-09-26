@@ -86,7 +86,7 @@ check_symbol_exists(
     HAVE_CLOCK_GETTIME_NSEC_NP)
 
 if (CLR_CMAKE_TARGET_KOS)
-  # SDK 1.4's libc links sched_getaffinity, but its headers declare neither it nor cpu_set_t.
+  # TODO-KOS(6): libc links sched_getaffinity, but the headers declare neither it nor cpu_set_t
   set(HAVE_SCHED_GETAFFINITY 0)
 else()
   check_library_exists(c sched_getaffinity "" HAVE_SCHED_GETAFFINITY)

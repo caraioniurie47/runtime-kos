@@ -13,7 +13,7 @@ Abstract:
 #include <cstdint>
 #include "cgroupcpu.h"
 
-#if defined(TARGET_LINUX) && !defined(__KOS__) // KOS: no cgroups; the stubs below report no limit
+#if defined(TARGET_LINUX) && !defined(__KOS__) // KOS-NOT-LINUX: no cgroups; the stubs below report no limit
 
 #include <cstddef>
 #include <cassert>

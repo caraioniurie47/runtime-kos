@@ -25,7 +25,7 @@ internal static class IOInputs
     // We now do the appropriate wrapping to allow creating longer directories. Like MaxPath, this is a legacy restriction.
     public static readonly int MaxDirectory = OperatingSystem.IsWindows() ? 247 : 258;
 
-    // KasperskyOS: NAME_MAX is 511, which VfsRamFs enforces.
+    // KOS-NOT-LINUX: NAME_MAX is 511 on KasperskyOS, which VfsRamFs enforces.
     public static readonly int MaxComponent = PlatformDetection.IsKasperskyOS ? 511 : 255;
 
     public const string ExtendedPrefix = @"\\?\";

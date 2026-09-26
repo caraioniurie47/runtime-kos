@@ -43,7 +43,7 @@
 // SunOS defines both AF_LINK and AF_PACKET but AF_LINK is preferred.
 // Using AF_PACKET on SunOS requires access to system-private headers.
 // Use undef to keep all the changes here.
-#if defined(TARGET_SUNOS) || defined(__KOS__) // KOS: AF_LINK as well
+#if defined(TARGET_SUNOS) || defined(__KOS__) // KOS-NOT-LINUX: no AF_PACKET, AF_LINK as on BSD
 #undef AF_PACKET
 #endif
 

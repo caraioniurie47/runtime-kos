@@ -1026,6 +1026,7 @@ done:;
     (void)applyPDeathSig;
     (void)startSuspended;
 #if defined(__KOS__)
+    // KOS-DOC(posix_uns_ifaces): no fork or exec
     // KasperskyOS has no fork or exec. The caller reports failure through the errno of this call, and a -1 left with
     // errno 0 made Process.Start succeed with no child process.
     errno = ENOTSUP;

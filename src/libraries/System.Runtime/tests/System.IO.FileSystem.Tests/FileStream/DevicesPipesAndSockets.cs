@@ -61,7 +61,7 @@ namespace System.IO.Tests
             await File.WriteAllTextAsync(devicePath, "foo");
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: mkfifo is a stub (ENOSYS)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KOS-DOC(posix_uns_ifaces): mkfifo is a stub (ENOSYS)
         [PlatformSpecific(TestPlatforms.AnyUnix & ~TestPlatforms.Browser)]
         [SkipOnPlatform(TestPlatforms.LinuxBionic, "SElinux blocks UNIX sockets in our CI environment")]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "iOS/tvOS blocks binding to UNIX sockets")]
@@ -83,7 +83,7 @@ namespace System.IO.Tests
                 }));
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: mkfifo is a stub (ENOSYS)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KOS-DOC(posix_uns_ifaces): mkfifo is a stub (ENOSYS)
         [PlatformSpecific(TestPlatforms.AnyUnix & ~TestPlatforms.Browser)]
         [SkipOnPlatform(TestPlatforms.LinuxBionic, "SElinux blocks UNIX sockets in our CI environment")]
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "iOS/tvOS blocks binding to UNIX sockets")]

@@ -251,7 +251,7 @@ check_symbol_exists(
     HAVE_POSIX_ADVISE)
 
 if (CLR_CMAKE_TARGET_KOS)
-    # SDK 1.4 declares fallocate() but none of the FALLOC_FL_* flags pal_io.c passes.
+    # TODO-KOS(5): SDK 1.4 declares fallocate() but none of the FALLOC_FL_* flags pal_io.c passes.
     set(HAVE_FALLOCATE 0)
 else ()
     check_symbol_exists(
@@ -384,7 +384,7 @@ check_struct_has_member(
     HAVE_STATFS_FSTYPENAME)
 
 if (CLR_CMAKE_TARGET_KOS)
-    # KOS has no struct statfs at all; struct statvfs (with f_fstypename[_VFS_NAMELEN]) is in sys/statvfs.h.
+    # TODO-KOS(6): no struct statfs at all; struct statvfs (with f_fstypename[_VFS_NAMELEN]) is in sys/statvfs.h.
     check_struct_has_member(
         "struct statvfs"
         f_fstypename
@@ -596,7 +596,7 @@ if (CLR_CMAKE_TARGET_LINUX)
 endif ()
 
 if(CLR_CMAKE_TARGET_KOS)
-    # KOS libc has no malloc size query; pal_memory.c's __KOS__ branch keeps sizes for the Aligned*
+    # KOS-NOT-LINUX: no malloc size query; pal_memory.c's __KOS__ branch keeps sizes for the Aligned*
     # exports itself and needs neither posix_memalign nor aligned_alloc.
     unset(HAVE_MALLOC_SIZE)
     unset(HAVE_MALLOC_USABLE_SIZE)
@@ -1142,7 +1142,7 @@ set (HAVE_INOTIFY 0)
 if (HAVE_INOTIFY_INIT AND HAVE_INOTIFY_ADD_WATCH AND HAVE_INOTIFY_RM_WATCH)
     set (HAVE_INOTIFY 1)
 elseif (CLR_CMAKE_TARGET_LINUX AND NOT CLR_CMAKE_TARGET_BROWSER AND NOT CLR_CMAKE_TARGET_WASI)
-    if (NOT CLR_CMAKE_TARGET_KOS) # KasperskyOS has no inotify (no sys/inotify.h in CE SDK 1.4.0.102)
+    if (NOT CLR_CMAKE_TARGET_KOS) # KOS-NOT-LINUX: no inotify (no sys/inotify.h in CE SDK 1.4.0.102)
         message(FATAL_ERROR "Cannot find inotify functions on a Linux platform.")
     endif()
 endif()

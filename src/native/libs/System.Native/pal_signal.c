@@ -448,6 +448,7 @@ static void CloseSignalHandlingPipe(void)
 static bool InstallSignalHandler(int sig, int flags)
 {
 #if defined(__KOS__)
+    // KOS-DOC(posix_uns_ifaces): only SIGTERM can be sent
     // KasperskyOS delivers no signal but SIGTERM to a process, and SystemNative_InitializeTerminalAndSignalHandling
     // (pal_console.c) sets up no signal handling there: no tables, pipe or handler thread. A handler is reported
     // installed and never runs, so registrations (Console.CancelKeyPress, PosixSignalRegistration) succeed and never
@@ -489,7 +490,7 @@ static bool InstallSignalHandler(int sig, int flags)
     {
         // Maintain flags and mask of original handler.
         newAction = *orig;
-#ifdef SA_RESETHAND // KasperskyOS (CE SDK 1.4.0.102) signal.h has no SA_RESETHAND
+#ifdef SA_RESETHAND // TODO-KOS(4c): signal.h has no SA_RESETHAND (POSIX base, not XSI)
         newAction.sa_flags = orig->sa_flags & ~(SA_RESTART | SA_RESETHAND);
 #else
         newAction.sa_flags = orig->sa_flags & ~(SA_RESTART);
@@ -719,7 +720,7 @@ void InstallTTOUHandlerForConsole(ConsoleSigTtouHandler handler)
         // on EINTR when the process is running in background and the terminal
         // configured with TOSTOP.
         RestoreSignalHandler(SIGTTOU);
-#ifdef SA_RESETHAND // KasperskyOS (CE SDK 1.4.0.102) signal.h has no SA_RESETHAND
+#ifdef SA_RESETHAND // TODO-KOS(4c): signal.h has no SA_RESETHAND (POSIX base, not XSI)
         installed = InstallSignalHandler(SIGTTOU, (int)SA_RESETHAND);
 #else
         installed = InstallSignalHandler(SIGTTOU, 0);

@@ -16,6 +16,7 @@
 #include <sys/systeminfo.h>
 #endif
 #if defined(__KOS__)
+// TODO-KOS(7): uname() returns constants
 // KasperskyOS's uname() returns constants ("KOS", "1.0", "1.0"), not the running system. This SDK-generated header
 // gives the product name and version the runtime was built against, which for a KOS image is also the SDK that built
 // the kernel in it.

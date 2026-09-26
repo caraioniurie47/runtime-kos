@@ -25,7 +25,7 @@ endif()
 
 if(CLR_CMAKE_TARGET_KOS)
   set(FEATURE_EVENT_TRACE 0)
-  set(FEATURE_EVENTSOURCE_XPLAT 0) # no LTTng on KOS
+  set(FEATURE_EVENTSOURCE_XPLAT 0) # KOS-NOT-LINUX: no LTTng
 endif()
 
 # FEATURE_EVENT_TRACE: Enables the full eventing infrastructure (generated FireEtw* functions,

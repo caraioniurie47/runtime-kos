@@ -413,6 +413,7 @@ static void* VirtualReserveInner(size_t size, size_t alignment, uint32_t flags, 
     size_t alignedSize = size + (alignment - OS_PAGE_SIZE);
     int mmapFlags = MAP_ANON | MAP_PRIVATE | hugePagesFlag;
 #if defined(__KOS__)
+    // TODO-KOS(8): mmap(PROT_NONE) commits physical memory; MAP_NORESERVE does not
     // KasperskyOS backs a plain anonymous mapping with physical memory at once, even with PROT_NONE (SDK 1.4.0.102:
     // 512 MiB took 28 s under QEMU and 513 MiB of free memory); MAP_NORESERVE maps pages on first write.
     mmapFlags |= MAP_NORESERVE;
@@ -567,6 +568,8 @@ bool GCToOSInterface::VirtualDecommit(void* address, size_t size)
     // longer need these pages. Also, GC depends on re-committed pages to
     // be zeroed-out.
 #if defined(__KOS__)
+    // KOS-DOC(posix_ifaces_impl_features): MAP_FIXED not supported
+    // TODO-KOS(8): MADV_DONTNEED and MADV_FREE free nothing
     // KasperskyOS fails MAP_FIXED over an existing mapping with ENOSYS, and neither MADV_DONTNEED nor MADV_FREE
     // frees pages (SDK 1.4.0.102). Unmapping the range and mapping it again is not safe either: in between, another
     // thread's mmap can take the range (KOS reuses the lowest free range), and the GC later wrote into memory that
@@ -1219,7 +1222,7 @@ uint64_t GetAvailablePhysicalMemory()
         available = info.free_memory;
     }
 #elif defined(__KOS__)
-    // KOS: no /proc/meminfo, and no _SC_AVPHYS_PAGES, so the Linux fallback below would read the total
+    // KOS-NOT-LINUX: no /proc/meminfo, and no _SC_AVPHYS_PAGES, so the Linux fallback below would read the total
     // page count and the memory load would always be 0. If the call fails, report that same load of 0
     // rather than 100.
     rtl_int64_t freePages;

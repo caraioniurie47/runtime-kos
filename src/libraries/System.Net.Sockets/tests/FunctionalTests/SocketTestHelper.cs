@@ -605,7 +605,7 @@ namespace System.Net.Sockets.Tests
             new object[] { IPAddress.Loopback, IPAddress.Any },
         });
 
-        // Without IPv6 (KasperskyOS), the rows whose first address is IPv6 are left out.
+        // Without IPv6 (KasperskyOS: TODO-KOS(6g)), the rows whose first address is IPv6 are left out.
         private static object[][] Supported(object[][] rows) =>
             Socket.OSSupportsIPv6 ? rows : Array.FindAll(rows, row => ((IPAddress)row[0]).AddressFamily != AddressFamily.InterNetworkV6);
     }

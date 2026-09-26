@@ -855,6 +855,8 @@ HijackFunc* PalGetHijackTarget(HijackFunc* defaultHijackTarget)
 void PalHijack(Thread* pThreadToHijack)
 {
 #if defined(__KOS__)
+    // KOS-DOC(posix_uns_ifaces): only SIGTERM can be sent
+    // TODO-KOS(11): no API to interrupt or inspect another thread
     // KasperskyOS sends processes only SIGTERM: pthread_kill with the activation signal fails, and the abort below
     // ended processes when a background GC suspended a thread running managed code (SDK 1.4.0.102). Without the
     // signal, a thread is suspended when it next checks RhpTrapThreads, in RhpGcPoll or on return from a P/Invoke.

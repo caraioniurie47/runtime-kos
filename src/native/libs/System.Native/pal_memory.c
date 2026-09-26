@@ -9,6 +9,7 @@
 #include <string.h>
 
 #if defined(__KOS__)
+    // KOS-NOT-LINUX: no malloc size query (malloc_usable_size)
     // KOS libc has no malloc size query. Only AlignedRealloc needs one, and the Aligned* exports are
     // only used with each other, so they keep the base pointer and the size in a header in front of
     // the aligned block.

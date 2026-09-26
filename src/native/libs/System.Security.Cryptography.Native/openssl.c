@@ -27,6 +27,7 @@
 #include <kos/random/random_api.h>
 #include <strings.h> // strncasecmp: KOS libc declares it only here, glibc in string.h too
 
+// TODO-KOS(2): libcrypto.a references getentropy(), which no SDK library defines
 // The KOS SDK's libcrypto.a seeds its DRBG through getentropy(), a weak reference that no SDK library
 // defines. It is defined in this file because CryptoNative_EnsureOpenSslInitialized is always linked,
 // and a weak reference alone does not pull an archive member into the link.

@@ -603,7 +603,7 @@ int minipal_getcpufeatures(void)
     int64_t valueFromSysctl = 0;
     size_t sz = sizeof(valueFromSysctl);
 
-#if !defined(__KOS__) // KOS: libc has sysctlbyname (no auxv) but neither AdvSIMD name, so this check aborted startup
+#if !defined(__KOS__) // TODO-KOS(13): libc has sysctlbyname (no auxv) but neither AdvSIMD name, so this check aborted startup
     if (((sysctlbyname("hw.optional.AdvSIMD", &valueFromSysctl, &sz, NULL, 0) != 0) || (valueFromSysctl == 0)) &&
         ((sysctlbyname("hw.optional.arm.AdvSIMD", &valueFromSysctl, &sz, NULL, 0) != 0) || (valueFromSysctl == 0)))
     {

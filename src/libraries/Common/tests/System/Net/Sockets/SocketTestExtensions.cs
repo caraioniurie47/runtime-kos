@@ -14,7 +14,7 @@ namespace System.Net.Sockets.Tests
             return ((IPEndPoint)socket.LocalEndPoint).Port;
         }
 
-        // Skips a test case that needs IPv6 where the OS has none (KasperskyOS).
+        // Skips a test case that needs IPv6 where the OS has none (KasperskyOS: TODO-KOS(6g), no IPv6 stack).
         public static void SkipIfIPv6Unsupported(bool usesIPv6)
         {
             if (usesIPv6 && !Socket.OSSupportsIPv6)

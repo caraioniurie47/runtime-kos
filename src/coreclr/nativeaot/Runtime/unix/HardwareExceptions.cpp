@@ -327,7 +327,7 @@ uint32_t GetExceptionCodeForSignal(const siginfo_t *siginfo, const void *context
     // IMPORTANT NOTE: This function must not call any signal unsafe functions
     // since it is called from signal handlers.
 
-#if defined(__KOS__) // KasperskyOS sends processes only SIGTERM; faults arrive through KosExceptionHandler
+#if defined(__KOS__) // KOS-DOC(posix_uns_ifaces): only SIGTERM can be sent; faults arrive through KosExceptionHandler
     return 0;
 #else
 #ifdef ILL_ILLOPC
@@ -597,6 +597,7 @@ void SIGFPEHandler(int code, siginfo_t *siginfo, void *context)
 
 #if defined(__KOS__) && defined(HOST_ARM64)
 
+// TODO-KOS(12): a fault handler cannot redirect the faulting thread; this one relies on undocumented TCB offsets
 // KOS has no SIGSEGV. The kernel runs the process-wide handler set by KnTaskSetExceptionHandler on the faulting
 // thread, below its stack pointer, and libkos's RtlExceptionPrologue then resumes at the faulting PC whatever the
 // handler does. So to redirect as RedirectNativeContext does, the handler restores an edited copy of the trap frame

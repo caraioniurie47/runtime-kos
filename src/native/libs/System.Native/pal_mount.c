@@ -207,6 +207,7 @@ int32_t SystemNative_GetAllMountPoints(MountPointFound onFound, void* context)
     return 0;
 }
 #elif defined(__KOS__)
+    // TODO-KOS(6): no mntent.h (and no getfsstat/getmntinfo)
     // KasperskyOS has neither getfsstat/getmntinfo nor mntent.h; getvfsstat lists the file systems the VFS
     // programs have mounted.
     int count = getvfsstat(NULL, 0, ST_NOWAIT);

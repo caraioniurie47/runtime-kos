@@ -145,7 +145,7 @@ RELEASE_CONFIG_INTEGER(JitPacEnabled, "JitPacEnabled", 0)
 RELEASE_CONFIG_INTEGER(JitEnableGenericVirtualDevirtualization, "JitEnableGenericVirtualDevirtualization", 1)
 
 // If set, a loop that has no GC safe point gets a GC poll instead of making the method fully interruptible, for
-// targets that cannot suspend a thread running managed code (KasperskyOS)
+// targets that cannot suspend a thread running managed code (KasperskyOS: TODO-KOS(11), no API to interrupt a thread)
 RELEASE_CONFIG_INTEGER(JitGCPollLoops, "JitGCPollLoops", 0)
 
 //

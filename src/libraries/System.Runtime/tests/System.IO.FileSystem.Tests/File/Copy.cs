@@ -245,7 +245,7 @@ namespace System.IO.Tests
             Assert.Throws<IOException>(() => Copy(testFileAlternateStream, testFile2 + alternateStream));
         }
 
-        // KasperskyOS has no procfs
+        // KOS-NOT-LINUX: no procfs
         [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux)]
         [InlineData("/proc/cmdline")]

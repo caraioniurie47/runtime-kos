@@ -21,7 +21,7 @@ SET_DEFAULT_DEBUG_CHANNEL(MISC);
 #include "pal/cgroup.h"
 #include <algorithm>
 
-#if defined(TARGET_LINUX) && !defined(__KOS__) // KOS: no cgroups; the stubs below report no limit
+#if defined(TARGET_LINUX) && !defined(__KOS__) // KOS-NOT-LINUX: no cgroups; the stubs below report no limit
 
 #include <sys/vfs.h>
 

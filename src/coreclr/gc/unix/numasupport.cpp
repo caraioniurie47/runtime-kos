@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <minipal/utils.h>
 
+// KOS-NOT-LINUX: no NUMA syscalls, sys/syscall.h or /sys (also the four guards below)
 #if defined(TARGET_LINUX) && !defined(TARGET_ANDROID) && !defined(__KOS__)
 #include <sys/syscall.h>
 #endif

@@ -62,7 +62,8 @@ if (CLR_CMAKE_TARGET_APPLE OR CLR_CMAKE_TARGET_ANDROID OR CLR_CMAKE_TARGET_BROWS
     # Keep an OS list instead of CMake configure checks since we also need to synchronize this with
     # the compile-time guards on the managed code side at
     # src/libraries/System.Private.CoreLib/src/System/Threading/NamedMutex.Unix.cs.
-    # KOS: SDK 1.4 declares pthread_mutexattr_setrobust and pthread_mutex_consistent but no library
+    # KOS-DOC(posix_uns_ifaces): robust mutexes not implemented
+    # TODO-KOS(4): SDK 1.4 declares pthread_mutexattr_setrobust and pthread_mutex_consistent but no library
     # defines them. Managed code sees Linux and takes the pthread path, so creating a named mutex fails
     # with EINVAL; it needs shared memory files, which KOS without a VFS entity cannot provide anyway.
     list (APPEND NATIVE_SOURCES

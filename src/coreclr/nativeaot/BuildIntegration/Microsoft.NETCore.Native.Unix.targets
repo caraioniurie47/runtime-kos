@@ -285,10 +285,11 @@ The .NET Foundation licenses this file to you under the MIT license.
       <LinkerArg Include="@(StaticICULibs)" Condition="'$(StaticICULinking)' == 'true'" />
       <LinkerArg Include="@(StaticSslLibs)" Condition="'$(StaticOpenSslLinking)' == 'true'" />
       <LinkerArg Include="-static" Condition="'$(StaticExecutable)' == 'true' and '$(PositionIndependentExecutable)' == 'false'" />
-      <!-- KOS clang (SDK 1.4+) ignores -static-pie and links dynamically; its -static already produces a static PIE -->
+      <!-- TODO-KOS(15): KOS clang (SDK 1.4+) ignores -static-pie and links dynamically; its -static already produces a static PIE -->
       <LinkerArg Include="-static" Condition="'$(StaticExecutable)' == 'true' and '$(PositionIndependentExecutable)' != 'false' and '$(TargetsKOS)' == 'true' and $(CppLinker.Contains('clang'))" />
       <LinkerArg Include="-static-pie" Condition="'$(StaticExecutable)' == 'true' and '$(PositionIndependentExecutable)' != 'false' and !('$(TargetsKOS)' == 'true' and $(CppLinker.Contains('clang')))" />
-      <!-- KOS runs no dynamic linker. With PT_INTERP present (GCC's -static-pie adds one when dynamic exports are requested), KOS libc
+      <!-- TODO-KOS(16): PT_INTERP in a static executable disables static TLS (SDK 1.1.1.40)
+           KOS runs no dynamic linker. With PT_INTERP present (GCC's -static-pie adds one when dynamic exports are requested), KOS libc
            assumes one ran and allocates no static TLS, so thread-locals overlay libc's data. The clang driver passes this itself. -->
       <LinkerArg Include="-Wl,--no-dynamic-linker" Condition="'$(StaticExecutable)' == 'true' and '$(TargetsKOS)' == 'true'" />
       <LinkerArg Include="-dynamiclib" Condition="'$(_IsApplePlatform)' == 'true' and '$(NativeLib)' == 'Shared'" />

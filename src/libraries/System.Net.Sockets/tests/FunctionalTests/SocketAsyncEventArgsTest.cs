@@ -435,7 +435,7 @@ namespace System.Net.Sockets.Tests
         {
             if (useFastOpen && ((PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater) || PlatformDetection.IsKasperskyOS))
             {
-                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none.
+                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none (KOS-NOT-LINUX).
                 throw new SkipTestException("TCP fast open is not supported");
             }
 
@@ -531,7 +531,7 @@ namespace System.Net.Sockets.Tests
         {
             if (useFastOpen && ((PlatformDetection.IsWindows && !PlatformDetection.IsWindows10OrLater) || PlatformDetection.IsKasperskyOS))
             {
-                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none.
+                // Old Windows versions do not support fast open and SetSocketOption fails with error; KasperskyOS has none (KOS-NOT-LINUX).
                 throw new SkipTestException("TCP fast open is not supported");
             }
 

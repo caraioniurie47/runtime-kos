@@ -97,6 +97,7 @@ check_symbol_exists(
     HAVE_POSIX_MADVISE)
 
 if (CLR_CMAKE_TARGET_KOS)
+  # TODO-KOS(6): no cpu_set_t or sched_getaffinity declaration in the SDK headers
   # SDK 1.4's libc links these symbols, but its headers declare neither them nor cpu_set_t/CPU_ALLOC.
   # The GC's affinity code needs those Linux types; see HAVE_PTHREAD_SETAFFINITY_NP below.
   set(HAVE_SCHED_GETAFFINITY 0)
@@ -119,7 +120,7 @@ if (HAVE_LIBPTHREAD OR HAVE_PTHREAD_IN_LIBC)
     check_library_exists(${PTHREAD_LIBRARY} pthread_setaffinity_np "" HAVE_PTHREAD_SETAFFINITY_NP)
 endif()
 if (CLR_CMAKE_TARGET_KOS)
-  # SDK 1.4 has NetBSD's pthread_setaffinity_np(pthread_t, size_t, cpuset_t *); the GC uses Linux cpu_set_t.
+  # TODO-KOS(6): NetBSD's pthread_setaffinity_np(pthread_t, size_t, cpuset_t *); the GC uses Linux cpu_set_t
   set(HAVE_PTHREAD_SETAFFINITY_NP 0)
 endif()
 

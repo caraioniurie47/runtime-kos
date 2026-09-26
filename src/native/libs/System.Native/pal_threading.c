@@ -163,7 +163,7 @@ void SystemNative_LowLevelMonitor_Signal_Release(LowLevelMonitor* monitor)
 }
 
 #if defined(__KOS__)
-// KOS: TARGET_LINUX is defined, so CoreLib uses LowLevelFutex, but there is no futex syscall. The
+// KOS-NOT-LINUX: TARGET_LINUX is defined, so CoreLib uses LowLevelFutex, but there is no futex syscall. The
 // kernel's own futex API has the same compare-and-block and wake semantics.
 void SystemNative_LowLevelFutex_WaitOnAddress(int32_t* address, int32_t comparand)
 {

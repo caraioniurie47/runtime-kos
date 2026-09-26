@@ -91,7 +91,7 @@ int64_t SystemNative_GetLowResolutionTimestamp(void)
 
 int64_t SystemNative_GetBootTimeTicks(void)
 {
-#if defined(TARGET_LINUX) && !defined(__KOS__) // KasperskyOS (CE SDK 1.4.0.102) time.h has no CLOCK_BOOTTIME
+#if defined(TARGET_LINUX) && !defined(__KOS__) // KOS-NOT-LINUX: time.h has no CLOCK_BOOTTIME (CE SDK 1.4.0.102)
     struct timespec ts;
 
     int result = clock_gettime(CLOCK_BOOTTIME, &ts);

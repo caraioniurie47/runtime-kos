@@ -116,6 +116,8 @@ static pthread_mutex_t s_groupLock = PTHREAD_MUTEX_INITIALIZER;
 static int pal_getgrouplist(const char *uname, gid_t agroup, gid_t *groups, int *groupCount)
 {
 #if defined(__KOS__)
+    // KOS-DOC(posix_uns_ifaces): no XSI group database functions
+    // TODO-KOS(4): grp.h declares them anyway
     // KasperskyOS (CE SDK 1.4.0.102) grp.h declares setgrent, getgrent and endgrent, but no SDK library defines
     // them, and there is no group database: report the primary group only, with getgrouplist's contract.
     (void)uname;

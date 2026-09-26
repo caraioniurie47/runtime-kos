@@ -137,7 +137,7 @@ namespace System.IO.Tests
             Assert.Equal(0, File.ReadAllBytes(path).Length);
         }
 
-        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: no procfs
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KOS-NOT-LINUX: no procfs
         [PlatformSpecific(TestPlatforms.Linux)]
         [InlineData("/proc/cmdline")]
         [InlineData("/proc/version")]
@@ -160,7 +160,7 @@ namespace System.IO.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: no procfs
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KOS-NOT-LINUX: no procfs
         [PlatformSpecific(TestPlatforms.Linux)]
         public void ReadAllBytes_ProcFs_Uptime_ContainsTwoNumbers()
         {
@@ -171,7 +171,7 @@ namespace System.IO.Tests
             Assert.True(double.TryParse(parts[1].Trim(), out _));
         }
 
-        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: no procfs
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KOS-NOT-LINUX: no procfs
         [PlatformSpecific(TestPlatforms.Linux)]
         [InlineData("/proc/meminfo")]
         [InlineData("/proc/stat")]
@@ -213,7 +213,7 @@ namespace System.IO.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: mkfifo is a stub (ENOSYS)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KOS-DOC(posix_uns_ifaces): mkfifo is a stub (ENOSYS)
         [PlatformSpecific(TestPlatforms.AnyUnix & ~TestPlatforms.Browser & ~TestPlatforms.iOS & ~TestPlatforms.tvOS)]
         public async Task ReadAllBytes_NonSeekableFileStream_InUnix()
         {

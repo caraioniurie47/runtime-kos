@@ -1,0 +1,15 @@
+{
+    "featureFilters": {
+        "conversion_mappings": "exclude",
+        "confusables": "exclude",
+        "translit": "exclude",
+        "unames": "exclude",
+        "unit_tree": "exclude",
+        "rbnf_tree": "exclude",
+        "stringprep": "exclude",
+        "brkitr_dictionaries": "exclude",
+        "brkitr_rules": {
+            "whitelist": ["char"]
+        }
+    }
+}

@@ -79,33 +79,47 @@ export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export NuGetAudit=false
 ```
 
-## 5. Get ICU and the sources
+## 5. Get the sources and ICU
 
-ICU 73.1 from [unicode-org-icu, branch `kos_changes`](https://github.com/caraioniurie47/unicode-org-icu/tree/kos_changes)
-goes to `/opt/icu4c/kos`. The build always needs it (`System.Globalization.Native` compiles against
-its headers) and packs its libraries; they are linked only when `InvariantGlobalization` is false.
-
-### Build ICU with clang
-
-A host build comes first; the cross build uses its tools.
+### Clone the runtime
 
 ```sh
 cd /home
-git clone --depth 1 --branch kos_changes https://github.com/caraioniurie47/unicode-org-icu.git
-cd /home/unicode-org-icu/icu4c/source/data/in
-wget -nc https://github.com/unicode-org/icu/releases/download/release-73-1/icu4c-73_1-data-bin-l.zip
-unzip -j -o icu4c-73_1-data-bin-l.zip
+git clone --depth 1 --branch kos-main https://github.com/caraioniurie47/runtime-kos.git
+find /home/runtime-kos -name "*.sh" -exec chmod +x {} +
+```
+
+### Build ICU with clang
+
+ICU is .NET's own, [dotnet/icu](https://github.com/dotnet/icu) (ICU 72.1.0.4 with Microsoft's patches, listed in its `icu-patches` folder), at the
+commit this branch pins for `Microsoft.NETCore.Runtime.ICU.Transport` in `eng/Version.Details.xml`, patched for
+KasperskyOS (`eng/kos/icu/kos-icu.patch`). It goes to `/opt/icu4c/kos`. Its data leaves out the ICU features .NET
+never calls (`eng/kos/icu/icudt_kos.json`: code page tables, transliteration, spoofing checks, character names, units,
+spelled-out numbers, stringprep profiles, and break rules and dictionaries other than character breaks) and keeps
+every locale, calendar, collation and display name. The build always needs ICU (`System.Globalization.Native`
+compiles against its headers) and packs its libraries; they are linked only when `InvariantGlobalization` is false.
+
+A host build comes first; the cross build uses its tools. Both read the data filter.
+
+```sh
+cd /home
+git init -q dotnet-icu && cd dotnet-icu
+git fetch --depth 1 https://github.com/dotnet/icu.git c6131fd7b7cebcef44c17f381b2fe325cb331964
+git checkout -q FETCH_HEAD
+patch -p1 -d icu < /home/runtime-kos/eng/kos/icu/kos-icu.patch
+export ICU_DATA_FILTER_FILE=/home/runtime-kos/eng/kos/icu/icudt_kos.json
 mkdir -p /home/icu4c-build-x64 && cd /home/icu4c-build-x64
-sh /home/unicode-org-icu/icu4c/source/runConfigureICU Linux/gcc --enable-static --disable-shared --disable-samples --disable-tests --disable-extras --disable-draft --disable-dyload --disable-icuio --with-data-packaging=static
+sh /home/dotnet-icu/icu/icu4c/source/runConfigureICU Linux/gcc --enable-static --disable-shared --disable-samples --disable-tests --disable-extras --disable-draft --disable-dyload --disable-icuio --with-data-packaging=static
 make -j$(nproc)
 mkdir -p /home/icu4c-build-kos && cd /home/icu4c-build-kos
 (
     export PATH=$PATH:$KOS_SDK/toolchain/bin
     CC=aarch64-kos-clang CXX=aarch64-kos-clang++ AR=llvm-ar RANLIB=llvm-ranlib \
-        sh /home/unicode-org-icu/icu4c/source/configure --host=aarch64-kos --with-cross-build=/home/icu4c-build-x64 --prefix=/opt/icu4c/kos --enable-static --disable-shared --disable-samples --disable-tests --disable-extras --disable-draft --disable-dyload --disable-icuio --with-data-packaging=static
+        sh /home/dotnet-icu/icu/icu4c/source/configure --host=aarch64-kos --with-cross-build=/home/icu4c-build-x64 --prefix=/opt/icu4c/kos --enable-static --disable-shared --disable-samples --disable-tests --disable-extras --disable-draft --disable-dyload --disable-icuio --with-data-packaging=static
     make -j$(nproc)
     make install
 )
+unset ICU_DATA_FILTER_FILE
 ```
 
 ### OpenSSL headers
@@ -124,14 +138,6 @@ cd /home/openssl-1.1.1t
 make include/openssl/opensslconf.h
 mkdir -p /opt/openssl-kos/include
 cp -a include/openssl /opt/openssl-kos/include/
-```
-
-### Clone the runtime
-
-```sh
-cd /home
-git clone --depth 1 --branch kos-main https://github.com/caraioniurie47/runtime-kos.git
-find /home/runtime-kos -name "*.sh" -exec chmod +x {} +
 ```
 
 ## 6. Build ilc-tools (host compiler)
@@ -253,7 +259,7 @@ signatures, ECDH and an NTLM negotiate message. The HTTPS section makes a test C
 that CA; a second `HttpClient` with the default trust must refuse the same server.
 
 `InvariantGlobalization=false` links ICU, so the globalization section runs; the binary grows from
-about 15 MB to about 52 MB. Without it the section reports `SKIP`.
+about 31 MB to about 53 MB. Without it the section reports `SKIP`.
 
 ### Publish the showcase
 
@@ -374,7 +380,7 @@ KasperskyOS console.
   showcase reports its files section as `SKIP`. A program linked with `libvfs_remote.a` first tries to
   reach a VFS server, then logs `Can't establish IPC connetion to VFS server` and falls back to the stub
   about 11 seconds later.
-- **ICU adds about 37 MB to the unstripped binary**; see step 10.
+- **ICU adds about 22 MB to the unstripped binary**; see step 10.
 - **Cryptography is the SDK's OpenSSL 1.1.1t**, linked statically. OpenSSL 1.1.1 is past its upstream end of
   life (2023-09-11). What .NET builds on OpenSSL 3 APIs throws `PlatformNotSupportedException`: ML-KEM,
   ML-DSA, SLH-DSA, KMAC and reading SHAKE output incrementally; SHA-3, one-shot SHAKE and ChaCha20-Poly1305

@@ -303,11 +303,13 @@ KasperskyOS console.
 - **No hardware exceptions.** KasperskyOS delivers only `SIGTERM`, so the runtime registers no
   `SIGSEGV` or `SIGFPE` handler there, and a fault such as a null dereference does not become a
   managed exception.
-- **A loop that makes no calls holds up the GC.** Without signals the runtime cannot interrupt a
-  thread running managed code, so a garbage collection waits until each such thread checks for a
-  pending suspension: at a GC poll or on return from a P/Invoke. A thread spinning on a flag with no
-  calls in its loop held a `GC.Collect` on another thread for 15 s, until the loop ended; an endless
-  loop of that kind would hang the program at the next collection.
+- **Garbage collection waits for GC polls.** Without signals the runtime cannot interrupt a thread
+  running managed code, so a collection waits until each such thread checks for a pending suspension:
+  at a GC poll or on return from a P/Invoke. The KOS build targets make the compiler put a GC poll in
+  every loop that has no call (`--codegenopt:JitGCPollLoops=1`): a `GC.Collect` that took 19.5 s
+  while another thread spun on a flag took 13 ms with the polls. Loops the compiler does not poll
+  still hold up a collection until they end: loops closed by a tail call or by exception-handling
+  flow, and methods compiled fully interruptible (debuggable code).
 - **Files live in RAM.** `VfsRamFs` mounts a RAM file system at `/tmp`, emptied at every boot; the
   showcase uses only `/tmp`, so other paths are untried.
 - **Sockets: TCP over IP addresses is what was tried.** KasperskyOS has neither epoll nor kqueue, so

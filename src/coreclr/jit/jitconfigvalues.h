@@ -144,6 +144,10 @@ RELEASE_CONFIG_INTEGER(JitPacEnabled, "JitPacEnabled", 0)
 // Enable devirtualization for generic virtual methods
 RELEASE_CONFIG_INTEGER(JitEnableGenericVirtualDevirtualization, "JitEnableGenericVirtualDevirtualization", 1)
 
+// If set, a loop that has no GC safe point gets a GC poll instead of making the method fully interruptible, for
+// targets that cannot suspend a thread running managed code (KasperskyOS)
+RELEASE_CONFIG_INTEGER(JitGCPollLoops, "JitGCPollLoops", 0)
+
 //
 // MinOpts
 //

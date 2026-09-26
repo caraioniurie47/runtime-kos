@@ -6072,6 +6072,8 @@ public:
 
     bool fgHasSwitch = false; // any BBJ_SWITCH jumps?
 
+    bool fgLoopGCPollsPending = false; // fgInsertGCPolls must poll the cycles without a GC safe point (JitGCPollLoops)
+
     bool fgRemoveRestOfBlock = false; // true if we know that we will throw
     bool fgHasNoReturnCall = false;   // true if statement we morphed had a no-return call
     bool fgStmtRemoved = false;       // true if we remove statements -> need new DFA
@@ -6791,6 +6793,7 @@ public:
     bool fgLateCastExpansionForCall(BasicBlock** pBlock, Statement* stmt, GenTreeCall* call);
 
     PhaseStatus fgInsertGCPolls();
+    bool fgMarkLoopGCPolls();
     BasicBlock* fgCreateGCPoll(GCPollType pollType, BasicBlock* block);
 
     BasicBlock* fgFirstBlockOfHandler(BasicBlock* block);

@@ -5966,7 +5966,9 @@ void Compiler::optRemoveRedundantZeroInits()
                             // insert a call to CORINFO_HELP_INIT_PINVOKE_FRAME but that is not a gc-safe point.
                             assert(s_helperCallProperties.IsNoGC(CORINFO_HELP_INIT_PINVOKE_FRAME));
 
-                            if (!lclDsc->HasGCPtr() || (!GetInterruptible() && !hasGCSafePoint))
+                            // Loop GC polls (fgLoopGCPollsPending) are safe points not inserted yet.
+                            if (!lclDsc->HasGCPtr() ||
+                                (!GetInterruptible() && !fgLoopGCPollsPending && !hasGCSafePoint))
                             {
                                 // The local hasn't been used and won't be reported to the gc between
                                 // the prolog and this explicit initialization. Therefore, it doesn't

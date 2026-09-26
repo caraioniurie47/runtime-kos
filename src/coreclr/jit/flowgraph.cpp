@@ -78,6 +78,17 @@ PhaseStatus Compiler::fgInsertGCPolls()
 {
     PhaseStatus result = PhaseStatus::MODIFIED_NOTHING;
 
+    if (fgLoopGCPollsPending)
+    {
+        fgLoopGCPollsPending = false;
+
+        if (!fgMarkLoopGCPolls())
+        {
+            JITDUMP("Not every cycle can take a GC poll; marking method as fully interruptible\n");
+            SetInterruptible(true);
+        }
+    }
+
     if ((optMethodFlags & OMF_NEEDS_GCPOLLS) == 0)
     {
         return result;
@@ -4168,8 +4179,18 @@ PhaseStatus Compiler::fgSetBlockOrder()
         JITDUMP("NOTE: Method requires GC polls -- Wasm does not insert these yet\n");
 #else
 
-        JITDUMP("Marking method as fully interruptible\n");
-        SetInterruptible(true);
+        if ((JitConfig.JitGCPollLoops() != 0) && !GetInterruptible())
+        {
+            // Blocks still change before fgInsertGCPolls, which marks the cycles on the final flow graph.
+            JITDUMP("Method requires GC polls in its cycles (JitGCPollLoops)\n");
+            fgLoopGCPollsPending = true;
+            optMethodFlags |= OMF_NEEDS_GCPOLLS;
+        }
+        else
+        {
+            JITDUMP("Marking method as fully interruptible\n");
+            SetInterruptible(true);
+        }
 
 #endif // defined(TARGET_WASM)
     }
@@ -4353,6 +4374,103 @@ bool Compiler::fgHasCycleWithoutGCSafePoint()
     }
 
     return false;
+}
+
+//------------------------------------------------------------------------------
+// fgMarkLoopGCPolls: Mark blocks with BBF_NEEDS_GCPOLL so that every cycle that
+// does not go through a BBF_GC_SAFE_POINT block gets a GC poll (JitGCPollLoops).
+//
+// Returns:
+//   True if the blocks were marked. False if some cycle can't take a poll, in
+//   which case no block is marked and the method must be fully interruptible.
+//
+// Notes:
+//   Every cycle contains a back edge of a depth-first search, so marking the
+//   source of each back edge found by the search of fgHasCycleWithoutGCSafePoint
+//   covers them all.
+//
+bool Compiler::fgMarkLoopGCPolls()
+{
+    ArrayStack<GCSafePointSuccessorEnumerator> stack(getAllocator(CMK_ArrayStack));
+    ArrayStack<BasicBlock*>                    marked(getAllocator(CMK_ArrayStack));
+    BitVecTraits                               traits(fgBBNumMax + 1, this);
+    BitVec                                     visited(BitVecOps::MakeEmpty(&traits));
+    BitVec                                     finished(BitVecOps::MakeEmpty(&traits));
+    bool                                       canPoll = true;
+
+    for (BasicBlock* block : Blocks())
+    {
+        if (!canPoll)
+        {
+            break;
+        }
+
+        if (block->HasFlag(BBF_GC_SAFE_POINT) || BitVecOps::IsMember(&traits, visited, block->bbNum))
+        {
+            continue;
+        }
+
+        BitVecOps::AddElemD(&traits, visited, block->bbNum);
+        stack.Emplace(this, block);
+
+        while (canPoll && (stack.Height() > 0))
+        {
+            BasicBlock* block = stack.TopRef().Block();
+            BasicBlock* succ  = stack.TopRef().NextSuccessor();
+
+            if (succ == nullptr)
+            {
+                BitVecOps::AddElemD(&traits, finished, block->bbNum);
+                stack.Pop();
+                continue;
+            }
+
+            if (succ->HasFlag(BBF_GC_SAFE_POINT) || BitVecOps::IsMember(&traits, finished, succ->bbNum))
+            {
+                continue;
+            }
+
+            if (BitVecOps::TryAddElemD(&traits, visited, succ->bbNum))
+            {
+                stack.Emplace(this, succ);
+                continue;
+            }
+
+            // succ is on the stack: block -> succ is a back edge. A tail call's edge to the entry is modeled
+            // (see GCSafePointSuccessorEnumerator), and the EH flow kinds can't take a poll.
+            if (!block->KindIs(BBJ_ALWAYS, BBJ_COND, BBJ_SWITCH) || block->endsWithTailCallOrJmp(this, true))
+            {
+                JITDUMP("Back edge " FMT_BB " -> " FMT_BB " can't take a GC poll\n", block->bbNum, succ->bbNum);
+                canPoll = false;
+                break;
+            }
+
+            if (!block->HasFlag(BBF_NEEDS_GCPOLL))
+            {
+                JITDUMP("Marking " FMT_BB " as needs gc poll for back edge to " FMT_BB "\n", block->bbNum,
+                        succ->bbNum);
+                block->SetFlags(BBF_NEEDS_GCPOLL);
+                marked.Push(block);
+            }
+        }
+    }
+
+    if (!canPoll)
+    {
+        while (marked.Height() > 0)
+        {
+            marked.Pop()->RemoveFlags(BBF_NEEDS_GCPOLL);
+        }
+
+        return false;
+    }
+
+    if (marked.Height() > 0)
+    {
+        optMethodFlags |= OMF_NEEDS_GCPOLLS;
+    }
+
+    return true;
 }
 
 /*****************************************************************************/

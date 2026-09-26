@@ -273,6 +273,40 @@ Section("Garbage collector under load", () =>
     Check(GC.CollectionCount(0) > before[0], "gen0 collections ran");
 });
 
+Section("GC while a thread loops without calls", () =>
+{
+    // KasperskyOS has no signals to interrupt a thread running managed code, so the compiler puts a GC poll in
+    // loops like this one. Without it, GC.Collect waits until the loop ends by itself after 1.5 billion
+    // iterations: the thread that would stop it is suspended for the GC too.
+    int stop = 0;
+    bool spinning = false;
+    long spins = 0;
+    var spinner = new Thread(() =>
+    {
+        long n = 0;
+        Volatile.Write(ref spinning, true);
+        while (Volatile.Read(ref stop) == 0 && n < 1_500_000_000)
+        {
+            n++;
+        }
+        spins = n;
+    });
+    spinner.Start();
+    while (!Volatile.Read(ref spinning))
+    {
+        Thread.Sleep(10);
+    }
+    Thread.Sleep(200);
+    var clock = Stopwatch.StartNew();
+    GC.Collect(2, GCCollectionMode.Forced, blocking: true);
+    long collectMs = clock.ElapsedMilliseconds;
+    Volatile.Write(ref stop, 1);
+    spinner.Join();
+    o.WriteLine($"  GC.Collect took {collectMs} ms; the loop ran {spins} iterations" +
+        (spins < 1_500_000_000 ? " and stopped when asked" : ", its full count"));
+    Check(collectMs < 2000, "GC.Collect did not wait for the loop");
+});
+
 Section("Exceptions, filters and stack traces", () =>
 {
     bool finallyRan = false;

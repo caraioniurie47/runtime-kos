@@ -5,6 +5,9 @@
 #include "pal_config.h"
 #include "pal_errno.h"
 #include "pal_io.h"
+#if defined(__KOS__)
+#include "pal_random.h" // KosMksTemps
+#endif
 #include "pal_utilities.h"
 #include "pal_safecrt.h"
 #include "pal_types.h"
@@ -937,10 +940,64 @@ char* SystemNative_MkdTemp(char* pathTemplate)
 #endif /* TARGET_WASI */
 }
 
+#if defined(__KOS__)
+// KasperskyOS (CE SDK 1.4.0.102) libc's mkstemps fails with EINVAL for a valid template and suffix, while mkstemp and
+// open(O_CREAT | O_EXCL) work, so do what mkstemps specifies: replace the trailing X's before the suffix and create the
+// file exclusively, trying other names while one exists.
+static intptr_t KosMksTemps(char* pathTemplate, int32_t suffixLength)
+{
+    static const char NameChars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    size_t length = strlen(pathTemplate);
+    if (suffixLength < 0 || (size_t)suffixLength > length)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    char* end = pathTemplate + length - suffixLength;
+    char* start = end;
+    while (start > pathTemplate && start[-1] == 'X')
+    {
+        start--;
+    }
+    if (end - start < 6)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    for (int attempt = 0; attempt < 1000; attempt++)
+    {
+        uint8_t random[32];
+        size_t count = (size_t)(end - start);
+        for (size_t i = 0; i < count; i++)
+        {
+            if (i % sizeof(random) == 0)
+            {
+                SystemNative_GetNonCryptographicallySecureRandomBytes(random, (int32_t)sizeof(random));
+            }
+            start[i] = NameChars[random[i % sizeof(random)] % (sizeof(NameChars) - 1)];
+        }
+
+        int fd;
+        while ((fd = open(pathTemplate, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)) < 0 && errno == EINTR);
+        if (fd >= 0 || errno != EEXIST)
+        {
+            return fd;
+        }
+    }
+
+    errno = EEXIST;
+    return -1;
+}
+#endif
+
 intptr_t SystemNative_MksTemps(char* pathTemplate, int32_t suffixLength)
 {
     intptr_t result;
-#if HAVE_MKSTEMPS
+#if defined(__KOS__)
+    result = KosMksTemps(pathTemplate, suffixLength);
+#elif HAVE_MKSTEMPS
     while ((result = mkstemps(pathTemplate, suffixLength)) < 0 && errno == EINTR);
 #elif HAVE_MKSTEMP
     // mkstemps is not available bionic/Android, but mkstemp is

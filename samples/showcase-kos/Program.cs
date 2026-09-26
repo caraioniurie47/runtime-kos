@@ -32,9 +32,9 @@ o.WriteLine("  +------------------------------------------+");
 Section("Runtime", () =>
 {
     o.WriteLine($"  Framework     {RuntimeInformation.FrameworkDescription}");
-    // OSDescription is uname()'s sysname, release and version, which SDK 1.4.0.102's libc fills with
-    // constants ("KOS", "1.0", "1.0"), not the OS version.
-    o.WriteLine($"  uname         {RuntimeInformation.OSDescription}");
+    // The KOS SDK's product name and version, from the header it generates: uname() itself reports
+    // constants ("KOS", "1.0", "1.0"). It is the SDK the runtime was built with, kernel included.
+    o.WriteLine($"  OS            {RuntimeInformation.OSDescription}");
     o.WriteLine($"  Runtime ID    {RuntimeInformation.RuntimeIdentifier}");
     o.WriteLine($"  Architecture  {RuntimeInformation.ProcessArchitecture}");
     o.WriteLine($"  Processors    {Environment.ProcessorCount}");

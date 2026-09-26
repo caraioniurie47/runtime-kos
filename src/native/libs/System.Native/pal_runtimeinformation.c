@@ -15,10 +15,18 @@
 #elif defined(TARGET_SUNOS)
 #include <sys/systeminfo.h>
 #endif
+#if defined(__KOS__)
+// KasperskyOS's uname() returns constants ("KOS", "1.0", "1.0"), not the running system. This SDK-generated header
+// gives the product name and version the runtime was built against, which for a KOS image is also the SDK that built
+// the kernel in it.
+#include <platform/version.h>
+#endif
 
 char* SystemNative_GetUnixRelease(void)
 {
-#if defined(TARGET_ANDROID)
+#if defined(__KOS__)
+    return strdup(PRODUCT_VERSION);
+#elif defined(TARGET_ANDROID)
     // get the Android API level
     char sdk_ver_str[PROP_VALUE_MAX];
     if (__system_property_get("ro.build.version.sdk_full", sdk_ver_str))
@@ -43,6 +51,14 @@ char* SystemNative_GetUnixRelease(void)
 
 int32_t SystemNative_GetUnixVersion(char* version, int* capacity)
 {
+#if defined(__KOS__)
+    int r = snprintf(version, (size_t)(*capacity), "%s %s", PRODUCT_NAME, PRODUCT_VERSION);
+    if (r > *capacity)
+    {
+        *capacity = r + 1;
+        return -1;
+    }
+#else
     struct utsname _utsname;
     if (uname(&_utsname) != -1)
     {
@@ -53,6 +69,7 @@ int32_t SystemNative_GetUnixVersion(char* version, int* capacity)
             return -1;
         }
     }
+#endif
 
     return 0;
 }

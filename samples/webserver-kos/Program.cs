@@ -93,6 +93,7 @@ Status CurrentStatus()
 {
     GCMemoryInfo memory = GC.GetGCMemoryInfo();
     return new Status(
+        RuntimeInformation.OSDescription,
         RuntimeInformation.FrameworkDescription,
         RuntimeInformation.RuntimeIdentifier,
         RuntimeInformation.ProcessArchitecture.ToString(),
@@ -132,6 +133,7 @@ static string Page(Status s)
         <p>This page is served by <code>System.Net.HttpListener</code> in a C# program compiled with NativeAOT,
         running on KasperskyOS under QEMU.</p>
         <table>
+          <tr><th>OS</th><td>{{E(s.Os)}}</td></tr>
           <tr><th>Framework</th><td>{{E(s.Framework)}}</td></tr>
           <tr><th>Runtime ID</th><td>{{E(s.RuntimeIdentifier)}}</td></tr>
           <tr><th>Architecture</th><td>{{E(s.Architecture)}}</td></tr>
@@ -164,8 +166,9 @@ static string Page(Status s)
 }
 
 record Status(
-    // No OS version: RuntimeInformation.OSDescription comes from uname(), which SDK 1.4.0.102's C library fills with
-    // the fixed strings "KOS", "1.0" and "1.0".
+    // Os is the KOS SDK's product name and version, which the runtime reads from the header the SDK generates;
+    // uname() itself reports the fixed strings "KOS", "1.0" and "1.0".
+    string Os,
     string Framework,
     string RuntimeIdentifier,
     string Architecture,

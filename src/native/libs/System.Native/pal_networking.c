@@ -4369,6 +4369,21 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
     // Repeatedly read from the source and write to the destination
     while (count > 0)
     {
+#if defined(__KOS__)
+        // A non-blocking socket that cannot take more data ends the call, as sendfile() would, before the next read:
+        // reading a file through the VFS is slow (80 KiB of a sparse /tmp file took 1.5-2 s under QEMU, 2026-09-24),
+        // and the caller then waits for the socket on the event port, where disposing the socket aborts the send. Left
+        // looping, the call held the socket for seconds and a dispose landed inside it.
+        if (*sent > 0 && (fcntl(outfd, F_GETFL) & O_NONBLOCK) != 0)
+        {
+            struct pollfd writable = { .fd = outfd, .events = POLLOUT, .revents = 0 };
+            if (poll(&writable, 1, 0) == 0)
+            {
+                errno = EAGAIN;
+                goto error;
+            }
+        }
+#endif
         size_t numBytesToRead = Min((size_t)count, bufferLength);
 
         // Read up to what will fit in our buffer.  We're done if we get back 0 bytes or read 'count' bytes

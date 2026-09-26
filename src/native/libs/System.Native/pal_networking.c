@@ -1833,6 +1833,15 @@ int32_t SystemNative_Accept(intptr_t socket, uint8_t* socketAddress, int32_t* so
     int fd = ToFileDescriptor(socket);
 
     socklen_t addrLen = (socklen_t)*socketAddressLen;
+#if defined(__KOS__) // TODO-KOS(10c): accept() fails with EACCES for an address buffer over 128 bytes
+    // The VFS IPC carries at most kl_VfsTypes_MaxSockAddrSize (128) address bytes, and accept() fails with EACCES
+    // when address_len is larger (200 and more measured; 128 works), where POSIX and NetBSD return a shortened address.
+    // Any address fits a sockaddr_storage (128 bytes); the managed code passes 244 for AF_UNIX listeners.
+    if (addrLen > (socklen_t)sizeof(struct sockaddr_storage))
+    {
+        addrLen = (socklen_t)sizeof(struct sockaddr_storage);
+    }
+#endif
     int accepted;
 #if HAVE_ACCEPT4 && defined(SOCK_CLOEXEC)
 #if defined(TARGET_WASI) // WASI is always FD_CLOEXEC and we always need SOCK_NONBLOCK. SOCK_CLOEXEC doesn't make sense in WASI.

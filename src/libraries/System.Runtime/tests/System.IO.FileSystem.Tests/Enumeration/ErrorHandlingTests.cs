@@ -81,7 +81,7 @@ namespace System.IO.Tests
             }
         }
 
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: readdir on a removed directory fails with ENOENT (allowed by POSIX) instead of ending the stream
         [ActiveIssue("https://github.com/dotnet/runtime/issues/55821", TestPlatforms.Android)]
         public void DeleteDirectoryAfterOpening()
         {

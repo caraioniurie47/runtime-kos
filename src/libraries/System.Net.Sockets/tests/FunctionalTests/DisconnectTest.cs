@@ -4,6 +4,7 @@
 using System.Net.Test.Common;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.DotNet.XUnitExtensions;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -132,11 +133,12 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Theory]
+        [ConditionalTheory]
         [InlineData(true)]
         [InlineData(false)]
         public async Task Disconnect_NotConnected_ThrowsSocketException(bool reuseSocket)
         {
+            if (PlatformDetection.IsKasperskyOS) throw new SkipTestException("TODO-KOS(6i): shutdown() on an unconnected TCP socket succeeds");
             using (Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
             {
                 await Assert.ThrowsAsync<SocketException>(async () => await DisconnectAsync(s, reuseSocket));

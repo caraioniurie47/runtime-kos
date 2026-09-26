@@ -13,6 +13,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void GetAndSet_Success()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             using (Socket socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp))
             {
                 Assert.Equal(0, socket.ReceiveTimeout);
@@ -28,6 +29,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void SocketSendTimeout_GetAndSet_Success()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             using (Socket socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp))
             {
                 Assert.Equal(0, socket.SendTimeout);

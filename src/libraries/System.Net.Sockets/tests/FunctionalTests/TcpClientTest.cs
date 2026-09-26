@@ -344,6 +344,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(AddressFamily.InterNetworkV6)]
         public void Ttl_Set_GetEqualsSet(AddressFamily af)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(af == AddressFamily.InterNetworkV6);
             using (TcpClient client = new TcpClient(af))
             {
                 short newTtl = client.Client.Ttl;

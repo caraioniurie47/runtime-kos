@@ -105,6 +105,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void StaticCreate_Success()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true); // TcpListener.Create makes a dual-mode listener
             TcpListener listener = TcpListener.Create(0);
 
             IPEndPoint ep = (IPEndPoint)listener.LocalEndpoint;

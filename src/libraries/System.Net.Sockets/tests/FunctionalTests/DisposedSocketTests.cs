@@ -188,12 +188,14 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void Ttl_IPv6_Throws_ObjectDisposed()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<ObjectDisposedException>(() => GetDisposedSocket(AddressFamily.InterNetworkV6).Ttl);
         }
 
         [Fact]
         public void SetTtl_IPv6_Throws_ObjectDisposed()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<ObjectDisposedException>(() =>
             {
                 GetDisposedSocket(AddressFamily.InterNetworkV6).Ttl = 1;
@@ -233,12 +235,14 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void MulticastLoopback_IPv6_Throws_ObjectDisposed()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<ObjectDisposedException>(() => GetDisposedSocket(AddressFamily.InterNetworkV6).MulticastLoopback);
         }
 
         [Fact]
         public void SetMulticastLoopback_IPv6_Throws_ObjectDisposed()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<ObjectDisposedException>(() =>
             {
                 GetDisposedSocket(AddressFamily.InterNetworkV6).MulticastLoopback = true;
@@ -264,6 +268,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support DualMode")]
         public void DualMode_Throws_ObjectDisposed()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<ObjectDisposedException>(() => GetDisposedSocket(AddressFamily.InterNetworkV6).DualMode);
         }
 
@@ -271,6 +276,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support DualMode")]
         public void SetDualMode_Throws_ObjectDisposed()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<ObjectDisposedException>(() =>
             {
                 GetDisposedSocket(AddressFamily.InterNetworkV6).DualMode = true;

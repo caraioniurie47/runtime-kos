@@ -24,6 +24,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(AddressFamily.InterNetworkV6)]
         public void Ctor_ValidAddressFamily_Succeeds(AddressFamily family)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(family == AddressFamily.InterNetworkV6);
             new UdpClient(family).Dispose();
         }
 
@@ -117,6 +118,7 @@ namespace System.Net.Sockets.Tests
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public void Ctor_IntAddressFamily_IPv6_CanSend()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             try
             {
                 using (var udpClient = new UdpClient(UnusedPort, AddressFamily.InterNetworkV6))
@@ -134,6 +136,7 @@ namespace System.Net.Sockets.Tests
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public void Ctor_IPEndPoint_CanSend()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true); // binds IPv6Any
             try
             {
                 using (var udpClient = new UdpClient(new IPEndPoint(IPAddress.IPv6Any, UnusedPort)))
@@ -275,7 +278,8 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no IP_MTU_DISCOVER or IP_DONTFRAG
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/51392", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         [SkipOnPlatform(TestPlatforms.Wasi, "Not supported on Wasi.")]
         public void DontFragment_Roundtrips()
@@ -296,6 +300,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Not supported on Wasi.")]
         public void MulticastLoopback_Roundtrips(AddressFamily addressFamily)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(addressFamily == AddressFamily.InterNetworkV6);
             using (var udpClient = new UdpClient(addressFamily))
             {
                 Assert.True(udpClient.MulticastLoopback);
@@ -573,6 +578,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public void Send_Receive_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             IPAddress address = ipv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
 
             using (var receiver = new UdpClient(new IPEndPoint(address, 0)))
@@ -637,6 +643,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public void Send_Available_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             IPAddress address = ipv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
 
             using (var receiver = new UdpClient(new IPEndPoint(address, 0)))
@@ -653,6 +660,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public void BeginEndSend_BeginEndReceive_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             IPAddress address = ipv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
             byte[] data = [1, 2, 3];
 
@@ -691,6 +699,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task SendAsync_ReceiveAsync_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             IPAddress address = ipv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
             byte[] data = [1, 2, 3];
 
@@ -730,6 +739,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task ReceiveAsync_Cancel_Throw(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             IPAddress address = ipv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
             
             using (var receiver = new UdpClient(new IPEndPoint(address, 0)))
@@ -802,6 +812,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task SendAsync_PreCanceled_Throws(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             IPAddress address = ipv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
 
             using (var receiver = new UdpClient(new IPEndPoint(address, 0)))
@@ -864,6 +875,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Not supported on Wasi.")]
         public void BeginSend_IPv6Socket_IPv4Dns_Success()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             using (var receiver = new UdpClient("127.0.0.1", DiscardPort))
             using (var sender = new UdpClient(AddressFamily.InterNetworkV6))
             {

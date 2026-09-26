@@ -1467,6 +1467,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support PortBlocker")]
         public async Task SendAsync_CanceledDuringOperation_Throws(bool ipv6)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(ipv6);
             const int CancelAfter = 200; // ms
             const int NumOfSends = 100;
             const int SendBufferSize = 1024;
@@ -1502,6 +1503,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support PortBlocker")]
         public async Task ReceiveAsync_CanceledDuringOperation_Throws(bool ipv6)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(ipv6);
             (Socket client, Socket server) = SocketTestExtensions.CreateConnectedSocketPair(ipv6);
             using (client)
             using (server)

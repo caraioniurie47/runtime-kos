@@ -124,12 +124,14 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void DontFragment_IPv6_Throws_NotSupported()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<NotSupportedException>(() => GetSocket(AddressFamily.InterNetworkV6).DontFragment);
         }
 
         [Fact]
         public void SetDontFragment_Throws_NotSupported()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<NotSupportedException>(() =>
             {
                 GetSocket(AddressFamily.InterNetworkV6).DontFragment = true;
@@ -175,6 +177,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void Connect_IPAddress_InvalidAddressFamily_Throws_NotSupported()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             Assert.Throws<NotSupportedException>(() => GetSocket(AddressFamily.InterNetwork).Connect(IPAddress.IPv6Loopback, 1));
             Assert.Throws<NotSupportedException>(() => GetSocket(AddressFamily.InterNetworkV6).Connect(IPAddress.Loopback, 1));
         }
@@ -621,6 +624,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public async Task Socket_Connect_IPv6AddressAsStringHost_Supported()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             using (Socket host = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp))
             {
                 host.Bind(new IPEndPoint(IPAddress.IPv6Loopback, 0));
@@ -673,6 +677,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public async Task Socket_ConnectAsync_IPv6AddressAsStringHost_Supported()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             using (Socket host = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp))
             {
                 host.Bind(new IPEndPoint(IPAddress.IPv6Loopback, 0));
@@ -1068,6 +1073,7 @@ namespace System.Net.Sockets.Tests
         [PlatformSpecific(TestPlatforms.Linux | TestPlatforms.Windows)]
         public void CanSetDontFragment_OnIPV6Address_DualModeSocket()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             using Socket socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp);
             socket.DualMode = true;
             socket.DontFragment = true;

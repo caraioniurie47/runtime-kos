@@ -367,6 +367,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void Socket_StaticConnectAsync_IPv6MappedIPv4_Success()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true); // connects a dual-mode socket
             using SocketTestServer server = SocketTestServer.SocketTestServerFactory(SocketImplementationType.Async, IPAddress.Loopback, out int port);
 
             SocketAsyncEventArgs args = new SocketAsyncEventArgs();

@@ -227,11 +227,12 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Theory]
+        [ConditionalTheory]
         [MemberData(nameof(LoopbacksAndAny))]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/107981", TestPlatforms.Wasi)]
         public async Task Connect_DatagramSockets_DontThrowConnectedException_OnSecondAttempt(IPAddress listenAt, IPAddress secondConnection)
         {
+            if (PlatformDetection.IsKasperskyOS) throw new SkipTestException("TODO-KOS(6m): connect() cannot dissolve a UDP association (AF_UNSPEC fails EAFNOSUPPORT, port 0 EADDRNOTAVAIL)");
             using Socket listener = new Socket(listenAt.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
             using Socket s = new Socket(listenAt.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
             listener.Bind(new IPEndPoint(listenAt, 0));
@@ -420,6 +421,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.Wasi, "Wasi doesn't support PortBlocker")]
         public async Task MultiConnect_DualMode_Preserved()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true); // a dual-mode socket is an IPv6 socket
             if (UsesEap) throw new SkipTestException("EAP does not support IPAddress[] connect");
 
             int port = -1;
@@ -732,6 +734,7 @@ namespace System.Net.Sockets.Tests
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))] // async SocketTestServer requires threads
         public async Task Connect_DualMode_MultiAddressFamilyConnect_RetrievedEndPoints_Success()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true); // a dual-mode socket is an IPv6 socket
             if (!SupportsMultiConnect)
                 return;
 

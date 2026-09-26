@@ -428,6 +428,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true, 2)]
         public void ReceiveSentMessages_ReuseEventArgs_Success(bool ipv4, int bufferMode)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             const int DatagramsToSend = 5;
             const int TimeoutMs = 30_000;
 

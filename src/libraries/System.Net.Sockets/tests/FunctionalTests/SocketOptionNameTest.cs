@@ -138,6 +138,7 @@ namespace System.Net.Sockets.Tests
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52124", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         public async Task MulticastInterface_Set_IPv6_AnyInterface_Succeeds()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             // On all platforms, index 0 means "any interface"
             await MulticastInterface_Set_IPv6_Helper(0);
         }
@@ -159,6 +160,7 @@ namespace System.Net.Sockets.Tests
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotWindowsNanoNorServerCore))] // Skip on Nano: https://github.com/dotnet/runtime/issues/26286
         public void MulticastTTL_Set_IPv6_Succeeds()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             using (Socket socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp))
             {
                 // This should not throw. We currently do not have good mechanism how to verify that the TTL/Hops is actually set.
@@ -175,6 +177,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(AddressFamily.InterNetworkV6)]
         public void Ttl_Set_Succeeds(AddressFamily af)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(af == AddressFamily.InterNetworkV6);
             using (Socket socket = new Socket(af, SocketType.Dgram, ProtocolType.Udp))
             {
                 short newTtl = socket.Ttl;
@@ -226,6 +229,7 @@ namespace System.Net.Sockets.Tests
         [Fact]
         public void MulticastInterface_Set_IPv6_InvalidIndex_Throws()
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(true);
             int interfaceIndex = 31415;
             using (Socket s = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp))
             {
@@ -234,7 +238,8 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Theory]
+        // KOS-NOT-LINUX: the NetBSD stack's poll() never reports POLLERR for a socket error
+        [ConditionalTheory(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [InlineData(false)]
         [InlineData(true)]
         [SkipOnPlatform(TestPlatforms.FreeBSD, "on FreeBSD Connect may or may not fail immediately based on timing.")]
@@ -470,10 +475,11 @@ namespace System.Net.Sockets.Tests
             int option = -1;
             if (PlatformDetection.IsKasperskyOS)
             {
-                // KOS-NOT-LINUX: KasperskyOS (Linux to .NET) has BSD's option numbers, and no SO_REUSEPORT.
+                // KOS-NOT-LINUX: KasperskyOS (Linux to .NET) has BSD's option numbers and BSD's rule: binding a UDP
+                // unicast address twice needs SO_REUSEPORT (TODO-KOS(6t): honoured by the stack, missing from the headers).
                 SOL_SOCKET = 0xffff;
-                const int SO_REUSEADDR = 0x0004;
-                option = SO_REUSEADDR;
+                const int SO_REUSEPORT = 0x200;
+                option = SO_REUSEPORT;
             }
             else if (OperatingSystem.IsLinux())
             {
@@ -531,6 +537,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(IPProtectionLevel.Unrestricted, AddressFamily.InterNetworkV6)]
         public void SetIPProtectionLevel_Unix(IPProtectionLevel level, AddressFamily family)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(family == AddressFamily.InterNetworkV6);
             using (var socket = new Socket(family, SocketType.Stream, ProtocolType.Tcp))
             {
                 Assert.Throws<PlatformNotSupportedException>(() => socket.SetIPProtectionLevel(level));
@@ -542,6 +549,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(AddressFamily.InterNetworkV6)]
         public void SetIPProtectionLevel_ArgumentException(AddressFamily family)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(family == AddressFamily.InterNetworkV6);
             using (var socket = new Socket(family, SocketType.Stream, ProtocolType.Tcp))
             {
                 AssertExtensions.Throws<ArgumentException>("level", () => socket.SetIPProtectionLevel(IPProtectionLevel.Unspecified));
@@ -555,6 +563,7 @@ namespace System.Net.Sockets.Tests
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52124", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         public void GetSetRawSocketOption_Roundtrips(AddressFamily family)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(family == AddressFamily.InterNetworkV6);
             int SOL_SOCKET;
             int SO_RCVBUF;
 
@@ -580,7 +589,8 @@ namespace System.Net.Sockets.Tests
             {
                 const int SetSize = 8192;
                 int ExpectedGetSize =
-                    OperatingSystem.IsLinux() ? SetSize * 2 : // Linux kernel documented to double the size
+                    // KOS-NOT-LINUX: the size is kept as set (BSD stack)
+                    OperatingSystem.IsLinux() && !PlatformDetection.IsKasperskyOS ? SetSize * 2 : // Linux kernel documented to double the size
                     SetSize;
 
                 socket.SetRawSocketOption(SOL_SOCKET, SO_RCVBUF, BitConverter.GetBytes(SetSize));

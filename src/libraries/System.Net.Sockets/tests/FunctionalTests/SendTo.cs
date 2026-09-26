@@ -191,6 +191,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task SendTo_DifferentEP_Success(bool ipv4)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(!ipv4);
             IPAddress address = ipv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
             IPEndPoint remoteEp = new IPEndPoint(address, 0);
 

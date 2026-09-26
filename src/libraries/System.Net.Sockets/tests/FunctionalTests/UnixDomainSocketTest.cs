@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.DotNet.RemoteExecutor;
 
+using Microsoft.DotNet.XUnitExtensions;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -390,6 +391,7 @@ namespace System.Net.Sockets.Tests
         [SkipOnPlatform(TestPlatforms.LinuxBionic, "SElinux blocks UNIX sockets in our CI environment")]
         public void UnixDomainSocketEndPoint_RemoteEndPointEqualsBindAddress(bool abstractAddress)
         {
+            if (abstractAddress && PlatformDetection.IsKasperskyOS) throw new SkipTestException("KOS-NOT-LINUX: no abstract AF_UNIX addresses");
             string serverAddress;
             string clientAddress;
             string expectedClientAddress;

@@ -436,6 +436,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(true)]
         public async Task SendFileAsync_CanceledDuringOperation_Throws(bool ipv6)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(ipv6);
             const int CancelAfter = 200; // ms
             const int NumOfSends = 100;
             const int SendBufferSize = 1024;

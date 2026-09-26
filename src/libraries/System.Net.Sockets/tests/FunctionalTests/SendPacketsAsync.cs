@@ -14,9 +14,13 @@ using Xunit.Abstractions;
 namespace System.Net.Sockets.Tests
 {
     [Collection(nameof(DisableParallelization))]
-    [ConditionalClass(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
+    [ConditionalClass(typeof(SendPacketsAsync), nameof(IsSupported))]
     public class SendPacketsAsync : IDisposable
     {
+        // TODO-KOS(6g): documented IPv6 API, stack built without IPv6
+        // Every test here serves and connects on IPv6Loopback. A class-level skip prints no reason.
+        public static bool IsSupported => PlatformDetection.IsMultithreadingSupported && Socket.OSSupportsIPv6;
+
         private readonly ITestOutputHelper _log;
 
         private IPAddress _serverAddress = IPAddress.IPv6Loopback;

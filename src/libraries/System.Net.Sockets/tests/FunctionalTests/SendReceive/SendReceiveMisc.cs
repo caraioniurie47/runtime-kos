@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.DotNet.XUnitExtensions;
 using Xunit;
 
 namespace System.Net.Sockets.Tests
@@ -79,6 +80,7 @@ namespace System.Net.Sockets.Tests
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public void SendIovMaxUdp_SuccessOrMessageSize()
         {
+            if (PlatformDetection.IsKasperskyOS) throw new SkipTestException("TODO-KOS(6v): IOV_MAX is 10, and more iovecs fail with EINVAL, not EMSGSIZE");
             // sending more than IOV_MAX segments causes EMSGSIZE on some platforms.
             // We handle this for stream sockets by truncating.
             // This test verifies we are not truncating non-stream sockets.
@@ -120,6 +122,7 @@ namespace System.Net.Sockets.Tests
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsMultithreadingSupported))]
         public async Task ReceiveIovMaxUdp_SuccessOrMessageSize()
         {
+            if (PlatformDetection.IsKasperskyOS) throw new SkipTestException("TODO-KOS(6v): IOV_MAX is 10, and more iovecs fail with EINVAL, not EMSGSIZE");
             // receiving more than IOV_MAX segments causes EMSGSIZE on some platforms.
             // We handle this for stream sockets by truncating.
             // This test verifies we are not truncating non-stream sockets.

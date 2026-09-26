@@ -9,6 +9,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.DotNet.RemoteExecutor;
+using Microsoft.DotNet.XUnitExtensions;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -105,6 +106,7 @@ namespace System.Net.Sockets.Tests
         [ConditionalTheory(typeof(CreateSocket), nameof(SupportsRawSockets))]
         public void Ctor_Raw_Supported_Success(AddressFamily addressFamily, ProtocolType protocolType)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(addressFamily == AddressFamily.InterNetworkV6);
             using (new Socket(addressFamily, SocketType.Raw, protocolType))
             {
             }
@@ -265,7 +267,7 @@ namespace System.Net.Sockets.Tests
             using var _ = new Socket(new SafeSocketHandle(new IntPtr(fd1), ownsHandle));
         }
 
-        [Theory]
+        [ConditionalTheory]
         [InlineData(AddressFamily.ControllerAreaNetwork, SocketType.Raw, ProtocolType.Unspecified)]
         [InlineData(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)]
         [InlineData(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)]
@@ -278,6 +280,7 @@ namespace System.Net.Sockets.Tests
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52124", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         public void Ctor_SafeHandle_BasicPropertiesPropagate_Success(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
         {
+            if (socketType == SocketType.Raw && addressFamily == AddressFamily.InterNetwork && PlatformDetection.IsKasperskyOS) throw new SkipTestException("KOS-NOT-LINUX: no SO_PROTOCOL, so a raw socket's protocol reads Unknown");
             if(OperatingSystem.IsWasi() && addressFamily == AddressFamily.Unix)
             {
                 // WASI doesn't support Unix domain sockets.
@@ -405,6 +408,7 @@ namespace System.Net.Sockets.Tests
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52124", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         public async Task Ctor_SafeHandle_Tcp_SendReceive_Success(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
         {
+            SocketTestExtensions.SkipIfIPv6Unsupported(addressFamily == AddressFamily.InterNetworkV6);
             using var orig = new Socket(addressFamily, socketType, protocolType);
             using var listener = new Socket(addressFamily, socketType, protocolType);
             listener.Bind(new IPEndPoint(addressFamily == AddressFamily.InterNetwork ? IPAddress.Loopback : IPAddress.IPv6Loopback, 0));
@@ -596,7 +600,8 @@ namespace System.Net.Sockets.Tests
             internal rtmsg rtm;
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: no netlink (socket(PF_NETLINK) fails)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux)]
         public unsafe void Ctor_SafeHandle_UnknownSocket_Success()
         {

@@ -19,7 +19,9 @@ namespace System.Net.Sockets.Tests
         {
             if (usesIPv6 && !Socket.OSSupportsIPv6)
             {
-                throw Xunit.Sdk.SkipException.ForSkip("IPv6 is not supported");
+                throw Xunit.Sdk.SkipException.ForSkip(PlatformDetection.IsKasperskyOS ?
+                    "TODO-KOS(6g): documented IPv6 API, stack built without IPv6" :
+                    "IPv6 is not supported");
             }
         }
 

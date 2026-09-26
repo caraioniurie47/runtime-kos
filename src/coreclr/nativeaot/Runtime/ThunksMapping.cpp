@@ -132,7 +132,13 @@ EXTERN_C HRESULT QCALLTYPE RhAllocateThunksMapping(void** ppThunksSection)
     void * pDataSection = (uint8_t*)pNewMapping + thunksMapSize;
 
     if (!PalVirtualProtect(pDataSection, thunksMapSize, PAGE_READWRITE) ||
+#if defined(__KOS__) // KOS-DOC(posix_uns_ifaces): no write+execute pages; the stubs are written RW, made RX below
+        // mprotect(PROT_READ|PROT_WRITE|PROT_EXEC) fails with ENOMEM on KOS (the docs say ENOTSUP). Nothing runs the stubs
+        // before the PAGE_EXECUTE_READ step after they are written, so they need not be executable while being written.
+        !PalVirtualProtect(pThunksSection, thunksMapSize, PAGE_READWRITE))
+#else
         !PalVirtualProtect(pThunksSection, thunksMapSize, PAGE_EXECUTE_READWRITE))
+#endif
     {
         PalVirtualFree(pNewMapping, THUNKS_MAP_SIZE * 2);
         return E_FAIL;

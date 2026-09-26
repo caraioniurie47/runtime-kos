@@ -29,6 +29,13 @@ namespace System.IO.Pipes
 
         private static int AccessRightsFromDirection(PipeDirection _) => 0;
 
+        // KOS-DOC(posix_ifaces_impl_features): AF_UNIX socket files live in the network VFS's own file system
+        // On KasperskyOS bind() creates the socket file in the network VFS program's file system, which stat() through the
+        // program's file system VFS never sees, so the check below would retry forever. The libraries build as Linux, so
+        // the OS is told apart at run time, as the tests' PlatformDetection.IsKasperskyOS does.
+        private static readonly bool s_socketFilesVisibleToStat =
+            !RuntimeInformation.OSDescription.StartsWith("KasperskyOS", StringComparison.Ordinal);
+
         private bool TryConnect(int _ /* timeout */)
         {
             // timeout isn't used as Connect will be very fast,
@@ -42,7 +49,8 @@ namespace System.IO.Pipes
             // socket.Connect so they surface their specific exceptions.
             // TOCTOU note: the file could appear between this check and the next retry
             // iteration, but ConnectInternal's polling loop handles that naturally.
-            if (Interop.Sys.Stat(_normalizedPipePath!, out Interop.Sys.FileStatus _) != 0 &&
+            if (s_socketFilesVisibleToStat &&
+                Interop.Sys.Stat(_normalizedPipePath!, out Interop.Sys.FileStatus _) != 0 &&
                 Interop.Sys.GetLastErrorInfo().Error == Interop.Error.ENOENT)
             {
                 return false;

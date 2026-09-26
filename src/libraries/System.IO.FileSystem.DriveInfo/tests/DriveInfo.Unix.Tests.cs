@@ -66,7 +66,8 @@ namespace System.IO.FileSystem.Tests
             var driveName = PlatformDetection.IsAndroid || PlatformDetection.IsLinuxBionic ? "/data" : "/";
             var driveInfo = new DriveInfo(driveName);
             var format = driveInfo.DriveFormat;
-            Assert.Equal(PlatformDetection.IsBrowser ? DriveType.Unknown : DriveType.Fixed, driveInfo.DriveType);
+            // TODO-KOS-IMAGE: the test image's root is a RAM file system
+            Assert.Equal(PlatformDetection.IsBrowser ? DriveType.Unknown : PlatformDetection.IsKasperskyOS ? DriveType.Ram : DriveType.Fixed, driveInfo.DriveType);
             Assert.True(driveInfo.IsReady);
             Assert.Equal(driveName, driveInfo.Name);
             Assert.Equal(driveName, driveInfo.ToString());
@@ -78,6 +79,11 @@ namespace System.IO.FileSystem.Tests
                 Assert.True(driveInfo.AvailableFreeSpace == 0);
                 Assert.True(driveInfo.TotalFreeSpace == 0);
                 Assert.True(driveInfo.TotalSize == 0);
+            }
+            else if (PlatformDetection.IsKasperskyOS)
+            {
+                // TODO-KOS(6s): VfsRamFs's statvfs reports no free space, and the space in use as the size
+                Assert.True(driveInfo.TotalSize > 0);
             }
             else
             {

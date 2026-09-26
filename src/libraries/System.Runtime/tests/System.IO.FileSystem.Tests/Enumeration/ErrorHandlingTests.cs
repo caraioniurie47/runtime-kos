@@ -81,10 +81,14 @@ namespace System.IO.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // TODO-KOS(6l): readdir on a removed directory fails with ENOENT (allowed by POSIX) instead of ending the stream
+        [ConditionalFact]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/55821", TestPlatforms.Android)]
         public void DeleteDirectoryAfterOpening()
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6l): readdir on a removed directory fails with ENOENT (allowed by POSIX) instead of ending the stream");
+
+
             // We shouldn't prevent the directory from being deleted, even though we've
             // opened (and are holding) the handle. On Windows this means we've opened
             // the handle with file share of delete.

@@ -12,11 +12,13 @@ using Xunit;
 [SkipOnPlatform(TestPlatforms.Android | TestPlatforms.Browser | TestPlatforms.iOS | TestPlatforms.MacCatalyst | TestPlatforms.tvOS, "Not supported on Android, Browser, iOS, MacCatalyst, or tvOS.")]
 public class TermInfoTests
 {
-    // TODO-KOS-IMAGE: no terminfo database in the image
-    [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
+    [ConditionalFact]
     [PlatformSpecific(TestPlatforms.AnyUnix)]  // Tests TermInfo
     public void VerifyInstalledTermInfosParse()
     {
+        if (PlatformDetection.IsKasperskyOS)
+            throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS-IMAGE: no terminfo database in the image");
+
         bool foundAtLeastOne = false;
         List<Exception>? verifyExceptions = null;
 

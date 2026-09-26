@@ -770,12 +770,15 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // TODO-KOS(6q): SendBufferSize, ReceiveBufferSize = 0 fail with EINVAL, as on BSD-like stacks
+        [ConditionalFact]
         [SkipOnPlatform(TestPlatforms.OSX | TestPlatforms.FreeBSD, "SendBufferSize, ReceiveBufferSize = 0 not supported on BSD like stacks.")]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/52124", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         [ActiveIssue("https://github.com/dotnet/runtime/issues/107981", TestPlatforms.Wasi)]
         public async Task SendRecv_NoBuffering_Success()
         {
+            if (PlatformDetection.IsKasperskyOS)
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6q): SendBufferSize, ReceiveBufferSize = 0 fail with EINVAL, as on BSD-like stacks");
+
             if (UsesSync) return;
 
             using (Socket listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))

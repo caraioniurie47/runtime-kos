@@ -115,6 +115,22 @@ static pthread_mutex_t s_groupLock = PTHREAD_MUTEX_INITIALIZER;
 // Distinct name: avoids -Wmissing-prototypes (illumos) and clashing with grp.h's decl (Emscripten).
 static int pal_getgrouplist(const char *uname, gid_t agroup, gid_t *groups, int *groupCount)
 {
+#if defined(__KOS__)
+    // KasperskyOS (CE SDK 1.4.0.102) grp.h declares setgrent, getgrent and endgrent, but no SDK library defines
+    // them, and there is no group database: report the primary group only, with getgrouplist's contract.
+    (void)uname;
+    if (*groupCount < 1)
+    {
+        *groupCount = 1;
+        return -1;
+    }
+    if (groups)
+    {
+        groups[0] = agroup;
+    }
+    *groupCount = 1;
+    return 0;
+#else
     int ngroups = 1;
     int maxgroups = *groupCount;
 
@@ -176,6 +192,7 @@ static int pal_getgrouplist(const char *uname, gid_t agroup, gid_t *groups, int 
     endgrent();
     *groupCount = ngroups;
     return result;
+#endif // __KOS__
 }
 #endif
 

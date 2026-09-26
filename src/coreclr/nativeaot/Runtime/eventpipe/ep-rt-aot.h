@@ -9,6 +9,9 @@
 #ifdef TARGET_UNIX
 #include <sys/time.h>
 #endif
+#if defined(__KOS__) // KOS-NOT-LINUX: strcasecmp is declared in <strings.h> (POSIX), which <string.h> does not include
+#include <strings.h>
+#endif
 
 #include <minipal/utf8.h>
 #include <minipal/time.h>

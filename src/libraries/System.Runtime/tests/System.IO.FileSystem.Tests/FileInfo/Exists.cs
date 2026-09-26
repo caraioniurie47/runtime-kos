@@ -88,7 +88,7 @@ namespace System.IO.Tests
             Assert.False(di.Exists);
         }
 
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: mkfifo is a stub (ENOSYS)
         [PlatformSpecific(TestPlatforms.AnyUnix & ~TestPlatforms.Browser & ~TestPlatforms.iOS & ~TestPlatforms.tvOS)]  // Uses P/Invokes
         public void TrueForNonRegularFile()
         {

@@ -24,7 +24,7 @@ namespace System.IO.Tests
             Assert.Equal(FileHandleType.Directory, handle.Type);
         }
 
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: mkfifo is a stub (ENOSYS)
         [SkipOnPlatform(TestPlatforms.iOS | TestPlatforms.tvOS, "iOS/tvOS do not support creating FIFOs (named pipes) with mkfifo")]
         public async Task GetFileType_NamedPipe()
         {

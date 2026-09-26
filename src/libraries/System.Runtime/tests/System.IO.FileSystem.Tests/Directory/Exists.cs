@@ -388,7 +388,7 @@ namespace System.IO.Tests
             Assert.False(Directory.Exists(IOServices.RemoveTrailingSlash(IOServices.AddTrailingSlashIfNeeded(path))));
         }
 
-        [Fact]
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))] // KasperskyOS: mkfifo is a stub (ENOSYS)
         [PlatformSpecific(TestPlatforms.AnyUnix & ~TestPlatforms.Browser & ~TestPlatforms.iOS & ~TestPlatforms.tvOS)]  // Makes call to native code (libc)
         public void FalseForNonRegularFile()
         {

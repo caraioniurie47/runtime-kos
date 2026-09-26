@@ -90,6 +90,6 @@ namespace System.IO.Tests
             RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
 
         // Mobile platforms don't support Process.Start.
-        private static bool IsGetAllocatedSizeImplemented => !PlatformDetection.IsMobile;
+        private static bool IsGetAllocatedSizeImplemented => !PlatformDetection.IsMobile && PlatformDetection.IsStartingProcessesSupported;
     }
 }

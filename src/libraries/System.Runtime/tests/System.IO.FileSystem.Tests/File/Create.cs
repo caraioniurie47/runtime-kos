@@ -188,7 +188,7 @@ namespace System.IO.Tests
             DirectoryInfo testDir = Directory.CreateDirectory(GetTestFilePath());
 
             AssertExtensions.ThrowsAny<IOException, DirectoryNotFoundException, PathTooLongException>(() =>
-              Create(Path.Combine(testDir.FullName, new string('a', 300))));
+              Create(Path.Combine(testDir.FullName, new string('a', Math.Max(300, IOInputs.MaxComponent + 1)))));
         }
 
         [Fact]

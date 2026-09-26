@@ -98,7 +98,8 @@ namespace System
                 int p = s_isPrivilegedProcess;
                 if (p == -1)
                 {
-                    s_isPrivilegedProcess = p = AdminHelpers.IsProcessElevated() ? 1 : 0;
+                    // KasperskyOS reports uid 0 but has no superuser: file permissions apply to every process.
+                    s_isPrivilegedProcess = p = !IsKasperskyOS && AdminHelpers.IsProcessElevated() ? 1 : 0;
                 }
 
                 return p == 1;
@@ -514,7 +515,8 @@ namespace System
         private static readonly Lazy<bool> s_fileLockingDisabled = new Lazy<bool>(()
             => (bool?)Type.GetType("Microsoft.Win32.SafeHandles.SafeFileHandle")?.GetProperty("DisableFileLocking", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null) == true);
 
-        public static bool IsFileLockingEnabled => IsWindows || !s_fileLockingDisabled.Value;
+        // KasperskyOS has no flock (no sys/file.h): System.Native's FLock fails with ENOTSUP, which FileShare ignores.
+        public static bool IsFileLockingEnabled => IsWindows || (!s_fileLockingDisabled.Value && !IsKasperskyOS);
 
         private static bool GetIsInContainer()
         {

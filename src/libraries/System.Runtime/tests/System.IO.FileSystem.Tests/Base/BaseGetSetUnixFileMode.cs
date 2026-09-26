@@ -29,9 +29,10 @@ namespace System.IO.Tests
         // returns EPERM when trying to setgid on directories, and for files
         // chmod filters out the bit.
         // We skip the tests with setgid.
-        private static bool CanSetGroup => !PlatformDetection.IsBsdLike;
+        // KasperskyOS (VfsRamFs) clears SetGroup and SetUser on directories.
+        private static bool CanSetGroup => !PlatformDetection.IsBsdLike && !PlatformDetection.IsKasperskyOS;
 
-        private static bool CanSetUser => !PlatformDetection.IstvOS;
+        private static bool CanSetUser => !PlatformDetection.IstvOS && !PlatformDetection.IsKasperskyOS;
 
         public static IEnumerable<object[]> AllowedUnixFileModes
         {

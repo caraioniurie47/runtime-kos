@@ -73,7 +73,8 @@ namespace System.IO.Tests
             Assert.InRange(GetCreationTimeUtc(path), DateTime.MinValue, GetLastWriteTimeUtc(path));
         }
 
-        [Fact]
+        // KasperskyOS stores a birth time, which setting the times does not change, so CreationTime is not synthesized
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         [PlatformSpecific(TestPlatforms.Linux)]
         public async Task CreationTimeSet_GetReturnsExpected_WhenNotInFuture()
         {

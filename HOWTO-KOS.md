@@ -341,15 +341,29 @@ KasperskyOS console.
   flow, and methods compiled fully interruptible (debuggable code).
 - **Files live in RAM.** `VfsRamFs` mounts a RAM file system at `/tmp`, emptied at every boot; the
   showcase uses only `/tmp`, so other paths are untried.
+- **The program has no path.** It is loaded from the image and there is no procfs, so
+  `AppContext.BaseDirectory` is empty (by the source, `Environment.ProcessPath` is null too). A file looked
+  up "beside the app" resolves against the working directory, `/`. Files the app needs at run time go
+  into the image's ROMFS, which keeps file names only (no directories) and which the app sees only where a
+  VFS program mounts it (`romfs /romfs romfs ro` among VfsRamFs's `EXTRA_ARGS`, as the test images do), or
+  are written to `/tmp` at run time.
+- **No time zone database.** .NET reads the tzdata files under `/usr/share/zoneinfo`, which the image
+  lacks, so looking up a zone such as `Europe/London` fails. An app that needs zones ships the files it
+  needs and sets `TZDIR` to their directory in its environment (`init.yaml`); not tried on KasperskyOS.
 - **Sockets: TCP over IP addresses is what was tried.** KasperskyOS has neither epoll nor kqueue, so
   System.Native's socket event port for it is built on `poll()`: once the first socket is created, each
   socket event thread wakes at least every 10 ms, and a socket registered meanwhile is polled up to
   10 ms later. That `poll()` takes at most 512 descriptors per call; the port polls more in chunks,
   which nothing has exercised yet. The showcase runs `Socket`, `TcpListener`, `TcpClient` and `NetworkStream`, blocking and
   `*Async`, the web server sample runs `HttpListener`, and `HttpClient` runs over HTTPS to loopback; UDP was not
-  tried. Host names resolve through VfsNet, whose default DNS server is 8.8.8.8 (a probe resolved
-  `example.com` under QEMU's user networking); `/etc/hosts` was not tried. On SDK 1.4.0.102 `recv()` fails with `EINVAL` for an 81920-byte buffer and works with
-  65536 bytes, so System.Native asks for at most 65536 bytes per read. In an
+  tried. KasperskyOS has no IPv6: creating an `AF_INET6` socket fails with `EAFNOSUPPORT`, so use IPv4
+  addresses (`IPAddress.Loopback`, not `IPv6Loopback` or dual-mode sockets). Host names resolve through
+  VfsNet, from its `/etc/hosts` or its DNS server, by default 8.8.8.8 (a probe resolved `example.com` under
+  QEMU's user networking). Without a hosts file not even `localhost` resolves, so the sample image gives
+  VfsNet one in its ROMFS (`kos-image/resources/romfs/etc/hosts`, `127.0.0.1 localhost`); an `/etc/hosts`
+  written by the program itself is not VfsNet's and changes nothing. On SDK 1.4.0.102 `recv()` once
+  failed with `EINVAL` for an 81920-byte buffer (a C probe on 2026-09-24 did not reproduce it), so
+  System.Native asks for at most 65536 bytes per read. In an
   image with `VfsRamFs` but no `VfsNet`, the socket calls go to libc's stub: creating a socket throws
   `SocketException` ("Unknown socket error"), and the showcase reports its sockets section as `SKIP`.
 - **Without a VFS program, no files or stdout.** In an image without one, each program's libc falls back

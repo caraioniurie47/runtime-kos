@@ -350,6 +350,7 @@ else()
   # OpenBSD marks the main executable's read-only segments immutable (mimmutable) at load,
   # so the runtime cannot mprotect the read-only GS cookie page to writable to initialize it.
   # Keep the cookie in writable memory there, like Apple.
+  # TODO-KOS(8d): mprotect of a read-only image segment to R|W fails with EACCES, so InitGSCookie would fail startup
   if(NOT CLR_CMAKE_TARGET_APPLE AND NOT CLR_CMAKE_TARGET_ARCH_WASM AND NOT CLR_CMAKE_TARGET_OPENBSD AND NOT CLR_CMAKE_TARGET_KOS)
     add_definitions(-DFEATURE_READONLY_GS_COOKIE)
   endif()

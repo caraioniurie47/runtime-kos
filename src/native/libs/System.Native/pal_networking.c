@@ -704,8 +704,11 @@ int32_t SystemNative_GetDomainName(uint8_t* name, int32_t nameLength)
     // Copy the domain name
     SafeStringCopy((char*)name, namelen, uts.domainname);
     return 0;
-#elif defined(__HAIKU__)
+#elif defined(__HAIKU__) || defined(__KOS__) // KOS-NOT-LINUX: no getdomainname and no NIS domain; report none
     // Haiku does not support NIS domains.
+    // KasperskyOS neither: no SDK library defines getdomainname and no header declares it. An empty name is what .NET
+    // reports on Linux when none is set (Interop.GetDomainName.cs maps "(none)" to ""), so IPGlobalProperties.DomainName
+    // returns "" instead of throwing InvalidOperationException.
     (void)nameLength;
     *name = '\0';
     return 0;

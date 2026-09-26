@@ -163,8 +163,8 @@ The .NET Foundation licenses this file to you under the MIT license.
       <NetCoreAppNativeLibrary Include="System.IO.Compression.Native" />
       <NetCoreAppNativeLibrary Include="System.Net.Security.Native" Condition="!$(_targetOS.StartsWith('tvos')) and '$(_linuxLibcFlavor)' != 'bionic' and '$(TargetsKOS)' != 'true'" />
       <NetCoreAppNativeLibrary Include="System.Security.Cryptography.Native.Apple" Condition="'$(_IsApplePlatform)' == 'true'" />
-      <!-- No OpenSSL on Apple platforms, Android or KOS -->
-      <NetCoreAppNativeLibrary Include="System.Security.Cryptography.Native.OpenSsl" Condition="'$(StaticOpenSslLinking)' != 'true' and '$(_IsApplePlatform)' != 'true' and '$(_targetOS)' != 'android' and '$(TargetsKOS)' != 'true'" />
+      <!-- No OpenSSL on Apple platforms or Android -->
+      <NetCoreAppNativeLibrary Include="System.Security.Cryptography.Native.OpenSsl" Condition="'$(StaticOpenSslLinking)' != 'true' and '$(_IsApplePlatform)' != 'true' and '$(_targetOS)' != 'android'" />
       <NetCoreAppNativeLibrary Include="System.Security.Cryptography.Native.Android" Condition="'$(_targetOS)' == 'android'" />
       <!-- KOS links ICU statically from the framework native path, dependents first: i18n needs uc, uc needs data -->
       <NetCoreAppNativeLibrary Include="icui18n" Condition="'$(TargetsKOS)' == 'true' and '$(InvariantGlobalization)' != 'true'" />
@@ -217,6 +217,12 @@ The .NET Foundation licenses this file to you under the MIT license.
     </ItemGroup>
 
     <ItemGroup Condition="'$(StaticOpenSslLinking)' != 'true' and Exists('$(IlcSdkPath)nonportable.txt')">
+      <NativeSystemLibrary Include="ssl" />
+      <NativeSystemLibrary Include="crypto" />
+    </ItemGroup>
+
+    <!-- KOS: the SDK's static libssl.a and libcrypto.a, which the KOS build of the OpenSSL shim is compiled against -->
+    <ItemGroup Condition="'$(TargetsKOS)' == 'true'">
       <NativeSystemLibrary Include="ssl" />
       <NativeSystemLibrary Include="crypto" />
     </ItemGroup>

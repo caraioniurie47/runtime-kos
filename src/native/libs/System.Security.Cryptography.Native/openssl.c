@@ -22,6 +22,27 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__KOS__)
+#include <errno.h>
+#include <kos/random/random_api.h>
+#include <strings.h> // strncasecmp: KOS libc declares it only here, glibc in string.h too
+
+// The KOS SDK's libcrypto.a seeds its DRBG through getentropy(), a weak reference that no SDK library
+// defines. It is defined in this file because CryptoNative_EnsureOpenSslInitialized is always linked,
+// and a weak reference alone does not pull an archive member into the link.
+int getentropy(void* buffer, size_t length);
+int getentropy(void* buffer, size_t length)
+{
+    if (KosRandomGenerate(length, buffer) != rcOk)
+    {
+        errno = EIO;
+        return -1;
+    }
+
+    return 0;
+}
+#endif
+
 c_static_assert(CRYPTO_EX_INDEX_X509 == 3);
 c_static_assert(CRYPTO_EX_INDEX_SSL_SESSION == 2);
 

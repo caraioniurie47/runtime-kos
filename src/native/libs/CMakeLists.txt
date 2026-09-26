@@ -160,8 +160,10 @@ if (CLR_CMAKE_TARGET_UNIX OR CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
     add_subdirectory(System.Globalization.Native)
 
     if (CLR_CMAKE_TARGET_KOS)
-        # System.Net.Security.Native is intentionally disabled
-        # System.Security.Cryptography.Native is intentionally disabled
+        # No System.Net.Security.Native: the KOS SDK has no GSSAPI, so NTLM is managed (see UseManagedNtlm)
+        # OpenSSL comes from the SDK's static libcrypto.a/libssl.a; there is no dlopen, so link it directly
+        set(FEATURE_DISTRO_AGNOSTIC_SSL 0)
+        add_subdirectory(System.Security.Cryptography.Native)
     elseif (CLR_CMAKE_TARGET_BROWSER OR CLR_CMAKE_TARGET_WASI)
         # skip for now
     elseif (CLR_CMAKE_TARGET_APPLE)

@@ -1,11 +1,16 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Numerics;
 using System.Runtime;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -92,6 +97,68 @@ Section("Files and stdout", () =>
 });
 
 Section("TCP sockets", () => TcpTour(o).GetAwaiter().GetResult());
+
+Section("Cryptography with OpenSSL", () =>
+{
+    // The KOS SDK's static libcrypto.a and libssl.a, linked into this binary.
+    if (OperatingSystem.IsLinux())
+    {
+        o.WriteLine($"  OpenSSL version number 0x{SafeEvpPKeyHandle.OpenSslVersion:X}");
+    }
+
+    Check(Convert.ToHexStringLower(SHA256.HashData("abc"u8)) ==
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256(\"abc\") is the FIPS 180-2 value");
+    Check(Convert.ToHexStringLower(HMACSHA256.HashData("Jefe"u8, "what do ya want for nothing?"u8)) ==
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", "HMAC-SHA256 is RFC 4231 test case 2");
+
+    byte[] key = RandomNumberGenerator.GetBytes(32);
+    Check(!key.AsSpan().SequenceEqual(RandomNumberGenerator.GetBytes(32)), "two 32-byte random draws differ");
+
+    byte[] plain = "sensor 7: 21.5 C"u8.ToArray();
+    byte[] nonce = RandomNumberGenerator.GetBytes(12), sealedText = new byte[plain.Length], tag = new byte[16], opened = new byte[plain.Length];
+    using (var aes = new AesGcm(key, tag.Length))
+    {
+        aes.Encrypt(nonce, plain, sealedText, tag);
+        aes.Decrypt(nonce, sealedText, tag, opened);
+        Check(opened.AsSpan().SequenceEqual(plain), "AES-256-GCM decrypts what it encrypted");
+        sealedText[0] ^= 1;
+        bool rejected = false;
+        try
+        {
+            aes.Decrypt(nonce, sealedText, tag, opened);
+        }
+        catch (AuthenticationTagMismatchException)
+        {
+            rejected = true;
+        }
+        Check(rejected, "AES-GCM rejects a modified ciphertext");
+    }
+
+    var clock = Stopwatch.StartNew();
+    using RSA rsa = RSA.Create(2048);
+    byte[] signature = rsa.SignData(plain, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+    o.WriteLine($"  RSA-2048 key generated and data signed (PSS) in {clock.ElapsedMilliseconds} ms");
+    Check(rsa.VerifyData(plain, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss), "the RSA-PSS signature verifies");
+
+    using ECDiffieHellman alice = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+    using ECDiffieHellman bob = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+    Check(alice.DeriveKeyFromHash(bob.PublicKey, HashAlgorithmName.SHA256).AsSpan()
+        .SequenceEqual(bob.DeriveKeyFromHash(alice.PublicKey, HashAlgorithmName.SHA256)), "ECDH P-256: both sides derive the same key");
+
+    // KOS has no GSSAPI, so NTLM is .NET's managed implementation (the KOS targets set it).
+    using var ntlm = new NegotiateAuthentication(new NegotiateAuthenticationClientOptions
+    {
+        Package = "NTLM",
+        Credential = new NetworkCredential("user", "password", "DOMAIN"),
+        TargetName = "HTTP/server.example",
+    });
+    byte[]? negotiate = ntlm.GetOutgoingBlob(ReadOnlySpan<byte>.Empty, out NegotiateAuthenticationStatusCode status);
+    o.WriteLine($"  NTLM client, first message: {status}, {negotiate?.Length ?? 0} bytes");
+    Check(status == NegotiateAuthenticationStatusCode.ContinueNeeded && negotiate is not null &&
+        negotiate.AsSpan().StartsWith("NTLMSSP\0"u8), "NTLM produces a negotiate message without GSSAPI");
+});
+
+Section("HTTPS over loopback", () => HttpsTour(o).GetAwaiter().GetResult());
 
 Section("Globalization with ICU", () =>
 {
@@ -481,6 +548,106 @@ static async Task AsyncTour(TextWriter o)
     }
     o.WriteLine($"  PeriodicTimer: {ticks} ticks of 100 ms in {clock.ElapsedMilliseconds} ms");
     Check(clock.ElapsedMilliseconds >= 450, "the timer does not fire early");
+}
+
+static async Task HttpsTour(TextWriter o)
+{
+    try
+    {
+        new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp).Dispose();
+    }
+    catch (SocketException e) when (e.SocketErrorCode == SocketError.SocketError)
+    {
+        Skip($"no network ({e.Message}); the image needs a network VFS program, see HOWTO-KOS.md");
+    }
+
+    // A test CA and a server certificate for 127.0.0.1 that it signs, both made here.
+    DateTimeOffset now = DateTimeOffset.UtcNow;
+    using ECDsa caKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    var caRequest = new CertificateRequest("CN=showcase-kos test CA", caKey, HashAlgorithmName.SHA256);
+    caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+    caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+    using X509Certificate2 ca = caRequest.CreateSelfSigned(now.AddDays(-1), now.AddDays(30));
+
+    using ECDsa serverKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    var serverRequest = new CertificateRequest("CN=127.0.0.1", serverKey, HashAlgorithmName.SHA256);
+    var names = new SubjectAlternativeNameBuilder();
+    names.AddIpAddress(IPAddress.Loopback);
+    serverRequest.CertificateExtensions.Add(names.Build());
+    serverRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+    serverRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], false));
+    using X509Certificate2 issued = serverRequest.Create(ca, now.AddHours(-1), now.AddDays(7), RandomNumberGenerator.GetBytes(8));
+    using X509Certificate2 serverCertificate = issued.CopyWithPrivateKey(serverKey);
+
+    using var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    string url = $"https://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/status";
+
+    // Trusting exactly the test CA: OpenSSL still builds and checks the chain, and the host name is checked too.
+    var trusting = new SocketsHttpHandler();
+    trusting.SslOptions.CertificateChainPolicy = new X509ChainPolicy
+    {
+        TrustMode = X509ChainTrustMode.CustomRootTrust,
+        RevocationMode = X509RevocationMode.NoCheck,
+    };
+    trusting.SslOptions.CertificateChainPolicy.CustomTrustStore.Add(ca);
+    using (var client = new HttpClient(trusting))
+    {
+        Task<(SslProtocols, TlsCipherSuite)> server = ServeOnce(listener, serverCertificate);
+        var clock = Stopwatch.StartNew();
+        string body = await client.GetStringAsync(url);
+        (SslProtocols protocol, TlsCipherSuite cipherSuite) = await server;
+        o.WriteLine($"  GET {url} in {clock.ElapsedMilliseconds} ms: \"{body}\"");
+        o.WriteLine($"  negotiated {protocol}, {cipherSuite}");
+        Check(body == "hello over TLS; the request was GET /status HTTP/1.1", "the HTTPS response body arrived");
+        Check(protocol is SslProtocols.Tls12 or SslProtocols.Tls13, "TLS 1.2 or 1.3 negotiated");
+    }
+
+    // The same server certificate with the default trust (the image has no CA certificates): refused.
+    using (var client = new HttpClient())
+    {
+        Task<(SslProtocols, TlsCipherSuite)> server = ServeOnce(listener, serverCertificate);
+        Exception? refused = null;
+        try
+        {
+            await client.GetStringAsync(url);
+        }
+        catch (HttpRequestException e)
+        {
+            refused = e;
+        }
+        try
+        {
+            await server;
+        }
+        catch (Exception e) when (e is AuthenticationException or IOException)
+        {
+            // The client closed the connection during the handshake.
+        }
+        o.WriteLine($"  default trust: {refused?.InnerException?.GetType().Name}: {refused?.InnerException?.Message}");
+        Check(refused?.InnerException is AuthenticationException, "a certificate from an untrusted CA is refused");
+    }
+
+    // One HTTP/1.1 exchange over TLS on the next accepted connection; returns what the handshake negotiated.
+    static async Task<(SslProtocols, TlsCipherSuite)> ServeOnce(TcpListener listener, X509Certificate2 certificate)
+    {
+        using TcpClient peer = await listener.AcceptTcpClientAsync();
+        using var tls = new SslStream(peer.GetStream());
+        await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate });
+        var request = new StringBuilder();
+        var buffer = new byte[4096];
+        int count;
+        while (!request.ToString().Contains("\r\n\r\n") && (count = await tls.ReadAsync(buffer)) > 0)
+        {
+            request.Append(Encoding.ASCII.GetString(buffer, 0, count));
+        }
+        byte[] body = Encoding.UTF8.GetBytes($"hello over TLS; the request was {request.ToString().Split("\r\n")[0]}");
+        await tls.WriteAsync(Encoding.ASCII.GetBytes(
+            $"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n"));
+        await tls.WriteAsync(body);
+        await tls.ShutdownAsync();
+        return (tls.SslProtocol, tls.NegotiatedCipherSuite);
+    }
 }
 
 static async Task TcpTour(TextWriter o)

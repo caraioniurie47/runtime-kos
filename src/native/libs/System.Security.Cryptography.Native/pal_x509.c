@@ -10,6 +10,9 @@
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
+#if defined(__KOS__)
+#include <strings.h> // strncasecmp: KOS libc declares it only here, glibc in string.h too
+#endif
 
 #include "openssl.h"
 

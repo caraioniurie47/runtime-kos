@@ -31,6 +31,10 @@
   <ItemGroup Condition="'$(TargetsKOS)' == 'true' and '$(_IcuDir)' != ''">
     <NativeCMakeArg Include="-cmakeargs &quot;-DCMAKE_ICU_DIR=$(_IcuDir)&quot;" />
   </ItemGroup>
+  <!-- KOS: OpenSSL headers from build.sh's -opensslincludedir; the SDK ships the libraries only -->
+  <ItemGroup Condition="'$(TargetsKOS)' == 'true' and '$(_OpenSslIncludeDir)' != ''">
+    <NativeCMakeArg Include="-cmakeargs &quot;-DOPENSSL_INCLUDE_DIR=$(_OpenSslIncludeDir)&quot;" />
+  </ItemGroup>
 
   <Target Name="BuildNativeCommon"
           DependsOnTargets="$(BuildNativeCommonDependsOnTargets)">

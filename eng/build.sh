@@ -22,6 +22,7 @@ usage()
   echo "  --binaryLog (-bl)               Output binary log."
   echo "  --kos                           Build for KasperskyOS (arm64, with --cross and ROOTFS_DIR=<KOS CE SDK>)."
   echo "  --icudir                        Optional argument that overrides the ICU dir."
+  echo "  --opensslincludedir             KasperskyOS: OpenSSL headers matching the SDK's libcrypto.a/libssl.a."
   echo "  --cross                         Optional argument to signify cross compilation."
   echo "  --configuration (-c)            Build configuration: Debug, Release or Checked."
   echo "                                  Checked is exclusive to the CLR subset. It is the same as Debug, except code is"
@@ -463,6 +464,15 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       arguments+=("/p:_IcuDir=$2")
+      shift 2
+      ;;
+
+     -opensslincludedir)
+      if [ -z ${2+x} ]; then
+        echo "No value for opensslincludedir is supplied." 1>&2
+        exit 1
+      fi
+      arguments+=("/p:_OpenSslIncludeDir=$2")
       shift 2
       ;;
 

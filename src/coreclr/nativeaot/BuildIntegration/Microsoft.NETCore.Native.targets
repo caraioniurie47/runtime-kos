@@ -39,6 +39,10 @@ The .NET Foundation licenses this file to you under the MIT license.
     <UseWindowsThreadPool Condition="'$(UseWindowsThreadPool)' == '' and '$(_targetOS)' == 'win'">true</UseWindowsThreadPool>
     <DynamicCodeSupport Condition="'$(DynamicCodeSupport)' == ''">false</DynamicCodeSupport>
     <UseSizeOptimizedLinq Condition="'$(UseSizeOptimizedLinq)' == ''">true</UseSizeOptimizedLinq>
+    <!-- KOS has no GSSAPI, so no System.Net.Security.Native: NTLM and Negotiate use the managed implementation,
+         as on linux-bionic (Microsoft.NET.ILLink.targets). Unconditional, because ILLink.targets defaults it to
+         false for linux RIDs and may be imported first. -->
+    <_UseManagedNtlm Condition="'$(TargetsKOS)' == 'true'">true</_UseManagedNtlm>
   </PropertyGroup>
 
   <!-- Configure LINQ expressions -->

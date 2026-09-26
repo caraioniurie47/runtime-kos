@@ -95,6 +95,11 @@
     <ItemGroup Condition="'$(TargetsKOS)' == 'true' and '$(_IcuDir)' != ''">
       <_CoreClrBuildArg Include="-cmakeargs -DCMAKE_ICU_DIR=&quot;$(_IcuDir)&quot;" />
     </ItemGroup>
+    <!-- Likewise System.Security.Cryptography.Native: the SDK has libcrypto.a and libssl.a but no headers
+         (build.sh -opensslincludedir). -->
+    <ItemGroup Condition="'$(TargetsKOS)' == 'true' and '$(_OpenSslIncludeDir)' != ''">
+      <_CoreClrBuildArg Include="-cmakeargs -DOPENSSL_INCLUDE_DIR=&quot;$(_OpenSslIncludeDir)&quot;" />
+    </ItemGroup>
 
     <PropertyGroup Condition="('$(TargetsAndroid)' == 'true' or '$(TargetsLinuxBionic)' == 'true') and '$(HostCrossOS)' == '' and '$(ANDROID_NDK_ROOT)' != ''">
       <_AndroidToolChainPath>$([MSBuild]::NormalizePath('$(ANDROID_NDK_ROOT)', 'build', 'cmake', 'android.toolchain.cmake'))</_AndroidToolChainPath>

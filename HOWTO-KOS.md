@@ -108,6 +108,24 @@ mkdir -p /home/icu4c-build-kos && cd /home/icu4c-build-kos
 )
 ```
 
+### OpenSSL headers
+
+The SDK has OpenSSL 1.1.1t as static libraries (`sysroot-aarch64-kos/lib/libcrypto.a`, `libssl.a`) but no
+headers. `System.Security.Cryptography.Native` compiles against the headers of that release, configured with
+its defaults, which the SDK's libraries match; nothing of OpenSSL is compiled here.
+
+```sh
+cd /home
+wget -nc https://www.openssl.org/source/old/1.1.1/openssl-1.1.1t.tar.gz
+echo "8dee9b24bdb1dcbf0c3d1e9b02fb8f6bf22165e807f45adeb7c9677536859d3b  openssl-1.1.1t.tar.gz" | sha256sum -c
+tar -xzf openssl-1.1.1t.tar.gz
+cd /home/openssl-1.1.1t
+./Configure linux-aarch64 no-shared
+make include/openssl/opensslconf.h
+mkdir -p /opt/openssl-kos/include
+cp -a include/openssl /opt/openssl-kos/include/
+```
+
 ### Clone the runtime
 
 ```sh
@@ -144,9 +162,9 @@ The cross toolchain file picks `aarch64-kos-clang` from the SDK.
 
 ```sh
 cd /home/runtime-kos
-ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.nativeaotruntime+clr.nativeaotlibs -c release --cross --kos --arch arm64 --icudir /opt/icu4c/kos
-ROOTFS_DIR=$KOS_SDK ./build.sh -s libs -c release --cross --kos --arch arm64 --icudir /opt/icu4c/kos
-ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.aottools+packs.aot -c release --cross --kos --arch arm64 --icudir /opt/icu4c/kos
+ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.nativeaotruntime+clr.nativeaotlibs -c release --cross --kos --arch arm64 --icudir /opt/icu4c/kos --opensslincludedir /opt/openssl-kos/include
+ROOTFS_DIR=$KOS_SDK ./build.sh -s libs -c release --cross --kos --arch arm64 --icudir /opt/icu4c/kos --opensslincludedir /opt/openssl-kos/include
+ROOTFS_DIR=$KOS_SDK ./build.sh -s clr.aottools+packs.aot -c release --cross --kos --arch arm64 --icudir /opt/icu4c/kos --opensslincludedir /opt/openssl-kos/include
 ```
 
 ### Copy the packages
@@ -217,7 +235,8 @@ Hello from .NET! Math.Min(4, 7)=4
 ## 10. The showcase sample
 
 `samples/showcase-kos` runs a set of sections, each ending in `PASS`, `SKIP` or `FAIL`: runtime
-information, files under `/tmp` and a line on `Console.Out`, TCP sockets, culture-aware formatting and
+information, files under `/tmp` and a line on `Console.Out`, TCP sockets, cryptography with OpenSSL, HTTPS
+over loopback, culture-aware formatting and
 sorting, a `Parallel.For` Mandelbrot, async/await with
 channels and timers, source-generated `System.Text.Json` and `Regex`, LINQ and generic math, the GC
 under allocation load, and exceptions with stack traces. It uses the HelloWorld image project.
@@ -227,6 +246,11 @@ The sockets section echoes 256 KiB over loopback with the `*Async` socket method
 configured, the image project also forwards that TCP port from the host (QEMU `hostfwd`) and the section
 waits up to 120 seconds for a client from the host: it sends a greeting line, reads a line and answers
 `KOS echo: <line>`. Without the option it does not wait.
+
+The cryptography section checks SHA-256 and HMAC against published test vectors, AES-GCM, RSA-2048 PSS
+signatures, ECDH and an NTLM negotiate message. The HTTPS section makes a test CA and a certificate for
+`127.0.0.1` signed by it, serves one request with `SslStream`, and fetches it with `HttpClient` trusting only
+that CA; a second `HttpClient` with the default trust must refuse the same server.
 
 `InvariantGlobalization=false` links ICU, so the globalization section runs; the binary grows from
 about 15 MB to about 52 MB. Without it the section reports `SKIP`.
@@ -258,7 +282,7 @@ command above, rebuild it, and once the showcase prints `listening on 0.0.0.0:50
 The last line it prints is the summary, for example:
 
 ```text
-SHOWCASE DONE: 11 passed, 0 skipped, 0 failed, 16421 ms
+SHOWCASE DONE: 15 passed, 0 skipped, 0 failed, 23826 ms
 ```
 
 ## 11. The web server sample
@@ -322,8 +346,9 @@ KasperskyOS console.
   socket event thread wakes at least every 10 ms, and a socket registered meanwhile is polled up to
   10 ms later. That `poll()` takes at most 512 descriptors per call; the port polls more in chunks,
   which nothing has exercised yet. The showcase runs `Socket`, `TcpListener`, `TcpClient` and `NetworkStream`, blocking and
-  `*Async`, and the web server sample runs `HttpListener`; UDP, and `HttpClient`, were not tried. The image has no DNS or
-  `/etc/hosts`. On SDK 1.4.0.102 `recv()` fails with `EINVAL` for an 81920-byte buffer and works with
+  `*Async`, the web server sample runs `HttpListener`, and `HttpClient` runs over HTTPS to loopback; UDP was not
+  tried. Host names resolve through VfsNet, whose default DNS server is 8.8.8.8 (a probe resolved
+  `example.com` under QEMU's user networking); `/etc/hosts` was not tried. On SDK 1.4.0.102 `recv()` fails with `EINVAL` for an 81920-byte buffer and works with
   65536 bytes, so System.Native asks for at most 65536 bytes per read. In an
   image with `VfsRamFs` but no `VfsNet`, the socket calls go to libc's stub: creating a socket throws
   `SocketException` ("Unknown socket error"), and the showcase reports its sockets section as `SKIP`.
@@ -334,4 +359,17 @@ KasperskyOS console.
   reach a VFS server, then logs `Can't establish IPC connetion to VFS server` and falls back to the stub
   about 11 seconds later.
 - **ICU adds about 37 MB to the unstripped binary**; see step 10.
-- **No cryptography or `System.Net.Security` native libraries** are built or linked.
+- **Cryptography is the SDK's OpenSSL 1.1.1t**, linked statically. OpenSSL 1.1.1 is past its upstream end of
+  life (2023-09-11). What .NET builds on OpenSSL 3 APIs throws `PlatformNotSupportedException`: ML-KEM,
+  ML-DSA, SLH-DSA, KMAC and reading SHAKE output incrementally; SHA-3, one-shot SHAKE and ChaCha20-Poly1305
+  work. The SDK's `libcrypto.a` looks for a `getentropy()` that no SDK library defines; the KOS build of the
+  OpenSSL shim defines it on the KasperskyOS random generator (`KosRandomGenerate`), and OpenSSL calls it.
+  Without it OpenSSL falls back to a device under `/dev`, which VfsRamFs mounts.
+- **No CA certificates in the image**, so the default trust refuses every server, public ones included (a
+  probe's request to `https://example.com/` failed with `PartialChain`). Either trust CAs in code, as the
+  showcase does with `CertificateChainPolicy`, or set `SSL_CERT_FILE` in the program's environment
+  (`init.yaml`) to a PEM bundle the program can read: a probe that wrote the host's
+  `ca-certificates.crt` to `/tmp` before its first request fetched `https://example.com/` with the default
+  trust. `SSL_CERT_DIR` was not tried.
+- **No Kerberos.** The SDK has no GSSAPI, so there is no `System.Net.Security.Native`; the KOS build targets
+  switch NTLM and Negotiate to .NET's managed implementation, which does NTLM only.

@@ -46,6 +46,10 @@
 // buffer and works with 65536 bytes, the size of _VFS_GENERAL_IPC_BUFFER_SIZE in the SDK's vfs/defs.h, so reads ask
 // for at most that; a stream socket read may return fewer bytes than asked anyway.
 enum { KOS_MAX_RECEIVE_LENGTH = 65536 };
+// TODO-KOS(10a): sendmsg() over 65536 bytes fails with EMSGSIZE on TCP
+// On a stream socket, where POSIX lets a send take part of the data, sendmsg() fails with EMSGSIZE for more than 65536
+// bytes (SDK 1.4.0.102); send() and writev() send part of a larger buffer.
+enum { KOS_MAX_SEND_MESSAGE_LENGTH = 65536 };
 #endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -1623,6 +1627,28 @@ int32_t SystemNative_ReceiveSocketError(intptr_t socket, MessageHeader* messageH
     return SystemNative_ConvertErrorPlatformToPal(errno);
 }
 
+#if defined(__KOS__)
+// Limits a message's buffers to maxLength bytes: drops the buffers past it and shortens the one it ends in. Returns that
+// buffer, whose length the caller restores from *originalLength, or NULL when the buffers hold at most maxLength bytes.
+static struct iovec* KosShortenMessage(struct msghdr* header, size_t maxLength, size_t* originalLength)
+{
+    size_t total = 0;
+    for (size_t i = 0; i < (size_t)header->msg_iovlen; i++)
+    {
+        struct iovec* iov = &header->msg_iov[i];
+        if (iov->iov_len > maxLength - total)
+        {
+            *originalLength = iov->iov_len;
+            iov->iov_len = maxLength - total;
+            header->msg_iovlen = (__typeof__(header->msg_iovlen))(i + 1);
+            return iov;
+        }
+        total += iov->iov_len;
+    }
+    return NULL;
+}
+#endif
+
 int32_t SystemNative_ReceiveMessage(intptr_t socket, MessageHeader* messageHeader, int32_t flags, int64_t* received)
 {
     if (messageHeader == NULL || received == NULL || messageHeader->SocketAddressLen < 0 ||
@@ -1649,24 +1675,9 @@ int32_t SystemNative_ReceiveMessage(intptr_t socket, MessageHeader* messageHeade
     ConvertMessageHeaderToMsghdr(&header, messageHeader, fd);
 
 #if defined(__KOS__)
-    // Receive into at most KOS_MAX_RECEIVE_LENGTH bytes: drop the buffers past it and shorten the one it ends in,
-    // restoring that length afterwards.
-    struct iovec* shortened = NULL;
+    // Receive into at most KOS_MAX_RECEIVE_LENGTH bytes, restoring the buffer length afterwards.
     size_t shortenedLength = 0;
-    size_t total = 0;
-    for (size_t i = 0; i < (size_t)header.msg_iovlen; i++)
-    {
-        struct iovec* iov = &header.msg_iov[i];
-        if (iov->iov_len > (size_t)KOS_MAX_RECEIVE_LENGTH - total)
-        {
-            shortened = iov;
-            shortenedLength = iov->iov_len;
-            iov->iov_len = (size_t)KOS_MAX_RECEIVE_LENGTH - total;
-            header.msg_iovlen = (__typeof__(header.msg_iovlen))(i + 1);
-            break;
-        }
-        total += iov->iov_len;
-    }
+    struct iovec* shortened = KosShortenMessage(&header, KOS_MAX_RECEIVE_LENGTH, &shortenedLength);
 #endif
 
     while ((res = recvmsg(fd, &header, socketFlags)) < 0 && errno == EINTR);
@@ -1764,6 +1775,28 @@ int32_t SystemNative_SendMessage(intptr_t socket, MessageHeader* messageHeader, 
     while ((res = sendmsg(fd, &header, socketFlags)) < 0 && (errno == EINTR || (errno == EPROTOTYPE && --maxProtoRetry > 0)));
 #else
     while ((res = sendmsg(fd, &header, socketFlags)) < 0 && errno == EINTR);
+#endif
+#if defined(__KOS__)
+    // On a stream socket, where sending fewer bytes than asked is allowed, send the first KOS_MAX_SEND_MESSAGE_LENGTH.
+    int socketType;
+    socklen_t socketTypeLength = sizeof(socketType);
+    if (res < 0 && errno == EMSGSIZE && getsockopt(fd, SOL_SOCKET, SO_TYPE, &socketType, &socketTypeLength) == 0 &&
+        socketType == SOCK_STREAM)
+    {
+        size_t shortenedLength = 0;
+        struct iovec* shortened = KosShortenMessage(&header, KOS_MAX_SEND_MESSAGE_LENGTH, &shortenedLength);
+        if (shortened != NULL)
+        {
+            while ((res = sendmsg(fd, &header, socketFlags)) < 0 && errno == EINTR);
+            int savedErrno = errno;
+            shortened->iov_len = shortenedLength;
+            errno = savedErrno;
+        }
+        else
+        {
+            errno = EMSGSIZE;
+        }
+    }
 #endif
 #else // CMSG_SPACE
     // we will only use 0th buffer

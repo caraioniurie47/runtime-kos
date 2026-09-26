@@ -1795,6 +1795,17 @@ int32_t SystemNative_Accept(intptr_t socket, uint8_t* socketAddress, int32_t* so
 #else // !TARGET_WASI
     while ((accepted = accept4(fd, (struct sockaddr*)socketAddress, &addrLen, SOCK_CLOEXEC)) < 0 && errno == EINTR);
 #endif // !TARGET_WASI
+#if defined(__KOS__)
+    // On KasperskyOS the new socket inherits O_NONBLOCK from the accepting one, as with accept() on macOS and FreeBSD
+    // below, although it has accept4. Our socket code expects new socket to be in blocking mode by default.
+    if ((accepted != -1) && SystemNative_FcntlSetIsNonBlocking(accepted, 0) != 0)
+    {
+        int oldErrno = errno;
+        close(accepted);
+        accepted = -1;
+        errno = oldErrno;
+    }
+#endif
 #else
     while ((accepted = accept(fd, (struct sockaddr*)socketAddress, &addrLen)) < 0 && errno == EINTR);
 #if defined(FD_CLOEXEC)
@@ -4237,7 +4248,9 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
     off_t offtOffset = (off_t)offset;
     int savedErrno;
 
-#if HAVE_SENDFILE_4
+// KasperskyOS declares and defines sendfile, but it fails with EINVAL from a file to a TCP socket (SDK 1.4.0.102): use
+// the read/write loop below.
+#if HAVE_SENDFILE_4 && !defined(__KOS__)
     ssize_t res;
     while ((res = sendfile(outfd, infd, &offtOffset, (size_t)count)) < 0 && errno == EINTR);
     if (res != -1)

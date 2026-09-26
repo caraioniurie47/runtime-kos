@@ -42,6 +42,7 @@
 #include <strings.h> // strcasecmp is declared here
 #endif
 #if defined(__KOS__)
+// TODO-KOS(10): recv() over 65536 bytes failed with EINVAL (not reproduced 2026-09-24)
 // Socket reads go over IPC to the network VFS program. On SDK 1.4.0.102 recv() fails with EINVAL for an 81920-byte
 // buffer and works with 65536 bytes, the size of _VFS_GENERAL_IPC_BUFFER_SIZE in the SDK's vfs/defs.h, so reads ask
 // for at most that; a stream socket read may return fewer bytes than asked anyway.
@@ -1839,7 +1840,7 @@ int32_t SystemNative_Accept(intptr_t socket, uint8_t* socketAddress, int32_t* so
 #else // !TARGET_WASI
     while ((accepted = accept4(fd, (struct sockaddr*)socketAddress, &addrLen, SOCK_CLOEXEC)) < 0 && errno == EINTR);
 #endif // !TARGET_WASI
-#if defined(__KOS__)
+#if defined(__KOS__) // TODO-KOS(6j): accepted sockets inherit O_NONBLOCK (docs)
     // On KasperskyOS the new socket inherits O_NONBLOCK from the accepting one, as with accept() on macOS and FreeBSD
     // below, although it has accept4. Our socket code expects new socket to be in blocking mode by default.
     if ((accepted != -1) && SystemNative_FcntlSetIsNonBlocking(accepted, 0) != 0)
@@ -3573,7 +3574,7 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
     return Error_SUCCESS;
 }
 
-#elif defined(__KOS__)
+#elif defined(__KOS__) // KOS-NOT-LINUX: no epoll or kqueue; a port built on poll()
 
 // KasperskyOS has neither epoll nor kqueue, only poll(). A port is a table of registered sockets that the waiting
 // thread polls. The engine expects edge-triggered events (EPOLLET, EV_CLEAR), while poll() is level-triggered and
@@ -3584,9 +3585,15 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
 // to wake a wait, so a registration made meanwhile is polled after at most KOS_SOCKET_EVENT_WAIT_MS. Closed
 // descriptors are dropped, as epoll drops them; a descriptor registered again replaces its entry.
 //
+// TODO-KOS(9): poll() fails the whole call on a closed descriptor (beyond the documented case)
 // KasperskyOS's poll() (SDK 1.4.0.102) differs from POSIX: a closed descriptor fails the whole call with EBADF instead
 // of reporting POLLNVAL; while another thread closes a polled descriptor the call can also fail with EINVAL or
 // EACCES; and more than KOS_POLL_MAX_NFDS entries fail with EINVAL, even when every descriptor is -1.
+//
+// KOS-DOC(limitations_and_known_problems): a VFS server serves 5 threads per client
+// poll() is a call to VfsNet like any other socket call, and VfsNet serves each client with at most
+// _VFS_SERVER_MAX_THREADS_PER_CLIENT threads (5 in SDK 1.4.0.102). While that many threads of the program are blocked
+// in socket calls, this wait's poll() cannot run either; the image raises the limit (samples' kos-image).
 
 #include <poll.h>
 #include <time.h>
@@ -4336,6 +4343,7 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
     off_t offtOffset = (off_t)offset;
     int savedErrno;
 
+// TODO-KOS(6h): sendfile() fails with EINVAL from a file to a TCP socket (the manual lists it as implemented)
 // KasperskyOS declares and defines sendfile, but it fails with EINVAL from a file to a TCP socket (SDK 1.4.0.102): use
 // the read/write loop below.
 #if HAVE_SENDFILE_4 && !defined(__KOS__)

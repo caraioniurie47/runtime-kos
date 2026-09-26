@@ -58,7 +58,7 @@
 #if HAVE_STATFS_VFS
 #include <sys/vfs.h>
 #endif
-#elif defined(__KOS__) // no struct statfs; struct statvfs has f_fstypename
+#elif defined(__KOS__) // TODO-KOS(6): no sys/statfs.h or struct statfs; struct statvfs has f_fstypename
 #include <sys/statvfs.h>
 #endif
 
@@ -798,7 +798,7 @@ int32_t SystemNative_FChMod(intptr_t fd, int32_t mode)
 #endif /* HAVE_FCHMOD */
 }
 
-#if defined(__KOS__)
+#if defined(__KOS__) // TODO-KOS(6c): pread/pwrite/ftruncate/fsync fail with ENOSYS on /dev/null and pipes
 // KasperskyOS (CE SDK 1.4.0.102) fails pread, pwrite, ftruncate and fsync with ENOSYS on /dev/null and on pipes,
 // where Linux gives the error callers expect of a file that cannot seek or be truncated or synced. Report a
 // non-regular file's ENOSYS as that error (ESPIPE for pread and pwrite, EINVAL for ftruncate and fsync).
@@ -960,7 +960,7 @@ char* SystemNative_MkdTemp(char* pathTemplate)
 #endif /* TARGET_WASI */
 }
 
-#if defined(__KOS__)
+#if defined(__KOS__) // TODO-KOS(6a): mkstemps() fails with EINVAL for a valid template
 // KasperskyOS (CE SDK 1.4.0.102) libc's mkstemps fails with EINVAL for a valid template and suffix, while mkstemp and
 // open(O_CREAT | O_EXCL) work, so do what mkstemps specifies: replace the trailing X's before the suffix and create the
 // file exclusively, trying other names while one exists.
@@ -1795,7 +1795,7 @@ static int16_t ConvertLockType(int16_t managedLockType)
     }
 }
 
-#if HAVE_STATFS_FSTYPENAME || HAVE_STATVFS_BASETYPE || defined(TARGET_HAIKU) || defined(__KOS__)
+#if HAVE_STATFS_FSTYPENAME || HAVE_STATVFS_BASETYPE || defined(TARGET_HAIKU) || defined(__KOS__) // TODO-KOS(6): no statfs
 static uint32_t FileSystemNameSupportsLocking(const char* fileSystemName)
 {
     if (strcmp(fileSystemName, "nfs") == 0 ||
@@ -1834,7 +1834,7 @@ uint32_t SystemNative_FileSystemSupportsLocking(intptr_t fd, int32_t lockOperati
     if (fsStatDevRes == -1) return 0;
 
     return FileSystemNameSupportsLocking(info.fsh_name);
-#elif defined(__KOS__) // TARGET_LINUX is defined, but KOS has only statvfs
+#elif defined(__KOS__) // TODO-KOS(6): TARGET_LINUX is defined, but KOS has only statvfs
     int statfsRes;
     struct statvfs statfsArgs;
     while ((statfsRes = fstatvfs(ToFileDescriptor(fd), &statfsArgs)) == -1 && errno == EINTR) ;

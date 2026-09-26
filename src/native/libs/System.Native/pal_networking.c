@@ -61,6 +61,11 @@ enum { KOS_MAX_SEND_MESSAGE_LENGTH = 65536 };
 #if defined(__APPLE__) && __APPLE__
 #include <sys/socketvar.h>
 #endif
+#if defined(__KOS__) && !defined(SO_REUSEPORT) // TODO-KOS(6t): the network stack honours SO_REUSEPORT, the headers lack it
+// The stack is NetBSD's, where binding a second UDP socket to a unicast address in use needs SO_REUSEPORT on both
+// (SO_REUSEADDR is not enough, as on macOS), and setsockopt() accepts NetBSD's value (tmp-probe/sockleft3.c).
+#define SO_REUSEPORT 0x0200
+#endif
 #if !HAVE_GETDOMAINNAME && HAVE_UTSNAME_DOMAINNAME
 #include <sys/utsname.h>
 #include <stdio.h>
@@ -1279,6 +1284,13 @@ int32_t SystemNative_SetIPv4MulticastOption(intptr_t socket, int32_t multicastOp
     {
         return Error_ENOPROTOOPT;
     }
+#if defined(__KOS__) // KOS-NOT-LINUX: IP_MULTICAST_IF takes a struct in_addr, as on NetBSD (a struct ip_mreq fails EINVAL)
+    if (optionName == IP_MULTICAST_IF)
+    {
+        int err = setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &opt.imr_interface, sizeof(opt.imr_interface));
+        return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
+    }
+#endif
 #endif
     int err = setsockopt(fd, IPPROTO_IP, optionName, &opt, sizeof(opt));
     return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
@@ -2471,6 +2483,14 @@ int32_t SystemNative_GetSockOpt(
     }
 
     socklen_t optLen = (socklen_t)*optionLen;
+#if defined(__KOS__) // TODO-KOS(6u): getsockopt() fails with EINVAL for a NULL option_value, even with option_len 0
+    // A null or empty managed buffer arrives as NULL with length 0, which Linux and NetBSD answer with success.
+    uint8_t emptyOptionValue;
+    if (optionValue == NULL && optLen == 0)
+    {
+        optionValue = &emptyOptionValue;
+    }
+#endif
     int err = getsockopt(fd, optLevel, optName, optionValue, &optLen);
 
     if (err != 0)

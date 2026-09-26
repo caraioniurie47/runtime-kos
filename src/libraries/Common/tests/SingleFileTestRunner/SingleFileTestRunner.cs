@@ -35,6 +35,15 @@ public class SingleFileTestRunner : XunitTestFramework
 
         report("Running assembly:" + asm.FullName);
 
+        // Where the device has no copy of the test's content files (TestData and the like, beside the executable on
+        // other platforms), they come as a ustar archive in a read-only file system: unpack it into the current
+        // directory first.
+        string contentArchive = Environment.GetEnvironmentVariable("DOTNET_TEST_CONTENT_TAR");
+        if (!string.IsNullOrEmpty(contentArchive))
+        {
+            report($"Content: {UnpackTar(contentArchive, Environment.CurrentDirectory)} files from {contentArchive} into {Environment.CurrentDirectory} (base directory {AppContext.BaseDirectory})");
+        }
+
         // The current RemoteExecutor implementation is not compatible with the SingleFileTestRunner.
         Environment.SetEnvironmentVariable("DOTNET_REMOTEEXECUTOR_SUPPORTED", "0");
 
@@ -195,7 +204,7 @@ public class SingleFileTestRunner : XunitTestFramework
                 }
             });
 #pragma warning restore CS0618
-        executor.RunTests(filteredTestCases, executionSink, TestFrameworkOptions.ForExecution(assemblyConfig));
+        executor.RunTests(filteredTestCases, new DynamicSkipSink(executionSink), TestFrameworkOptions.ForExecution(assemblyConfig));
 
         resultsSink.Finished.WaitOne();
 
@@ -229,6 +238,52 @@ public class SingleFileTestRunner : XunitTestFramework
         var failed = resultsSink.ExecutionSummary.Failed > 0 || resultsSink.ExecutionSummary.Errors > 0;
         return failed ? 1 : 0;
     }
+
+    // Regular files and directories of a ustar archive (tar --format=ustar), unpacked under a directory; returns the
+    // number of files.
+    private static int UnpackTar(string archive, string destination)
+    {
+        int files = 0;
+        using FileStream tar = File.OpenRead(archive);
+        byte[] header = new byte[512];
+        while (tar.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length && header[0] != 0)
+        {
+            string name = Field(header, 0, 100);
+            string prefix = Field(header, 345, 155);
+            if (prefix.Length > 0)
+            {
+                name = prefix + "/" + name;
+            }
+            long size = Convert.ToInt64(Field(header, 124, 12).Trim(), 8);
+            char type = (char)header[156];
+            string path = Path.Combine(destination, name.TrimStart('.', '/'));
+            long skip = (size + 511) / 512 * 512; // the entry's data, padded to the next header
+            if (type == '5')
+            {
+                Directory.CreateDirectory(path);
+            }
+            else if (type == '0' || type == '\0')
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                using (FileStream file = File.Create(path))
+                {
+                    byte[] data = new byte[size];
+                    tar.ReadExactly(data);
+                    file.Write(data);
+                }
+                files++;
+                skip -= size;
+            }
+            tar.Seek(skip, SeekOrigin.Current);
+        }
+        return files;
+
+        static string Field(byte[] header, int offset, int length)
+        {
+            int end = Array.IndexOf(header, (byte)0, offset, length);
+            return System.Text.Encoding.ASCII.GetString(header, offset, (end < 0 ? offset + length : end) - offset);
+        }
+    }
 }
 
 // This is about running on desktop FX, which we don't do
@@ -243,6 +298,38 @@ internal class ConsoleDiagnosticMessageSink : IMessageSink
         }
         return false;
     }
+}
+
+// A test skipped at run time (SkipException.ForSkip) fails with a message starting "$XunitDynamicSkip$", which xunit's
+// console runners report as a skip: do the same, and correct the assembly's counts.
+internal class DynamicSkipSink : IMessageSinkWithTypes
+{
+    private const string Prefix = "$XunitDynamicSkip$";
+    private readonly IMessageSinkWithTypes _inner;
+    private int _skipped;
+
+    public DynamicSkipSink(IMessageSinkWithTypes inner) => _inner = inner;
+
+    public void Dispose() => _inner.Dispose();
+
+    public bool OnMessageWithTypes(IMessageSinkMessage message, HashSet<string> messageTypes)
+    {
+        if (message is ITestFailed failed && failed.Messages.Length > 0 && failed.Messages[0] != null &&
+            failed.Messages[0].StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            System.Threading.Interlocked.Increment(ref _skipped);
+            return Forward(new Xunit.Sdk.TestSkipped(failed.Test, failed.Messages[0].Substring(Prefix.Length)));
+        }
+        if (message is ITestAssemblyFinished finished && _skipped > 0)
+        {
+            return Forward(new Xunit.Sdk.TestAssemblyFinished(finished.TestCases, finished.TestAssembly, finished.ExecutionTime,
+                finished.TestsRun, finished.TestsFailed - _skipped, finished.TestsSkipped + _skipped));
+        }
+        return _inner.OnMessageWithTypes(message, messageTypes);
+    }
+
+    private bool Forward(IMessageSinkMessage message) =>
+        _inner.OnMessageWithTypes(message, new HashSet<string>(message.GetType().GetInterfaces().Select(i => i.FullName)));
 }
 
 // Forwards discovery messages, naming each test class as discovery reaches it.

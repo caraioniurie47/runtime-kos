@@ -100,6 +100,7 @@ bool minipal_initialize_memory_barrier_process_wide(void)
 #elif defined(HOST_APPLE)
     // Apple platforms do not support membarrier, so we use a different mechanism
 #elif defined(__KOS__)
+    // KOS-NOT-LINUX: no membarrier, and no mlock (ENOSYS; the SDK's _POSIX_MEMLOCK_RANGE is -1)
     // KOS: no membarrier, and the fallback's mlock of the helper page fails, which would fail
     // GC initialization. Flushing is a no-op instead, as in the port before this moved to minipal.
 #else

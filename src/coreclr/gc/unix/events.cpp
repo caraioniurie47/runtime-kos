@@ -61,6 +61,7 @@ public:
 
     bool Initialize()
     {
+        // TODO-KOS(4a): pthread_condattr_init fails on memory that holds an initialized attribute
         // Zeroed: KOS CE SDK 1.4.0.102's pthread_condattr_init reads the attribute first and fails with EINVAL
         // when it already holds the initialized-attribute marker.
         pthread_condattr_t attrs = {};

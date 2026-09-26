@@ -265,6 +265,7 @@ bool GCToOSInterface::Initialize()
     long pages = -1;
 
 #if defined(__KOS__)
+    // TODO-KOS(8b): sysconf(_SC_PHYS_PAGES) fails with EINVAL
     int kos_ret = KnGroupStatGetParam(GROUP_PARAM_MEM_TOTAL, &pages);
     if (kos_ret != 0)
     {

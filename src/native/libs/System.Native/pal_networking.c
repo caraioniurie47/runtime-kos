@@ -2997,6 +2997,46 @@ int32_t SystemNative_Socket(int32_t addressFamily, int32_t socketType, int32_t p
     return Error_SUCCESS;
 }
 
+#if defined(__KOS__) // KOS-NOT-LINUX: no SO_DOMAIN or SO_PROTOCOL
+// KOS defines neither SO_DOMAIN nor SO_PROTOCOL (SDK 1.4.0.102). The family is read from the socket's own address, which
+// getsockname reports for an unbound socket too; the protocol is the one an IPv4 or IPv6 stream or datagram socket
+// implies, and none for a Unix domain socket.
+static bool KosTryGetAddressFamily(int fd, int32_t* addressFamily)
+{
+    struct sockaddr_storage address;
+    socklen_t addressLength = sizeof(address);
+    return getsockname(fd, (struct sockaddr*)&address, &addressLength) == 0 &&
+        addressLength >= (socklen_t)(offsetof(struct sockaddr, sa_family) + sizeof(address.ss_family)) &&
+        TryConvertAddressFamilyPlatformToPal(address.ss_family, addressFamily);
+}
+
+static bool KosTryGetProtocolType(int32_t addressFamily, int32_t socketType, int32_t* protocolType)
+{
+    if (addressFamily == AddressFamily_AF_INET || addressFamily == AddressFamily_AF_INET6)
+    {
+        switch (socketType)
+        {
+            case SocketType_SOCK_STREAM:
+                *protocolType = ProtocolType_PT_TCP;
+                return true;
+            case SocketType_SOCK_DGRAM:
+                *protocolType = ProtocolType_PT_UDP;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    if (addressFamily == AddressFamily_AF_UNIX)
+    {
+        *protocolType = ProtocolType_PT_UNSPECIFIED;
+        return true;
+    }
+
+    return false;
+}
+#endif
+
 int32_t SystemNative_GetSocketType(intptr_t socket, int32_t* addressFamily, int32_t* socketType, int32_t* protocolType, int32_t* isListening)
 {
     if (addressFamily == NULL || socketType == NULL || protocolType == NULL || isListening == NULL)
@@ -3035,6 +3075,8 @@ int32_t SystemNative_GetSocketType(intptr_t socket, int32_t* addressFamily, int3
     socklen_t domainLength = sizeof(int);
     if (getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &domainValue, &domainLength) != 0 ||
         !TryConvertAddressFamilyPlatformToPal((sa_family_t)domainValue, addressFamily))
+#elif defined(__KOS__)
+    if (!KosTryGetAddressFamily(fd, addressFamily))
 #endif
     {
         *addressFamily = AddressFamily_AF_UNKNOWN;
@@ -3060,6 +3102,8 @@ int32_t SystemNative_GetSocketType(intptr_t socket, int32_t* addressFamily, int3
     socklen_t protocolLength = sizeof(int);
     if (getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &protocolValue, &protocolLength) != 0 ||
         !TryConvertProtocolTypePlatformToPal(*addressFamily, protocolValue, protocolType))
+#elif defined(__KOS__)
+    if (!KosTryGetProtocolType(*addressFamily, *socketType, protocolType))
 #endif
     {
         *protocolType = ProtocolType_PT_UNKNOWN;

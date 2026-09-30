@@ -66,6 +66,17 @@ set_target_properties (precompiled_vfs::VfsNet PROPERTIES EXTRA_ENV "
     DEFAULT_DNS_SERVER: 8.8.8.8
     VFS_SERVER_MAX_THREADS_PER_CLIENT: \"${VFSNET_MAX_THREADS_PER_CLIENT}\"")
 
+# TODO-KOS(6f): VfsRamFs faults (NULL dereference) under concurrent file calls from one client
+# The KasperskyOS team's workaround until an SDK release fixes it: VfsRamFs serves one call at a time, per client and
+# per process. File calls then wait for each other; System.IO.FileSystem.Tests took about 30% longer under QEMU with it
+# and gave the same results (2026-09-29). The backend line is VfsRamFs's default environment (the SDK's
+# precompiled_vfsConfig.cmake), which this property replaces.
+set (VFSRAMFS_MAX_THREADS "1" CACHE STRING "Threads VfsRamFs serves with, per client and per process")
+set_target_properties (precompiled_vfs::VfsRamFs PROPERTIES EXTRA_ENV "
+    VFS_SERVER_MAX_THREADS_PER_CLIENT: ${VFSRAMFS_MAX_THREADS}
+    VFS_SERVER_MAX_THREADS_PER_PROCESS: ${VFSRAMFS_MAX_THREADS}
+    VFS_FILESYSTEM_BACKEND: server:kl.VfsRamFs")
+
 set (NK_RESOURCES ${CMAKE_SOURCE_DIR}/resources/xdl)
 nk_include_directories (${NK_RESOURCES})
 

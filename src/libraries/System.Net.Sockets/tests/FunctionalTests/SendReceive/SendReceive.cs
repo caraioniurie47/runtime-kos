@@ -665,7 +665,10 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: loopback UDP may reorder datagrams under load
+        // The test expects the empty datagram before the 1-byte one sent after it; under load KOS delivered some pairs
+        // the other way round (tmp-probe/loopload.c, 2026-09-29), which UDP allows.
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         public async Task Send_0ByteSendTo_Success()
         {
             using (Socket server = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
@@ -1325,7 +1328,8 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: loopback UDP may reorder datagrams under load (see Send_0ByteSendTo_Success)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         public async Task Send_0ByteSendTo_Span_Success()
         {
             using (Socket server = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
@@ -1405,7 +1409,8 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        [Fact]
+        // KOS-NOT-LINUX: loopback UDP may reorder datagrams under load (see Send_0ByteSendTo_Success)
+        [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsNotKasperskyOS))]
         public async Task Send_0ByteSendTo_Memory_Success()
         {
             using (Socket server = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))

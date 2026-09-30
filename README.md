@@ -8,7 +8,7 @@ carries the port on dotnet/runtime `main`.
 
 What works: a single statically linked executable per program, with files and stdout (a RAM file system at
 `/tmp`), TCP sockets, `HttpListener`, ICU globalization, and the base class libraries the samples exercise.
-The limits are listed at the end of [HOWTO-KOS.md](HOWTO-KOS.md#limitations).
+The limits, and the test suites run, are in [LIMITATIONS-KOS.md](LIMITATIONS-KOS.md).
 
 - [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt packages and a quick start;
   [`release_v03`](https://github.com/caraioniurie47/runtime-kos/releases/tag/release_v03) is built from

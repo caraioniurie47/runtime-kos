@@ -52,14 +52,22 @@ enum { KOS_MAX_RECEIVE_LENGTH = 65536 };
 // bytes (SDK 1.4.0.102); send() and writev() send part of a larger buffer.
 enum { KOS_MAX_SEND_MESSAGE_LENGTH = 65536 };
 #include <poll.h>
-static void KosRearmSocketEvents(int fd, short bits);
-// A socket call that would block re-arms the event port's edge for its direction (see the port, below).
-static void KosRearmIfWouldBlock(int fd, short bits)
+#include <time.h>
+static void KosRearmSocketEvents(int fd, short bits, int64_t callStart);
+static int64_t KosMonotonicMicroseconds(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000;
+}
+// A socket call that would block re-arms the event port's edge for its direction (see the port, below); callStart is
+// KosMonotonicMicroseconds() taken before the call.
+static void KosRearmIfWouldBlock(int fd, short bits, int64_t callStart)
 {
     int savedErrno = errno;
     if (savedErrno == EAGAIN || savedErrno == EWOULDBLOCK || savedErrno == EINPROGRESS)
     {
-        KosRearmSocketEvents(fd, bits);
+        KosRearmSocketEvents(fd, bits, callStart);
         errno = savedErrno;
     }
 }
@@ -1591,6 +1599,7 @@ int32_t SystemNative_Receive(intptr_t socket, void* buffer, int32_t bufferLen, i
 
 #if defined(__KOS__)
     bufferLen = Min(bufferLen, KOS_MAX_RECEIVE_LENGTH);
+    int64_t kosCallStart = KosMonotonicMicroseconds();
 #endif
 
     ssize_t res;
@@ -1603,7 +1612,7 @@ int32_t SystemNative_Receive(intptr_t socket, void* buffer, int32_t bufferLen, i
     }
 
 #if defined(__KOS__)
-    KosRearmIfWouldBlock(fd, POLLIN);
+    KosRearmIfWouldBlock(fd, POLLIN, kosCallStart);
 #endif
     *received = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
@@ -1702,6 +1711,9 @@ int32_t SystemNative_ReceiveMessage(intptr_t socket, MessageHeader* messageHeade
     }
 
     ssize_t res;
+#if defined(__KOS__)
+    int64_t kosCallStart = KosMonotonicMicroseconds();
+#endif
 #if !defined(CMSG_SPACE)
     // we will only use 0th buffer
     struct iovec* msg_iov = (struct iovec*)messageHeader->IOVectors;
@@ -1744,7 +1756,7 @@ int32_t SystemNative_ReceiveMessage(intptr_t socket, MessageHeader* messageHeade
     }
 
 #if defined(__KOS__)
-    KosRearmIfWouldBlock(fd, POLLIN);
+    KosRearmIfWouldBlock(fd, POLLIN, kosCallStart);
 #endif
     *received = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
@@ -1766,6 +1778,9 @@ int32_t SystemNative_Send(intptr_t socket, void* buffer, int32_t bufferLen, int3
     }
 
     ssize_t res;
+#if defined(__KOS__)
+    int64_t kosCallStart = KosMonotonicMicroseconds();
+#endif
 #if defined(__APPLE__) && __APPLE__
     // possible OSX kernel bug: https://github.com/dotnet/runtime/issues/27221
     // According to https://github.com/dotnet/runtime/issues/63291 the EPROTOTYPE may be
@@ -1782,7 +1797,7 @@ int32_t SystemNative_Send(intptr_t socket, void* buffer, int32_t bufferLen, int3
     }
 
 #if defined(__KOS__)
-    KosRearmIfWouldBlock(fd, POLLOUT);
+    KosRearmIfWouldBlock(fd, POLLOUT, kosCallStart);
 #endif
     *sent = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
@@ -1805,6 +1820,9 @@ int32_t SystemNative_SendMessage(intptr_t socket, MessageHeader* messageHeader, 
     }
 
     ssize_t res;
+#if defined(__KOS__)
+    int64_t kosCallStart = KosMonotonicMicroseconds();
+#endif
 #if defined(CMSG_SPACE)
     struct msghdr header;
     ConvertMessageHeaderToMsghdr(&header, messageHeader, fd);
@@ -1853,7 +1871,7 @@ int32_t SystemNative_SendMessage(intptr_t socket, MessageHeader* messageHeader, 
     }
 
 #if defined(__KOS__)
-    KosRearmIfWouldBlock(fd, POLLOUT);
+    KosRearmIfWouldBlock(fd, POLLOUT, kosCallStart);
 #endif
     *sent = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
@@ -1877,6 +1895,7 @@ int32_t SystemNative_Accept(intptr_t socket, uint8_t* socketAddress, int32_t* so
     {
         addrLen = (socklen_t)sizeof(struct sockaddr_storage);
     }
+    int64_t kosCallStart = KosMonotonicMicroseconds();
 #endif
     int accepted;
 #if HAVE_ACCEPT4 && defined(SOCK_CLOEXEC)
@@ -1925,7 +1944,7 @@ int32_t SystemNative_Accept(intptr_t socket, uint8_t* socketAddress, int32_t* so
     if (accepted == -1)
     {
 #if defined(__KOS__)
-        KosRearmIfWouldBlock(fd, POLLIN);
+        KosRearmIfWouldBlock(fd, POLLIN, kosCallStart);
 #endif
         *acceptedSocket = -1;
         return SystemNative_ConvertErrorPlatformToPal(errno);
@@ -1972,11 +1991,14 @@ int32_t SystemNative_Connect(intptr_t socket, uint8_t* socketAddress, int32_t so
     int fd = ToFileDescriptor(socket);
 
     int err;
+#if defined(__KOS__)
+    int64_t kosCallStart = KosMonotonicMicroseconds();
+#endif
     while ((err = connect(fd, (struct sockaddr*)socketAddress, (socklen_t)socketAddressLen)) < 0 && errno == EINTR);
 #if defined(__KOS__)
     if (err != 0)
     {
-        KosRearmIfWouldBlock(fd, POLLOUT);
+        KosRearmIfWouldBlock(fd, POLLOUT, kosCallStart);
     }
 #endif
     return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
@@ -3683,6 +3705,8 @@ typedef struct
     short reported;     // bits reported and not re-armed since
     short rearm;        // bits a call found would block since the last copy (in entries only)
     short hooked;       // bits a call has found would block: re-armed by calls, never reported again by time
+    int64_t rearmAt;    // microseconds: the start of the latest call that set rearm (in entries only)
+    int64_t sampledAt;  // microseconds: when the poll that last reported new bits returned
     int64_t reportedAt; // milliseconds, CLOCK_MONOTONIC
     int closed;         // POLLNVAL seen (in snapshots only)
 } KosSocketRegistration;
@@ -3715,7 +3739,7 @@ static KosSocketEventPort* GetKosSocketEventPort(int32_t port)
     return result;
 }
 
-static void KosRearmSocketEvents(int fd, short bits)
+static void KosRearmSocketEvents(int fd, short bits, int64_t callStart)
 {
     for (int port = 0; port < KOS_SOCKET_EVENT_MAX_PORTS; port++)
     {
@@ -3732,6 +3756,10 @@ static void KosRearmSocketEvents(int fd, short bits)
             {
                 p->entries[i].rearm = (short)(p->entries[i].rearm | bits);
                 p->entries[i].hooked = (short)(p->entries[i].hooked | bits);
+                if (callStart > p->entries[i].rearmAt)
+                {
+                    p->entries[i].rearmAt = callStart;
+                }
                 break;
             }
         }
@@ -4029,10 +4057,17 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
         {
             memcpy(p->snapshot, p->entries, (size_t)n * sizeof(KosSocketRegistration));
         }
-        // Bits a call found would block are re-armed: the next readiness is a new edge.
+        // Bits a call found would block are re-armed: the next readiness is a new edge. Only when the call started after
+        // the poll that reported them returned: a call that started before it may have found the socket empty before
+        // the data the poll reported arrived, and clearing that report would report the same data again, possibly
+        // after it was read (a zero-byte receive would then complete on it). Keeping a report is safe: the
+        // zero-timeout poll below re-arms a bit once the socket is no longer ready for it.
         for (int i = 0; i < n; i++)
         {
-            p->snapshot[i].reported = (short)(p->snapshot[i].reported & ~p->entries[i].rearm);
+            if (p->entries[i].rearmAt > p->entries[i].sampledAt)
+            {
+                p->snapshot[i].reported = (short)(p->snapshot[i].reported & ~p->entries[i].rearm);
+            }
             p->entries[i].rearm = 0;
         }
         pthread_mutex_unlock(&p->lock);
@@ -4102,6 +4137,7 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
         if (ready > 0)
         {
             now = KosMonotonicMilliseconds();
+            int64_t sampledAt = KosMonotonicMicroseconds();
             for (int i = 0; i < n && numEvents < *count; i++)
             {
                 KosSocketRegistration* entry = &snapshot[i];
@@ -4121,6 +4157,7 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
                     SetKosSocketEvent(&buffer[numEvents++], entry->data, readyBits);
                     entry->reported = (short)(entry->reported | readyBits);
                     entry->reportedAt = now;
+                    entry->sampledAt = sampledAt;
                 }
             }
         }
@@ -4143,6 +4180,7 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
                     {
                         entry->reported = copy->reported;
                         entry->reportedAt = copy->reportedAt;
+                        entry->sampledAt = copy->sampledAt;
                     }
                     break;
                 }
@@ -4502,6 +4540,9 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
     *sent = 0;
     char* buffer = NULL;
     size_t bufferLength = Min((size_t)count, 80 * 1024 * sizeof(char));
+#if defined(__KOS__)
+    int64_t kosCallStart = KosMonotonicMicroseconds(); // before the call on outfd that would block, if one does
+#endif
 
     // Save the original input file position and seek to the offset position
     off_t inputFileOrigOffset = lseek(infd, 0, SEEK_CUR);
@@ -4527,6 +4568,7 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
         // looping, the call held the socket for seconds and a dispose landed inside it.
         if (*sent > 0 && (fcntl(outfd, F_GETFL) & O_NONBLOCK) != 0)
         {
+            kosCallStart = KosMonotonicMicroseconds();
             struct pollfd writable = { .fd = outfd, .events = POLLOUT, .revents = 0 };
             if (poll(&writable, 1, 0) == 0)
             {
@@ -4555,6 +4597,9 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
         while (bytesRead > 0)
         {
             ssize_t bytesWritten;
+#if defined(__KOS__)
+            kosCallStart = KosMonotonicMicroseconds();
+#endif
             while ((bytesWritten = write(outfd, buffer + writeOffset, (size_t)bytesRead)) < 0 && errno == EINTR);
             if (bytesWritten == -1)
             {
@@ -4580,7 +4625,7 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
 error:
     savedErrno = errno;
 #if defined(__KOS__)
-    KosRearmIfWouldBlock(outfd, POLLOUT);
+    KosRearmIfWouldBlock(outfd, POLLOUT, kosCallStart);
 #endif
     free(buffer);
     return SystemNative_ConvertErrorPlatformToPal(savedErrno);

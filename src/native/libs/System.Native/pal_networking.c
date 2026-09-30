@@ -1904,9 +1904,10 @@ int32_t SystemNative_Accept(intptr_t socket, uint8_t* socketAddress, int32_t* so
 #else // !TARGET_WASI
     while ((accepted = accept4(fd, (struct sockaddr*)socketAddress, &addrLen, SOCK_CLOEXEC)) < 0 && errno == EINTR);
 #endif // !TARGET_WASI
-#if defined(__KOS__) // TODO-KOS(6j): accepted sockets inherit O_NONBLOCK (docs)
+#if defined(__KOS__) // TODO-KOS(6j): accept4 lets the new socket inherit O_NONBLOCK
     // On KasperskyOS the new socket inherits O_NONBLOCK from the accepting one, as with accept() on macOS and FreeBSD
-    // below, although it has accept4. Our socket code expects new socket to be in blocking mode by default.
+    // below, although POSIX has accept4 take it from its flags only. Our socket code expects new socket to be in
+    // blocking mode by default.
     if ((accepted != -1) && SystemNative_FcntlSetIsNonBlocking(accepted, 0) != 0)
     {
         int oldErrno = errno;

@@ -51,6 +51,18 @@ enum { KOS_MAX_RECEIVE_LENGTH = 65536 };
 // On a stream socket, where POSIX lets a send take part of the data, sendmsg() fails with EMSGSIZE for more than 65536
 // bytes (SDK 1.4.0.102); send() and writev() send part of a larger buffer.
 enum { KOS_MAX_SEND_MESSAGE_LENGTH = 65536 };
+#include <poll.h>
+static void KosRearmSocketEvents(int fd, short bits);
+// A socket call that would block re-arms the event port's edge for its direction (see the port, below).
+static void KosRearmIfWouldBlock(int fd, short bits)
+{
+    int savedErrno = errno;
+    if (savedErrno == EAGAIN || savedErrno == EWOULDBLOCK || savedErrno == EINPROGRESS)
+    {
+        KosRearmSocketEvents(fd, bits);
+        errno = savedErrno;
+    }
+}
 #endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -1590,6 +1602,9 @@ int32_t SystemNative_Receive(intptr_t socket, void* buffer, int32_t bufferLen, i
         return Error_SUCCESS;
     }
 
+#if defined(__KOS__)
+    KosRearmIfWouldBlock(fd, POLLIN);
+#endif
     *received = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
 }
@@ -1728,6 +1743,9 @@ int32_t SystemNative_ReceiveMessage(intptr_t socket, MessageHeader* messageHeade
         return Error_SUCCESS;
     }
 
+#if defined(__KOS__)
+    KosRearmIfWouldBlock(fd, POLLIN);
+#endif
     *received = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
 }
@@ -1763,6 +1781,9 @@ int32_t SystemNative_Send(intptr_t socket, void* buffer, int32_t bufferLen, int3
         return Error_SUCCESS;
     }
 
+#if defined(__KOS__)
+    KosRearmIfWouldBlock(fd, POLLOUT);
+#endif
     *sent = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
 }
@@ -1831,6 +1852,9 @@ int32_t SystemNative_SendMessage(intptr_t socket, MessageHeader* messageHeader, 
         return Error_SUCCESS;
     }
 
+#if defined(__KOS__)
+    KosRearmIfWouldBlock(fd, POLLOUT);
+#endif
     *sent = 0;
     return SystemNative_ConvertErrorPlatformToPal(errno);
 }
@@ -1900,6 +1924,9 @@ int32_t SystemNative_Accept(intptr_t socket, uint8_t* socketAddress, int32_t* so
 #endif
     if (accepted == -1)
     {
+#if defined(__KOS__)
+        KosRearmIfWouldBlock(fd, POLLIN);
+#endif
         *acceptedSocket = -1;
         return SystemNative_ConvertErrorPlatformToPal(errno);
     }
@@ -1946,6 +1973,12 @@ int32_t SystemNative_Connect(intptr_t socket, uint8_t* socketAddress, int32_t so
 
     int err;
     while ((err = connect(fd, (struct sockaddr*)socketAddress, (socklen_t)socketAddressLen)) < 0 && errno == EINTR);
+#if defined(__KOS__)
+    if (err != 0)
+    {
+        KosRearmIfWouldBlock(fd, POLLOUT);
+    }
+#endif
     return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
 }
 
@@ -3607,12 +3640,16 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
 
 // KasperskyOS has neither epoll nor kqueue, only poll(). A port is a table of registered sockets that the waiting
 // thread polls. The engine expects edge-triggered events (EPOLLET, EV_CLEAR), while poll() is level-triggered and
-// would report a readable or writable socket again at once. So once a bit is reported it is left out of the wait:
-// a zero-timeout poll re-arms it when the socket is no longer ready for it, and a bit still ready after
-// KOS_SOCKET_EVENT_REARM_MS is reported again. Extra events are harmless (an operation retries and waits again);
-// the re-report bounds the delay when the socket became ready again between two checks. There is no descriptor
-// to wake a wait, so a registration made meanwhile is polled after at most KOS_SOCKET_EVENT_WAIT_MS. Closed
-// descriptors are dropped, as epoll drops them; a descriptor registered again replaces its entry.
+// would report a readable or writable socket again at once. So once a bit is reported it is left out of the wait
+// until it is re-armed: by a socket call in this file that finds the direction would block (EAGAIN, or EINPROGRESS
+// from connect), or by a zero-timeout poll that finds the socket no longer ready for it. The engine makes a call
+// before an operation waits, and retries on each event until a call would block, so every wait is preceded by a
+// re-arm. A bit that no call has re-armed (a descriptor used only by calls outside this file) is reported again
+// while still ready after KOS_SOCKET_EVENT_REARM_MS. Bits that calls re-arm are never reported again by time: such
+// an event, sampled while data was there and handled after it was read, completed the next zero-byte receive, which
+// makes no call. There is no descriptor to wake a wait, so a registration or re-arm made meanwhile is polled after at
+// most KOS_SOCKET_EVENT_WAIT_MS. Closed descriptors are dropped, as epoll drops them; a descriptor registered again
+// replaces its entry.
 //
 // TODO-KOS(9): poll() fails the whole call on a closed descriptor (beyond the documented case)
 // KasperskyOS's poll() (SDK 1.4.0.102) differs from POSIX: a closed descriptor fails the whole call with EBADF instead
@@ -3644,6 +3681,8 @@ typedef struct
     uint64_t generation; // distinguishes a registration from a later one of the same descriptor
     short interest;     // POLLIN and POLLOUT
     short reported;     // bits reported and not re-armed since
+    short rearm;        // bits a call found would block since the last copy (in entries only)
+    short hooked;       // bits a call has found would block: re-armed by calls, never reported again by time
     int64_t reportedAt; // milliseconds, CLOCK_MONOTONIC
     int closed;         // POLLNVAL seen (in snapshots only)
 } KosSocketRegistration;
@@ -3674,6 +3713,30 @@ static KosSocketEventPort* GetKosSocketEventPort(int32_t port)
     KosSocketEventPort* result = g_kosSocketEventPorts[port];
     pthread_mutex_unlock(&g_kosSocketEventPortsLock);
     return result;
+}
+
+static void KosRearmSocketEvents(int fd, short bits)
+{
+    for (int port = 0; port < KOS_SOCKET_EVENT_MAX_PORTS; port++)
+    {
+        KosSocketEventPort* p = GetKosSocketEventPort(port);
+        if (p == NULL)
+        {
+            continue;
+        }
+
+        pthread_mutex_lock(&p->lock);
+        for (int i = 0; i < p->count; i++)
+        {
+            if (p->entries[i].fd == fd)
+            {
+                p->entries[i].rearm = (short)(p->entries[i].rearm | bits);
+                p->entries[i].hooked = (short)(p->entries[i].hooked | bits);
+                break;
+            }
+        }
+        pthread_mutex_unlock(&p->lock);
+    }
 }
 
 static int64_t KosMonotonicMilliseconds(void)
@@ -3966,6 +4029,12 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
         {
             memcpy(p->snapshot, p->entries, (size_t)n * sizeof(KosSocketRegistration));
         }
+        // Bits a call found would block are re-armed: the next readiness is a new edge.
+        for (int i = 0; i < n; i++)
+        {
+            p->snapshot[i].reported = (short)(p->snapshot[i].reported & ~p->entries[i].rearm);
+            p->entries[i].rearm = 0;
+        }
         pthread_mutex_unlock(&p->lock);
 
         KosSocketRegistration* snapshot = p->snapshot;
@@ -4000,9 +4069,10 @@ static int32_t WaitForSocketEventsInner(int32_t port, SocketEvent* buffer, int32
 
                 short stillReady = GetKosReadyBits(entry->reported, pollFds[i].revents);
                 entry->reported = stillReady;
-                if (stillReady != 0 && now - entry->reportedAt >= KOS_SOCKET_EVENT_REARM_MS && numEvents < *count)
+                short again = (short)(stillReady & ~entry->hooked);
+                if (again != 0 && now - entry->reportedAt >= KOS_SOCKET_EVENT_REARM_MS && numEvents < *count)
                 {
-                    SetKosSocketEvent(&buffer[numEvents++], entry->data, stillReady);
+                    SetKosSocketEvent(&buffer[numEvents++], entry->data, again);
                     entry->reportedAt = now;
                 }
             }
@@ -4509,6 +4579,9 @@ int32_t SystemNative_SendFile(intptr_t out_fd, intptr_t in_fd, int64_t offset, i
 
 error:
     savedErrno = errno;
+#if defined(__KOS__)
+    KosRearmIfWouldBlock(outfd, POLLOUT);
+#endif
     free(buffer);
     return SystemNative_ConvertErrorPlatformToPal(savedErrno);
 

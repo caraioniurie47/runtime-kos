@@ -111,7 +111,7 @@ namespace System.IO.Tests
             }
 
             if (PlatformDetection.IsKasperskyOS)
-                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6e): utimensat on a read-only file fails with EACCES for its owner");
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6e): utimensat on a read-only file fails with EACCES for the process that created it");
 
             T item = GetExistingItem(readOnly: true);
             SettingUpdatesPropertiesCore(item);

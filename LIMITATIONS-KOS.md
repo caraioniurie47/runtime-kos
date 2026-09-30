@@ -100,7 +100,7 @@ tried.
   read-only file throws `UnauthorizedAccessException`, where root on Linux may write it. *SDK (finding 6d).*
 - **`UnixFileMode.SetUser` and `SetGroup` are dropped on directories** (kept on files). *SDK (finding 6d).*
 - **`File.Delete` on an empty directory deletes it**, where Linux throws. *SDK (finding 6e).*
-- **Setting the times of a read-only file throws `UnauthorizedAccessException`**, even for its owner. *SDK (finding 6e).*
+- **Setting the times of a read-only file throws `UnauthorizedAccessException`**, even for the process that created it. *SDK (finding 6e).*
 - **Moving to an over-long path throws `IOException` ("Invalid argument")**, not `PathTooLongException`. *SDK (finding 6e).*
 - **Preallocation beyond the free memory is not reported as .NET expects.** `posix_fallocate` returns -1 rather than
   an error number, and the `WhenDiskIsFullTheErrorMessageContainsAllDetails` tests fail. *SDK (finding 6e).*
@@ -246,7 +246,7 @@ those of `TODO-KOS(<id>)`; 8c is marked `KOS-DOC(posix_uns_ifaces)`, which docum
 | 5 | `fallocate()` without `FALLOC_FL_*` flags | does not use it |
 | 6 | headers portable code probes are absent (`sys/statfs.h`, `mntent.h`, `cpu_set_t`, ...) | NetBSD equivalents |
 | 6a | `mkstemps()` fails with `EINVAL` | creates temporary files itself (`Path.GetTempFileName` works) |
-| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on devices and pipes | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
+| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on `/dev/null` and pipes | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
 | 6h | `sendfile()` to a socket fails with `EINVAL` | read/write loop (`Socket.SendFile` works) |
 | 6j | an accepted socket inherits the listener's `O_NONBLOCK` | clears it |
 | 6t | the stack honours `SO_REUSEPORT`, the headers lack it | defines NetBSD's value |

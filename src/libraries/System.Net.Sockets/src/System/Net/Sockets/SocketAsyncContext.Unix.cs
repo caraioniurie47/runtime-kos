@@ -2227,7 +2227,19 @@ namespace System.Net.Sockets
                 BytesTransferred = bytesSent
             };
 
-            if (!_sendQueue.StartAsyncOperation(this, operation, observedSequenceNumber, cancellationToken))
+            bool pending;
+            try
+            {
+                pending = _sendQueue.StartAsyncOperation(this, operation, observedSequenceNumber, cancellationToken);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The socket was disposed while the first attempt ran, so registering it for the wait failed.
+                bytesSent = operation.BytesTransferred;
+                return SocketError.OperationAborted;
+            }
+
+            if (!pending)
             {
                 bytesSent = operation.BytesTransferred;
                 return operation.ErrorCode;

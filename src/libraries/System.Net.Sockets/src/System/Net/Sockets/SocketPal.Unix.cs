@@ -1055,7 +1055,9 @@ namespace System.Net.Sockets
                 {
                     if (errno != Interop.Error.EAGAIN && errno != Interop.Error.EWOULDBLOCK)
                     {
-                        errorCode = GetSocketErrorForErrorCode(errno);
+                        // A dispose that lands while the call runs makes it fail (EPIPE after the disconnect that
+                        // unblocks it): report the abort, as for an operation that was waiting when the socket closed.
+                        errorCode = socket.IsClosed ? SocketError.OperationAborted : GetSocketErrorForErrorCode(errno);
                         return true;
                     }
 

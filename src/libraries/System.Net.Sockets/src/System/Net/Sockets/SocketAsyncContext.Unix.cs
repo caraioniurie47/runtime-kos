@@ -44,6 +44,11 @@ namespace System.Net.Sockets
         private BufferMemorySendOperation? _cachedBufferMemorySendOperation;
         private BufferListSendOperation? _cachedBufferListSendOperation;
 
+        // KOS-NOT-LINUX: no epoll; the poll-based event port can deliver a read event after the data was read
+        // The libraries build as Linux, so the OS is told apart at run time (as NamedPipeClientStream.Unix.cs does).
+        private static readonly bool s_readEventsMayBeStale =
+            RuntimeInformation.OSDescription.StartsWith("KasperskyOS", StringComparison.Ordinal);
+
         private void ReturnOperation(AcceptOperation operation)
         {
             operation.Reset();
@@ -459,6 +464,15 @@ namespace System.Net.Sockets
                 // We don't have to call receive, our caller is interested in the event.
                 if (Buffer.Length == 0 && Flags == SocketFlags.None && SocketAddress.Length == 0)
                 {
+                    // KOS-NOT-LINUX: no epoll; a read event from the poll-based event port may be stale
+                    // The port emulates edge-triggered events with poll(): a POLLIN sampled while data was queued can
+                    // reach this operation after that data was read, and completing on it would report data that is
+                    // not there. Ask the socket, as the first synchronous attempt does (a 1-byte MSG_PEEK).
+                    if (s_readEventsMayBeStale)
+                    {
+                        return SocketPal.TryCompleteReceive(context._socket, Span<byte>.Empty, SocketFlags.None, out BytesTransferred, out ErrorCode);
+                    }
+
                     BytesTransferred = 0;
                     ReceivedFlags = SocketFlags.None;
                     ErrorCode = SocketError.Success;

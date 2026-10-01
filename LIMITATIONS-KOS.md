@@ -74,8 +74,10 @@ marker naming its cause:
   can send (`posix_uns_ifaces`). The runtime therefore installs no signal handler: `Console.CancelKeyPress` and
   `PosixSignalRegistration.Create` succeed, for any signal (even `SIGKILL`, which Linux refuses), and their handlers
   never run; `SIGTERM` keeps its default action. *KasperskyOS, Port.*
-- **At most 512 descriptors per process** (`OPEN_MAX`, `sysconf(_SC_OPEN_MAX)`); the next one fails with `EMFILE`.
-  *KasperskyOS.*
+- **At most 512 descriptors per process** (`OPEN_MAX`, `sysconf(_SC_OPEN_MAX)`); the next one fails with `EMFILE`,
+  which .NET reports as "Too many open files in system". `setrlimit` cannot raise it (not implemented), so the runtime's
+  startup raise of the limit does nothing. System.Net.Sockets.Tests reaches it now and then when its parallel test
+  classes overlap; which tests fail varies, so none is marked. *SDK (finding 6x).*
 - **No diagnostics tracing through LTTng.** The Linux EventSource-to-LTTng bridge is not built. *KasperskyOS.*
 
 ## Files

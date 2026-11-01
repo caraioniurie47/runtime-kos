@@ -1,0 +1,16 @@
+{
+  "services": {
+    "ProductRomfsLoader": {
+      "packageId": "kl.ProductRomfsLoader",
+      "runConfigurationId": "default"
+    },
+    "NetInit": {
+      "packageId": "NetInit",
+      "runConfigurationId": "default"
+    },
+    "Hello": {
+      "packageId": "Hello",
+      "runConfigurationId": "default"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "packages": [
+    {
+      "name": "kl.ProductRomfsLoader"
+    },
+    {
+      "name": "NetInit"
+    },
+    {
+      "name": "Hello"
+    }
+  ]
+}

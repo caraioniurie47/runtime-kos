@@ -1,0 +1,21 @@
+/* Security policy of the helloworldapp-kos image for SDK 2.0: as permissive as the 1.4 image's, on top of
+   MinimalKOS's own policy. */
+
+use nk.base._
+use minimal_kos._
+
+use EDL ProductEinit
+use EDL hello.Hello
+use EDL hello.NetInit
+
+use kl.drivers.DNetSrv._
+use kl.VfsNet._
+use kl.VfsRamFs._
+
+execute { grant () }
+
+request { grant () }
+
+response { grant () }
+
+error { grant () }

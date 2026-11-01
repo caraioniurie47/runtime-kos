@@ -1,0 +1,39 @@
+# Started by ProductEinit from the product ROMFS: the dnet driver, VfsNet, VfsRamFs. VfsNet as in the SDK's
+# examples/net_with_separate_vfs (with /etc/hosts from the root file system), plus the thread limit the 1.4 image set;
+# VfsRamFs with the SDK's default environment and arguments (precompiled_vfsConfig.cmake), plus its thread limit.
+
+blob_container_romfs_prefix: "/romfs/product/"
+
+entities:
+
+- name: kl.drivers.DNetSrv
+  path: dnet_executable
+  wait_for: ready
+
+- name: kl.VfsNet
+  path: VfsNet
+  wait_for: ready
+  after:
+  - kl.drivers.DNetSrv
+  env:
+    RUMP_NETEN_NAME_POLICY: @VFSENV_RUMP_NETEN_NAME_POLICY@
+    VFS_FILESYSTEM_BACKEND: "server:kl.VfsNet:relay:local:kl.VfsNet"
+    VFS_NETWORK_BACKEND: "server:kl.VfsNet:relay:local:kl.VfsNet"
+    VFS_RELAY_DESCENDANTS: "VfsFs=client:task:kl.VfsEntity"
+    ALLOWED_FS_PATHS: "/etc/hosts"
+    DEFAULT_DNS_SERVER: 8.8.8.8
+    VFS_SERVER_MAX_THREADS_PER_CLIENT: "@VFSNET_MAX_THREADS_PER_CLIENT@"
+  args:
+  - '-l'
+  - 'devfs /dev devfs 0'
+
+- name: kl.VfsRamFs
+  path: VfsRamFs
+  wait_for: ready
+  env:
+    VFS_FILESYSTEM_BACKEND: server:kl.VfsRamFs@VFSRAMFS_THREADS_ENV@
+  args:
+  - '-l'
+  - 'nodev /tmp ramfs 0'
+  - '-l'
+  - 'devfs /dev devfs 0'

@@ -1,12 +1,12 @@
-# KasperskyOS image for the NativeAOT-published helloworldapp-kos, for KOS CE SDK 1.4 and later, which
-# build images through SDK CMake instead of the einit/makeimg tools that dist/kos-image.sh calls.
-# Modeled on the SDK's examples/hello. Build (QEMU) with the SDK's own cmake, which carries the
-# `platform` modules:
+# KasperskyOS image for the NativeAOT-published helloworldapp-kos, for KOS CE SDK 2.0 and later (the SDK 1.4 image
+# is on the branch kos-sdk-1.4.0.102). SDK 2.0 builds no Einit-only image: a prebuilt MinimalKOS boots, programs are
+# KPA packages that ExecutionManager installs and starts, and the system programs a solution adds run from a product
+# ROMFS started by ProductEinit. Modeled on the SDK's examples/net_with_separate_vfs. Build (QEMU) with the SDK's own cmake:
 #   $SDK/toolchain/bin/cmake -B build -D CMAKE_TOOLCHAIN_FILE=$SDK/toolchain/share/toolchain-aarch64-kos.cmake \
 #         -D HELLO_BINARY=<publish dir>/helloworldapp-kos [-D HOST_TCP_PORT=5047] [-D HOST_HTTP_PORT=8080]
-#   $SDK/toolchain/bin/cmake --build build --target kos-qemu-image   # or: sim, which also starts QEMU
+#   $SDK/toolchain/bin/cmake --build build --target qemu   # or: sim, which also starts QEMU
 
-cmake_minimum_required (VERSION 3.25)
+cmake_minimum_required (VERSION 3.29)
 
 project (helloworldapp_kos_image)
 
@@ -14,14 +14,23 @@ include (platform)
 initialize_platform (FORCE_STATIC)
 project_header_default ("STANDARD_GNU_17:YES" "EXTRA_STRICT_WARNINGS:YES")
 include (platform/nk)
-include (platform/image)
+include (platform/options)
+include (platform/kpa)
+
+find_package (minimal_kos REQUIRED)
+find_package (vfs REQUIRED)
+find_package (precompiled_vfs REQUIRED)
+find_package (dnet REQUIRED)
+include (${KL_SDK_ROOT_PATH}/share/vendor_rom/build_vendor_rom.cmake)
 
 set (HELLO_BINARY "" CACHE FILEPATH "The NativeAOT-published helloworldapp-kos executable")
 if (NOT EXISTS "${HELLO_BINARY}")
     message (FATAL_ERROR "Set HELLO_BINARY to the published helloworldapp-kos executable (got '${HELLO_BINARY}')")
 endif ()
-# The ROMFS entry keeps the file name; init.yaml.in's `path:` points Einit at it.
-get_filename_component (HELLO_BINARY_NAME "${HELLO_BINARY}" NAME)
+
+# Optional: arguments and more environment variables for the program, as CMake lists (e.g. for a test runner).
+set (HELLO_ARGS "" CACHE STRING "Command-line arguments for the program, a CMake list")
+set (HELLO_ENV "" CACHE STRING "More NAME=value environment variables for the program, a CMake list")
 
 # Optional: forward a TCP port from the host (QEMU user networking) to the same port of the program, and tell
 # the program in an environment variable of the option's name. HOST_TCP_PORT: the showcase waits for one client
@@ -35,87 +44,124 @@ foreach (option HOST_TCP_PORT HOST_HTTP_PORT)
         if (NOT ${option} MATCHES "^[0-9]+$")
             message (FATAL_ERROR "${option} must be a port number (got '${${option}}')")
         endif ()
-        string (APPEND HOST_PORTS_ENV "\n    ${option}: \"${${option}}\"")
+        list (APPEND HOST_PORTS_ENV "${option}=${${option}}")
         list (APPEND HOST_PORTS_FWD "hostfwd=tcp::${${option}}-:${${option}}")
     endif ()
 endforeach ()
 set (HOST_PORTS_QEMU "")
 if (HOST_PORTS_FWD)
-    # The SDK inserts this after its default `-nic user,`; several hostfwd rules are separated by commas.
+    # The SDK appends this to its default `-nic user,`; several hostfwd rules are separated by commas.
     list (JOIN HOST_PORTS_FWD "," HOST_PORTS_FWD)
     set (HOST_PORTS_QEMU QEMU_USER_NETWORK_FLAGS "${HOST_PORTS_FWD}")
 endif ()
 
-# The SDK's prebuilt VFS programs serve files, stdout and sockets to the program over IPC; the program links the
-# SDK's libvfs_remote.a, the client side, which dotnet publish adds, and init.yaml.in names the servers.
-# VfsRamFs (as in the SDK's examples/secure_logger): a RAM file system at /tmp, devices at /dev, for
-# VFS_FILESYSTEM_BACKEND. VfsNet (as in examples/multi_vfs_ntpd): the network stack, for VFS_NETWORK_BACKEND,
-# with the SDK's network driver program. Both bring the entropy program.
-find_package (precompiled_vfs REQUIRED)
-find_package (vfs REQUIRED)
+# Kernel startup parameters (manual, "Kernel startup parameters"), passed with QEMU's -append.
+# TODO-KOS(8a): vmm.overcommit=exception, so running out of memory ends the program instead of stalling it
+# SDK 2.0's default makes a thread that writes memory the kernel cannot commit wait for free pages: a .NET program that
+# runs out of memory stops making progress, with no OutOfMemoryException and no end. With `exception` the kernel ends
+# the process at that write, as SDK 1.4 did, which a test runner or a watchdog can see. -D KOS_KERNEL_CMDLINE= (empty)
+# boots with the SDK's defaults.
+set (KOS_KERNEL_CMDLINE "vmm.overcommit=exception" CACHE STRING "Kernel startup parameters passed with QEMU's -append")
+set (KERNEL_CMDLINE_QEMU "")
+if (KOS_KERNEL_CMDLINE)
+    set (KERNEL_CMDLINE_QEMU KERNEL_CMDLINE ${KOS_KERNEL_CMDLINE})
+endif ()
 
 # KOS-DOC(limitations_and_known_problems): a VFS program serves each client with at most 5 threads
 # A socket call that blocks (a synchronous Receive, Accept, a Send to a full socket) holds one of VfsNet's threads for
 # this program until it returns; with 5 of them held, every other socket call of the program waits, poll() included,
-# and the program stalls for good. VFS_SERVER_MAX_THREADS_PER_CLIENT raises the limit. The rest is VfsNet's default
-# environment (the SDK's precompiled_vfsConfig.cmake), which this property replaces.
+# and the program stalls for good. VFS_SERVER_MAX_THREADS_PER_CLIENT raises the limit (product_init.yaml.in).
 set (VFSNET_MAX_THREADS_PER_CLIENT "64" CACHE STRING "Threads VfsNet serves this image's programs with, each")
-set_target_properties (precompiled_vfs::VfsNet PROPERTIES EXTRA_ENV "
-    VFS_NETWORK_BACKEND: server:kl.VfsNet
-    VFS_FILESYSTEM_BACKEND: server:kl.VfsNet
-    DEFAULT_DNS_SERVER: 8.8.8.8
-    VFS_SERVER_MAX_THREADS_PER_CLIENT: \"${VFSNET_MAX_THREADS_PER_CLIENT}\"")
 
 # TODO-KOS(6f): VfsRamFs faults (NULL dereference) under concurrent file calls from one client
-# The KasperskyOS team's workaround until an SDK release fixes it: VfsRamFs serves one call at a time, per client and
-# per process. File calls then wait for each other; System.IO.FileSystem.Tests took about 30% longer under QEMU with it
-# and gave the same results (2026-09-29). The backend line is VfsRamFs's default environment (the SDK's
-# precompiled_vfsConfig.cmake), which this property replaces.
-set (VFSRAMFS_MAX_THREADS "1" CACHE STRING "Threads VfsRamFs serves with, per client and per process")
-set_target_properties (precompiled_vfs::VfsRamFs PROPERTIES EXTRA_ENV "
-    VFS_SERVER_MAX_THREADS_PER_CLIENT: ${VFSRAMFS_MAX_THREADS}
-    VFS_SERVER_MAX_THREADS_PER_PROCESS: ${VFSRAMFS_MAX_THREADS}
-    VFS_FILESYSTEM_BACKEND: server:kl.VfsRamFs")
+# The KasperskyOS team's workaround for SDK 1.4: VfsRamFs serves one call at a time, per client and per process.
+# Kept on SDK 2.0 until the .NET tests show it can go (the C reproducer no longer faults on 2.0.0.179); empty: the
+# SDK's default.
+set (VFSRAMFS_MAX_THREADS "1" CACHE STRING "Threads VfsRamFs serves with, per client and per process; empty: default")
+set (VFSRAMFS_THREADS_ENV "")
+if (VFSRAMFS_MAX_THREADS)
+    set (VFSRAMFS_THREADS_ENV "\n    VFS_SERVER_MAX_THREADS_PER_CLIENT: \"${VFSRAMFS_MAX_THREADS}\"\n    VFS_SERVER_MAX_THREADS_PER_PROCESS: \"${VFSRAMFS_MAX_THREADS}\"")
+endif ()
 
 set (NK_RESOURCES ${CMAKE_SOURCE_DIR}/resources/xdl)
 nk_include_directories (${NK_RESOURCES})
-
-# Copies Hello.edl into build/_headers_/hello/, where Einit generation looks for it.
 nk_build_edl_files (hello_edl_files
                     NK_MODULE "hello"
                     EDL       "${NK_RESOURCES}/hello/Hello.edl")
-
-# The program is built by dotnet publish, not by this project.
-add_executable (Hello IMPORTED)
-set_target_properties (Hello PROPERTIES IMPORTED_LOCATION "${HELLO_BINARY}")
-
-# VfsNet does not address the network interface. NetInit gives en0 the address QEMU user networking expects
-# (as the SDK's network examples do in their own programs), then exits.
 nk_build_edl_files (netinit_edl_files
                     NK_MODULE "hello"
                     EDL       "${NK_RESOURCES}/hello/NetInit.edl")
-add_executable (NetInit "src/netinit.c")
+
+# The program, built by dotnet publish, as the KPA package Hello. The client form of the backends that waits for the
+# server, as the SDK examples use for programs started at boot.
+add_kpa_package (Hello.kpa ID Hello MANIFEST_V "2")
+add_kpa_component (Hello.kpa RESOURCE "${HELLO_BINARY}" TYPE "bin" NAME "Hello")
+add_kpa_component (Hello.kpa
+                   RUN_CONFIGURATION "default"
+                   TYPE              "application"
+                   NAME              "Hello"
+                   EIID              "hello.Hello"
+                   PATH              "bin/Hello"
+                   ENV               "VFS_FILESYSTEM_BACKEND=client:task:kl.VfsRamFs:timeout_dcm_ms:600000"
+                                     "VFS_NETWORK_BACKEND=client:task:kl.VfsNet:timeout_dcm_ms:600000"
+                                     ${HOST_PORTS_ENV} ${HELLO_ENV}
+                   ARGS              ${HELLO_ARGS}
+                   NO_AUTO_VFS_CONNECTION)
+
+# VfsNet does not address the network interface. NetInit gives en0 the address QEMU user networking expects (as the
+# SDK's network examples did in their own programs on 1.4), then exits.
+add_executable (NetInit "${CMAKE_SOURCE_DIR}/src/netinit.c")
 add_dependencies (NetInit netinit_edl_files)
 target_link_libraries (NetInit vfs::client)
-# vfs::client would add the SDK's default VFS program; VfsNet serves NetInit instead.
 set_target_properties (NetInit PROPERTIES vfs::entity_REPLACEMENT "")
+add_kpa_package (NetInit.kpa ID NetInit MANIFEST_V "2")
+add_kpa_component (NetInit.kpa RESOURCE NetInit TYPE "bin")
+add_kpa_component (NetInit.kpa
+                   RUN_CONFIGURATION "default"
+                   TYPE              "application"
+                   NAME              "NetInit"
+                   EIID              "hello.NetInit"
+                   PATH              "bin/NetInit"
+                   ENV               "VFS_NETWORK_BACKEND=client:task:kl.VfsNet:timeout_dcm_ms:600000"
+                   NO_AUTO_VFS_CONNECTION)
 
-# VfsNet resolves host names for its clients, from /etc/hosts or DNS; without a hosts file not even `localhost`
-# resolves. As in the SDK's examples/net_with_separate_vfs, the image's ROMFS carries one and VfsNet mounts it at /etc
-# (besides the devfs the SDK gives it by default).
-set_target_properties (precompiled_vfs::VfsNet PROPERTIES EXTRA_ARGS "
-    - -l
-    - devfs /dev devfs 0
-    - -l
-    - romfs /etc romfs ro")
+# VfsRamFs, VfsNet and the dnet driver VfsNet needs run from the product ROMFS. VfsNet resolves host names for its
+# clients from /etc/hosts or DNS; without a hosts file not even `localhost` resolves. As in the SDK's
+# examples/net_with_separate_vfs, VfsNet reads /etc/hosts from the root file system (MinimalKOS's kl.VfsEntity).
+set (EINIT_SRC ${CMAKE_SOURCE_DIR}/einit)
+set (ROOTFS_DIR ${CMAKE_BINARY_DIR}/rootfs_img)
+set (PRODUCT_ROM_PROGRAMS dnet_executables::whole precompiled_vfs::VfsNet precompiled_vfs::VfsRamFs)
+set (PRODUCT_INIT_YAML "${CMAKE_BINARY_DIR}/product_init.yaml")
+configure_file (${EINIT_SRC}/product_init.yaml.in "${PRODUCT_INIT_YAML}")
 
-build_kos_qemu_image (kos-qemu-image
-                      EINIT_ENTITY EinitQemu
-                      CONNECTIONS_CFG "src/init.yaml.in"
-                      SECURITY_PSL "src/security.psl"
+build_vendor_romfs (vendor_romfs
+                    WITH_PRODUCT_ROMFS
+                    SECURITY_PSL_FILE ${EINIT_SRC}/security.psl
+                    EDL_TARGETS       hello_edl_files netinit_edl_files)
+build_einit (product_einit ${PRODUCT_INIT_YAML} DEPENDS ${PRODUCT_ROM_PROGRAMS})
+build_romfs (product_romfs product_einit FILES ${PRODUCT_ROM_PROGRAMS})
+
+find_program (TAR_COMMAND tar REQUIRED)
+add_custom_target (rootfs_part_src
+                   COMMAND ${CMAKE_COMMAND} -E make_directory ${ROOTFS_DIR}
+                   COMMAND ${TAR_COMMAND} --extract --keep-directory-symlink
+                                          --file ${MINIMAL_KOS_ROOTFS_ARCHIVE} --directory ${ROOTFS_DIR}
+                   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:product_romfs,ROMFS_LOCATION>
+                                                    ${ROOTFS_DIR}/product_romfs
+                   COMMAND ${CMAKE_COMMAND} -E copy ${EINIT_SRC}/initial_install.json
+                                                    ${EINIT_SRC}/system_services.json
+                                                    ${ROOTFS_DIR}${MINIMAL_KOS_INITIAL_SETTINGS_DIR}/
+                   COMMAND ${CMAKE_COMMAND} -E make_directory ${ROOTFS_DIR}/data/etc
+                   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/resources/romfs/etc/hosts ${ROOTFS_DIR}/data/etc/
+                   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PROPERTY:Hello.kpa,KPA_OUTPUT_DIR>/Hello.kpa
+                                                    $<TARGET_PROPERTY:NetInit.kpa,KPA_OUTPUT_DIR>/NetInit.kpa
+                                                    ${ROOTFS_DIR}${MINIMAL_KOS_INITIAL_PACKAGES_DIR}
+                   DEPENDS product_romfs Hello.kpa NetInit.kpa)
+build_rootfs (rootfs DIR ${ROOTFS_DIR} DEPENDS rootfs_part_src)
+
+generate_qemu_target (qemu
+                      KERNEL_IMAGE ${MINIMAL_KOS_IMAGE}
+                      VENDOR_IMAGE vendor_romfs
+                      ROOTFS_IMAGE rootfs
                       ${HOST_PORTS_QEMU}
-                      IMAGE_FILES Hello NetInit precompiled_vfs::VfsRamFs precompiled_vfs::VfsNet
-                                  ${CMAKE_SOURCE_DIR}/resources/romfs/etc/hosts)
-# An IMPORTED target cannot carry the dependency, so attach it to the image targets.
-add_dependencies (kos-qemu-image hello_edl_files)
-add_dependencies (EinitQemu hello_edl_files)
+                      ${KERNEL_CMDLINE_QEMU})

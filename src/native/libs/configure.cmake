@@ -251,7 +251,7 @@ check_symbol_exists(
     HAVE_POSIX_ADVISE)
 
 if (CLR_CMAKE_TARGET_KOS)
-    # TODO-KOS(5): SDK 1.4 declares fallocate() but none of the FALLOC_FL_* flags pal_io.c passes.
+    # TODO-KOS(5): SDK 1.4 and 2.0 declare fallocate() but none of the FALLOC_FL_* flags pal_io.c passes.
     set(HAVE_FALLOCATE 0)
 else ()
     check_symbol_exists(

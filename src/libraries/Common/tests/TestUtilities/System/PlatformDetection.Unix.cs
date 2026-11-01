@@ -38,7 +38,7 @@ namespace System
         public static bool IsNotQemuLinux => !IsQemuLinux;
 
         // KasperskyOS runs .NET as linux-arm64; System.Native reports the SDK's product name there
-        // ("KasperskyOS-Community-Edition-Qemu 1.4.0.102"), not uname's.
+        // ("KasperskyOS-Community-Edition-Qemu-arm64 2.0.0.179"), not uname's.
         public static bool IsKasperskyOS => IsLinux && RuntimeInformation.OSDescription.StartsWith("KasperskyOS", StringComparison.Ordinal);
         public static bool IsNotKasperskyOS => !IsKasperskyOS;
 

@@ -872,7 +872,8 @@ int32_t SystemNative_FChMod(intptr_t fd, int32_t mode)
 }
 
 #if defined(__KOS__) // TODO-KOS(6c): pread/pwrite/ftruncate/fsync fail with ENOSYS on /dev/null and pipes
-// KasperskyOS (CE SDK 1.4.0.102) fails pread, pwrite, ftruncate and fsync with ENOSYS on /dev/null and on pipes,
+// KasperskyOS (CE SDK 1.4.0.102) fails pread, pwrite, ftruncate and fsync with ENOSYS on /dev/null and on pipes
+// (SDK 2.0.0.179: pread and pwrite on /dev/null work, pread on a pipe fails with ESPIPE, the rest unchanged),
 // where Linux gives the error callers expect of a file that cannot seek or be truncated or synced. Report a
 // non-regular file's ENOSYS as that error (ESPIPE for pread and pwrite, EINVAL for ftruncate and fsync).
 static void KosNonRegularFileError(int fileDescriptor, int error)

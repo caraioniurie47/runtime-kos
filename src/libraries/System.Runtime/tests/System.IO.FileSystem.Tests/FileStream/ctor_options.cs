@@ -162,7 +162,7 @@ namespace System.IO.Tests
         public void WhenDiskIsFullTheErrorMessageContainsAllDetails(FileMode mode)
         {
             if (PlatformDetection.IsKasperskyOS)
-                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(6e): posix_fallocate returns -1 instead of an error number");
+                throw new Microsoft.DotNet.XUnitExtensions.SkipTestException("TODO-KOS(5): no usable fallocate(), so preallocation is not done and the file opens");
 
             const long tooMuch = 1024L * 1024L * 1024L * 1024L * 1024L * 1024L; // 1 Exbibyte .. we are assuming this is not available
             string filePath = GetTestFilePath();

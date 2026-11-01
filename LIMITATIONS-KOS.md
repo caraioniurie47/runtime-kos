@@ -79,7 +79,8 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX`, `TODO-KOS-IMAGE` or `KO
   back), two minutes without an allocation by any thread (every thread's state), and free memory falling below 512,
   256, 128 and 64 MiB and at exit. Each report gives the address of `minipal_lowres_ticks`, which places the binary
   for a symbol lookup in its `.dbg` file. A suspension report is written by the suspending thread, so its write time
-  adds to the suspension it reports. Unset, the runtime only tests a flag. *KasperskyOS (finding 11), Port.*
+  adds to the suspension it reports. Unset, the runtime reads the variable once and then only tests a flag.
+  *KasperskyOS (finding 11), Port.*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
   free, so in the runs made no allocation failed for .NET to report as `OutOfMemoryException`. What happens at the
@@ -111,7 +112,7 @@ tried.
   was one server thread per client and per process (`VFS_SERVER_MAX_THREADS_PER_CLIENT` and `..._PER_PROCESS` 1 in
   its environment). On SDK 2.0 the C reproducer no longer faults, and full System.IO.FileSystem.Tests runs at the
   default passed with no VfsRamFs fault, so the image sets no limit; its `VFSRAMFS_MAX_THREADS` (in
-  `kos-image/CMakeLists.txt`) sets one again, and the image of the branch `kos-sdk-1.4.0.102` sets 1. Report:
+  `kos-image/CMakeLists.txt`) can set a limit again, and the image of the branch `kos-sdk-1.4.0.102` sets 1. Report:
   [forum topic 59792](https://forum.kaspersky.com/topic/vfsramfs-crashes-null-dereference-in-inode_destructor-under-concurrent-statreaddirunlink-kasperskyos-ce-140102-59792/),
   reproducer [kos-vfsramfs-repro](https://github.com/caraioniurie47/kos-vfsramfs-repro). *SDK (finding 6f).*
 - **`FileShare` is not enforced.** There is no `flock` (no `sys/file.h`), so opening a file another handle holds with

@@ -35,8 +35,8 @@
 // the GC threads' stacks), 120 s without an allocation by any thread (every thread's state), free memory crossing
 // 512, 256, 128 and 64 MiB, and at exit. A stack is the frame-record chains found in the top 128 KB of its memory; the
 // lowest may be stale. Every report gives the address of minipal_lowres_ticks, which places the binary for
-// symbolizing. Unset, the runtime only tests a flag. Distilled from the trace that found the SDK 2.0 GC stalls' causes
-// (2026-10-21).
+// symbolizing. Unset, it reads the variable once and then only tests a flag. Distilled from the trace that found the
+// SDK 2.0 GC stalls' causes (2026-10-21).
 #include <coresrv/stat/stat_api.h>
 #include <errno.h>
 #include <pthread.h>
@@ -395,13 +395,13 @@ void ThreadStore::UnlockThreadStore()
 }
 
 #if defined(__KOS__)
-// The watchdog thread (TODO-KOS(11), see KosWatchdogStart): never attached to the runtime, so no GC stops it. Every
-// 15 s it samples free memory, then try-locks the thread store. Found busy at every sample for 120 s, it reports the
-// suspending thread and the GC threads without holding the lock: the holder can release it meanwhile, a thread can
-// then exit and free its Thread (thread-local) and stack, and GC threads attach while the GC holds the lock, so the
-// walk can read freed memory and a fault there ends the process (a risk taken only in a stall). If it gets the lock,
-// it fingerprints every thread's allocation context, and after 120 s without a change (and again at 300 s) reports
-// every thread, writing only after releasing the lock.
+// TODO-KOS(11): the watchdog thread, never attached to the runtime, so no GC stops it
+// Every 15 s it samples free memory, then try-locks the thread store. Found busy at every sample for 120 s, it reports
+// the suspending thread and the GC threads without holding the lock: the holder can release it meanwhile, a thread
+// can then exit and free its Thread (thread-local) and stack, and GC threads attach while the GC holds the lock, so
+// the walk can read freed memory and a fault there ends the process (a risk taken only in a stall). If it gets the
+// lock, it fingerprints every thread's allocation context, and after 120 s without a change (and again at 300 s)
+// reports every thread, writing only after releasing the lock.
 void* ThreadStore::KosWatchdog(void* unused)
 {
     (void)unused;

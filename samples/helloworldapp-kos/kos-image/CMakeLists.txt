@@ -56,7 +56,7 @@ if (HOST_PORTS_FWD)
 endif ()
 
 # Kernel startup parameters (manual, "Kernel startup parameters"), passed with QEMU's -append.
-# KOS-DOC(kernel_command_line): vmm.overcommit=exception, so running out of memory ends the program, not stalls it
+# KOS-DOC(kernel_command_line): vmm.overcommit=exception, so a program out of memory ends rather than stalls
 # SDK 2.0's default makes a thread that writes memory the kernel cannot commit wait for free pages: a .NET program that
 # runs out of memory stops making progress, with no OutOfMemoryException and no end. With `exception` the kernel ends
 # the process at that write, as SDK 1.4 did, which a test runner or a watchdog can see. -D KOS_KERNEL_CMDLINE= (empty)

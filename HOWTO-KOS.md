@@ -60,7 +60,7 @@ wsl -d UbuntuKOS20 -u root
 
 ## 2. Install prerequisites
 
-The quick start's `eng/kos/setup-host.sh` runs steps 2-4 as written here, skipping what is already installed.
+The quick start's `eng/kos/setup-host.sh` runs steps 2-4 as written here, and skips a step whose result is complete.
 
 ```sh
 export DEBIAN_FRONTEND=noninteractive
@@ -72,11 +72,13 @@ apt-get install -y --no-install-recommends build-essential clang llvm lld lldb p
 ### CMake
 
 `main` needs CMake 3.26 or later. The builds used Kitware's portable CMake 3.31.12 (apt's was not tried). It goes
-to `/opt`, linked from `/usr/local/bin`, which comes before `/usr/bin` on `PATH`.
+to `/opt`, linked from `/usr/local/bin`, which comes before `/usr/bin` on `PATH`. The SHA-256 is Kitware's, from
+the release's `cmake-3.31.12-SHA-256.txt`.
 
 ```sh
 cd /home
 wget -nc https://github.com/Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-linux-x86_64.tar.gz
+echo "0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c  cmake-3.31.12-linux-x86_64.tar.gz" | sha256sum -c
 tar -xzf cmake-3.31.12-linux-x86_64.tar.gz -C /opt
 for t in cmake ctest cpack; do ln -sf /opt/cmake-3.31.12-linux-x86_64/bin/$t /usr/local/bin/$t; done
 hash -r

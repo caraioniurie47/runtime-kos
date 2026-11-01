@@ -70,6 +70,12 @@ marker naming its cause:
   bookkeeping tables span terabytes; growing them copies gigabytes with every thread stopped, for minutes under QEMU
   (Cryptography's and Sockets' test suites). Allocating arrays of a gigabyte or more also holds up a collection
   while the memory is first touched. *SDK, Port.*
+- **`DOTNET_KOS_WATCHDOG=1` reports what holds up a collection.** Nothing outside a KasperskyOS program can read
+  another thread's registers, so with this variable set the runtime writes to stderr: a thread suspension still
+  waiting after 10 s (the threads it waits for, with stack return addresses), a collection holding the runtime for
+  120 s, two minutes without an allocation by any thread (every thread's state), and free memory falling below 512,
+  256, 128 and 64 MiB and at exit. Each report gives the address of `minipal_lowres_ticks`, which places the binary
+  for a symbol lookup in its `.dbg` file. Unset, it costs nothing. *KasperskyOS (finding 11), Port.*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
   free, so in the runs made no allocation failed for .NET to report as `OutOfMemoryException`. What happens at the

@@ -64,6 +64,9 @@ public:
     void        ResumeAllThreads(bool waitForGCEvent);
 
     static bool IsTrapThreadsRequested();
+#if defined(__KOS__)
+    static void* KosWatchdog(void* unused); // see threadstore.cpp, TODO-KOS(11)
+#endif
 };
 typedef DPTR(ThreadStore) PTR_ThreadStore;
 

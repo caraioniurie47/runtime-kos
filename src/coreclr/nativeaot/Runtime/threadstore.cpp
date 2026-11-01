@@ -26,6 +26,159 @@
 #include <minipal/thread.h>
 #include "SignalSafeThreadMap.h"
 
+#if defined(__KOS__)
+// TODO-KOS(11): no API to interrupt or inspect another thread, so an opt-in watchdog reports what holds up a GC
+// A GC waits until every thread reaches a safe point by itself, and nothing outside the program can see what a thread
+// is doing. With DOTNET_KOS_WATCHDOG=1 the runtime reports on stderr: from the suspending thread, a suspension still
+// waiting after 10 s (the threads not yet suspended; again at 70 s and 130 s); from a watchdog thread outside the
+// runtime, the thread store lock held for 120 s (a GC that long: the suspending thread's and the GC threads' stacks),
+// 120 s without an allocation by any thread (every thread's state), free memory crossing 512, 256, 128 and 64 MiB,
+// and at exit. A stack is the frame-record chains found in the top 128 KB of its memory; the lowest may be stale.
+// Every report gives the address of minipal_lowres_ticks, which places the binary for symbolizing. Unset, nothing
+// runs. Written for the SDK 2.0 GC stalls (2026-10-21), whose causes it found.
+#include <coresrv/stat/stat_api.h>
+#include <errno.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+
+static bool s_kosWatchdog = false; // set before the first thread attaches, never changed after
+static pthread_once_t s_kosWatchdogOnce = PTHREAD_ONCE_INIT;
+
+static void KosWatchdogWrite(const char* text)
+{
+    size_t length = strlen(text);
+    while (length > 0)
+    {
+        ssize_t written = write(2, text, length);
+        if (written <= 0)
+            return;
+        text += written;
+        length -= (size_t)written;
+    }
+}
+
+static void* KosWatchdogAnchor()
+{
+    return (void*)&minipal_lowres_ticks;
+}
+
+static int64_t KosWatchdogFreeMiB()
+{
+    rtl_int64_t pages = -1;
+    if (KnGroupStatGetParam(GROUP_PARAM_MEM_FREE, &pages) != 0 || pages < 0)
+        return -1;
+    return (int64_t)(pages * (rtl_int64_t)sysconf(_SC_PAGESIZE) / (1024 * 1024));
+}
+
+static volatile int64_t s_kosWatchdogFreeMiB = -1;
+static volatile int64_t s_kosWatchdogMinFreeMiB = -1;
+static volatile int64_t s_kosWatchdogMinFreeAtS = 0;
+
+static void KosWatchdogWriteMemory(const char* when)
+{
+    char line[200];
+    snprintf(line, sizeof(line), "KOS-WATCHDOG memory (%s): free %lld MiB, lowest %lld MiB at %lld s; anchor %p\n", when,
+             (long long)s_kosWatchdogFreeMiB, (long long)s_kosWatchdogMinFreeMiB, (long long)s_kosWatchdogMinFreeAtS,
+             KosWatchdogAnchor());
+    KosWatchdogWrite(line);
+}
+
+static void KosWatchdogAtExit()
+{
+    s_kosWatchdogFreeMiB = KosWatchdogFreeMiB();
+    KosWatchdogWriteMemory("exit");
+}
+
+// The frame-record chains in the top 128 KB of another thread's stack, read from this thread (the same address space).
+// A record is a 16-byte-aligned slot holding a higher frame pointer within the stack and, beside it, an address within
+// 256 MB of this binary's code. Prints, from the lowest address up, the first five chains of at least four records,
+// a record already printed as part of a chain starting none.
+static void KosWatchdogScanStack(unsigned long long tid, uintptr_t low, uintptr_t high)
+{
+    const uintptr_t ScanBytes = 128 * 1024;
+    uintptr_t code = (uintptr_t)KosWatchdogAnchor();
+    uintptr_t codeLow = code - 0x10000000;
+    uintptr_t codeHigh = code + 0x10000000;
+    uintptr_t start = high - low > ScanBytes ? high - ScanBytes : low;
+    start = (start + 15) & ~(uintptr_t)15;
+
+    auto isRecord = [&](uintptr_t f) -> bool
+    {
+        if (f < start || f + 16 > high || (f & 15) != 0)
+            return false;
+        uintptr_t next = ((uintptr_t*)f)[0];
+        uintptr_t ra = ((uintptr_t*)f)[1];
+        return next > f && next < high && (next & 15) == 0 && ra >= codeLow && ra < codeHigh;
+    };
+
+    char line[1024];
+    uintptr_t members[5 * 32];
+    int memberCount = 0;
+    int printed = 0;
+    for (uintptr_t f = start; f + 16 <= high && printed < 5; f += 16)
+    {
+        if (!isRecord(f))
+            continue;
+        bool seen = false;
+        for (int i = 0; i < memberCount; i++)
+        {
+            if (members[i] == f)
+            {
+                seen = true;
+                break;
+            }
+        }
+        if (seen)
+            continue;
+        int length = 0;
+        for (uintptr_t g = f; isRecord(g) && length < 64; g = ((uintptr_t*)g)[0])
+            length++;
+        if (length < 4)
+            continue;
+        int used = snprintf(line, sizeof(line), "KOS-WATCHDOG   stack of tid %llu, record %p (%d frames):", tid, (void*)f,
+                            length);
+        int frames = 0;
+        for (uintptr_t g = f; isRecord(g) && frames < 32 && used > 0 && used < (int)sizeof(line) - 24;
+             g = ((uintptr_t*)g)[0])
+        {
+            used += snprintf(line + used, sizeof(line) - used, " %p", (void*)((uintptr_t*)g)[1]);
+            if (memberCount < (int)(sizeof(members) / sizeof(members[0])))
+                members[memberCount++] = g;
+            frames++;
+        }
+        snprintf(line + used, sizeof(line) - used, "\n");
+        KosWatchdogWrite(line);
+        printed++;
+    }
+    if (printed == 0)
+    {
+        snprintf(line, sizeof(line), "KOS-WATCHDOG   stack of tid %llu: no chain in [%p,%p)\n", tid, (void*)start,
+                 (void*)high);
+        KosWatchdogWrite(line);
+    }
+}
+
+static void KosWatchdogStart()
+{
+    const char* setting = getenv("DOTNET_KOS_WATCHDOG");
+    if (setting == NULL || strcmp(setting, "1") != 0)
+        return;
+    s_kosWatchdog = true;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_t thread;
+    if (pthread_create(&thread, &attr, ThreadStore::KosWatchdog, NULL) != 0)
+    {
+        KosWatchdogWrite("KOS-WATCHDOG: pthread_create failed\n");
+    }
+    pthread_attr_destroy(&attr);
+}
+#endif
+
 EXTERN_C volatile uint32_t RhpTrapThreads;
 volatile uint32_t RhpTrapThreads = (uint32_t)TrapThreadsFlags::None;
 
@@ -111,6 +264,10 @@ void ThreadStore::AttachCurrentThread(bool fAcquireThreadStoreLock)
     // thread belongs to), but it hasn't been added to the thread store because doing so takes a lock, which
     // we want to avoid at construction time because the loader lock is held then.
     Thread * pAttachingThread = RawGetCurrentThread();
+
+#if defined(__KOS__)
+    pthread_once(&s_kosWatchdogOnce, KosWatchdogStart); // TODO-KOS(11): see KosWatchdogStart
+#endif
 
     if (pAttachingThread->IsDetached())
     {
@@ -236,9 +393,211 @@ void ThreadStore::UnlockThreadStore()
     m_Lock.Leave();
 }
 
+#if defined(__KOS__)
+// The watchdog thread (TODO-KOS(11), see KosWatchdogStart): never attached to the runtime, so no GC stops it. Every
+// 15 s it samples free memory, then try-locks the thread store: if another thread has held it for 120 s, it reports that
+// thread and the GC threads (the list cannot change while the lock is held: threads attach and detach under it); if it
+// gets the lock, it fingerprints every thread's allocation context, and after 120 s without a change (and again at 300 s)
+// reports every thread, writing only after releasing the lock.
+void* ThreadStore::KosWatchdog(void* unused)
+{
+    (void)unused;
+    const int PeriodS = 15;
+    const int64_t FirstReportMs = 120000;
+    const int64_t SecondDumpMs = 300000;
+    const int64_t Thresholds[] = { 512, 256, 128, 64 };
+    static char text[32768];
+    ThreadStore* pTS = GetThreadStore();
+    // CrstStatic's only member in a release build is a minipal_mutex, whose only member is a pthread_mutex_t.
+    pthread_mutex_t* lock = (pthread_mutex_t*)&pTS->m_Lock;
+    uint64_t lastSignature = 0;
+    int64_t started = minipal_lowres_ticks();
+    int64_t unchangedSince = started;
+    int64_t busySince = 0;
+    int64_t busyReportedAt = 0;
+    int busyReports = 0;
+    int dumps = 0;
+    int thresholdsCrossed = 0;
+    atexit(KosWatchdogAtExit);
+
+    for (;;)
+    {
+        struct timespec pause = { PeriodS, 0 };
+        while (nanosleep(&pause, &pause) < 0 && errno == EINTR)
+        {
+        }
+        int64_t now = minipal_lowres_ticks();
+
+        int64_t freeMiB = KosWatchdogFreeMiB();
+        s_kosWatchdogFreeMiB = freeMiB;
+        if (freeMiB >= 0 && (s_kosWatchdogMinFreeMiB < 0 || freeMiB < s_kosWatchdogMinFreeMiB))
+        {
+            s_kosWatchdogMinFreeMiB = freeMiB;
+            s_kosWatchdogMinFreeAtS = (now - started) / 1000;
+        }
+        if (thresholdsCrossed < 4 && freeMiB >= 0 && freeMiB < Thresholds[thresholdsCrossed])
+        {
+            while (thresholdsCrossed < 4 && freeMiB < Thresholds[thresholdsCrossed])
+                thresholdsCrossed++;
+            KosWatchdogWriteMemory("below a threshold");
+        }
+
+        if (pthread_mutex_trylock(lock) != 0)
+        {
+            if (busySince == 0)
+            {
+                busySince = now;
+            }
+            else if (now - busySince >= FirstReportMs && (busyReports == 0 || now - busyReportedAt >= FirstReportMs) &&
+                     busyReports < 6)
+            {
+                char line[300];
+                IGCHeap* heap = GCHeapUtilities::GetGCHeap();
+                snprintf(line, sizeof(line),
+                         "KOS-WATCHDOG: thread store lock held for %lld s; trap 0x%x, suspending thread %p; gc count %u, "
+                         "in progress %d, concurrent in progress %d; anchor %p\n",
+                         (long long)((now - busySince) / 1000), (unsigned)RhpTrapThreads, (void*)RhpSuspendingThread,
+                         (unsigned)heap->GetGcCount(), GCHeapUtilities::IsGCInProgress() ? 1 : 0,
+                         heap->IsConcurrentGCInProgress() ? 1 : 0, KosWatchdogAnchor());
+                KosWatchdogWrite(line);
+                KosWatchdogWriteMemory("lock held");
+                FOREACH_THREAD(pThread)
+                {
+                    if (pThread == RhpSuspendingThread || pThread->IsGCSpecial())
+                    {
+                        snprintf(line, sizeof(line), "KOS-WATCHDOG   thread %p tid %llu%s%s flags 0x%x frame %p\n",
+                                 (void*)pThread, (unsigned long long)pThread->m_threadId,
+                                 pThread == RhpSuspendingThread ? " suspending" : "",
+                                 pThread->IsGCSpecial() ? " gcspecial" : "", (unsigned)pThread->m_ThreadStateFlags,
+                                 (void*)VolatileLoadWithoutBarrier(&pThread->m_pTransitionFrame));
+                        KosWatchdogWrite(line);
+                        KosWatchdogScanStack((unsigned long long)pThread->m_threadId,
+                                             (uintptr_t)pThread->m_pStackLow, (uintptr_t)pThread->m_pStackHigh);
+                    }
+                }
+                END_FOREACH_THREAD
+                busyReportedAt = now;
+                busyReports++;
+            }
+            continue;
+        }
+        busySince = 0;
+        busyReports = 0;
+
+        uint64_t signature = 0;
+        int count = 0;
+        FOREACH_THREAD(pThread)
+        {
+            gc_alloc_context* ac = pThread->m_eeAllocContext.GetGCAllocContext();
+            signature = signature * 31 + (uint64_t)(uintptr_t)ac->alloc_ptr + (uint64_t)ac->alloc_bytes;
+            count++;
+        }
+        END_FOREACH_THREAD
+
+        if (signature != lastSignature)
+        {
+            lastSignature = signature;
+            unchangedSince = now;
+            dumps = 0;
+            pthread_mutex_unlock(lock);
+            continue;
+        }
+
+        int64_t unchangedMs = now - unchangedSince;
+        if (!((dumps == 0 && unchangedMs >= FirstReportMs) || (dumps == 1 && unchangedMs >= SecondDumpMs)))
+        {
+            pthread_mutex_unlock(lock);
+            continue;
+        }
+        dumps++;
+
+        struct { unsigned long long tid; uintptr_t low; uintptr_t high; } coop[16];
+        int coopCount = 0;
+        size_t used = 0;
+#define KOS_WATCHDOG_APPEND(...)                                                                         \
+        do                                                                                               \
+        {                                                                                                \
+            if (used < sizeof(text))                                                                     \
+            {                                                                                            \
+                int n = snprintf(text + used, sizeof(text) - used, __VA_ARGS__);                         \
+                if (n > 0)                                                                               \
+                    used = used + (size_t)n < sizeof(text) ? used + (size_t)n : sizeof(text) - 1;        \
+            }                                                                                            \
+        } while (0)
+
+        KOS_WATCHDOG_APPEND("KOS-WATCHDOG: dump %d: no allocation for %lld s, %d threads, trap 0x%x, suspending "
+                            "thread %p; anchor %p\n",
+                            dumps, (long long)(unchangedMs / 1000), count, (unsigned)RhpTrapThreads,
+                            (void*)RhpSuspendingThread, KosWatchdogAnchor());
+        FOREACH_THREAD(pThread)
+        {
+            PInvokeTransitionFrame* frame = VolatileLoadWithoutBarrier(&pThread->m_pTransitionFrame);
+            uintptr_t low = (uintptr_t)pThread->m_pStackLow;
+            uintptr_t high = (uintptr_t)pThread->m_pStackHigh;
+            KOS_WATCHDOG_APPEND("KOS-WATCHDOG   thread %p tid %llu flags 0x%x stack [%p,%p) gcspecial %d", (void*)pThread,
+                                (unsigned long long)pThread->m_threadId, (unsigned)pThread->m_ThreadStateFlags,
+                                (void*)low, (void*)high, pThread->IsGCSpecial() ? 1 : 0);
+            if (frame == NULL)
+            {
+                KOS_WATCHDOG_APPEND(" cooperative (no transition frame)\n");
+                if (coopCount < (int)(sizeof(coop) / sizeof(coop[0])))
+                {
+                    coop[coopCount].tid = (unsigned long long)pThread->m_threadId;
+                    coop[coopCount].low = low;
+                    coop[coopCount].high = high;
+                    coopCount++;
+                }
+                continue;
+            }
+            if (frame == TOP_OF_STACK_MARKER)
+            {
+                KOS_WATCHDOG_APPEND(" top-of-stack marker\n");
+                continue;
+            }
+            KOS_WATCHDOG_APPEND(" frame %p ip %p fp %p chain", (void*)frame, (void*)frame->m_RIP,
+                                (void*)frame->m_FramePointer);
+            uintptr_t fp = (uintptr_t)frame->m_FramePointer;
+            for (int i = 0; i < 16; i++)
+            {
+                if (fp < low || fp + 2 * sizeof(uintptr_t) > high || (fp & 7) != 0)
+                    break;
+                uintptr_t* record = (uintptr_t*)fp;
+                KOS_WATCHDOG_APPEND(" %p", (void*)record[1]);
+                if (record[0] <= fp)
+                    break;
+                fp = record[0];
+            }
+            KOS_WATCHDOG_APPEND("\n");
+        }
+        END_FOREACH_THREAD
+#undef KOS_WATCHDOG_APPEND
+        pthread_mutex_unlock(lock);
+
+        KosWatchdogWrite(text);
+        KosWatchdogWriteMemory("no allocation");
+        // After the unlock: a thread that exits meanwhile has its stack freed (a risk taken only in a stall).
+        for (int i = 0; i < coopCount; i++)
+        {
+            KosWatchdogScanStack(coop[i].tid, coop[i].low, coop[i].high);
+        }
+        char line[80];
+        snprintf(line, sizeof(line), "KOS-WATCHDOG: dump %d end\n", dumps);
+        KosWatchdogWrite(line);
+    }
+    return NULL;
+}
+#endif
+
 void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
 {
     Thread * pThisThread = GetCurrentThreadIfAvailable();
+#if defined(__KOS__)
+    // TODO-KOS(11): with DOTNET_KOS_WATCHDOG=1, a suspension that waits 10 s names the threads it waits for (from this,
+    // the suspending thread), again at 70 s and 130 s, and its length when it ends.
+    int64_t kosWatchdogStart = s_kosWatchdog ? minipal_lowres_ticks() : 0;
+    int64_t kosWatchdogNext = kosWatchdogStart + 10000;
+    int kosWatchdogReports = 0;
+#endif
     RhpSuspendingThread = pThisThread;
 
     if (waitForGCEvent)
@@ -280,6 +639,48 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
         }
         END_FOREACH_THREAD
 
+#if defined(__KOS__)
+        if (s_kosWatchdog)
+        {
+            int64_t kosWatchdogNow = minipal_lowres_ticks();
+            char line[400];
+            if (remaining == 0)
+            {
+                if (kosWatchdogReports > 0)
+                {
+                    snprintf(line, sizeof(line), "KOS-WATCHDOG: suspension done after %lld ms; anchor %p\n",
+                             (long long)(kosWatchdogNow - kosWatchdogStart), KosWatchdogAnchor());
+                    KosWatchdogWrite(line);
+                }
+            }
+            else if (kosWatchdogNow >= kosWatchdogNext && kosWatchdogReports < 3)
+            {
+                snprintf(line, sizeof(line),
+                         "KOS-WATCHDOG: suspension waiting %lld ms for %d thread(s); suspender tid %llu; anchor %p\n",
+                         (long long)(kosWatchdogNow - kosWatchdogStart), remaining,
+                         pThisThread != NULL ? (unsigned long long)pThisThread->m_threadId : 0ULL, KosWatchdogAnchor());
+                KosWatchdogWrite(line);
+                if (kosWatchdogReports == 0)
+                {
+                    FOREACH_THREAD(pWaitedFor)
+                    {
+                        if (pWaitedFor == pThisThread || pWaitedFor->m_pCachedTransitionFrame != NULL)
+                            continue;
+                        snprintf(line, sizeof(line),
+                                 "KOS-WATCHDOG   not suspended: tid %llu flags 0x%x gcspecial %d stack [%p,%p)\n",
+                                 (unsigned long long)pWaitedFor->m_threadId, (unsigned)pWaitedFor->m_ThreadStateFlags,
+                                 pWaitedFor->IsGCSpecial() ? 1 : 0, pWaitedFor->m_pStackLow, pWaitedFor->m_pStackHigh);
+                        KosWatchdogWrite(line);
+                        KosWatchdogScanStack((unsigned long long)pWaitedFor->m_threadId,
+                                             (uintptr_t)pWaitedFor->m_pStackLow, (uintptr_t)pWaitedFor->m_pStackHigh);
+                    }
+                    END_FOREACH_THREAD
+                }
+                kosWatchdogReports++;
+                kosWatchdogNext = kosWatchdogNow + 60000;
+            }
+        }
+#endif
         if (remaining == 0)
             break;
 

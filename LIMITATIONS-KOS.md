@@ -69,14 +69,15 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX` or `TODO-KOS-IMAGE`.
   the pages to the system, and its commit calls `KnVmCommit`, after which the range reads as zeros. Reservations use
   `MAP_NORESERVE`, because a plain `PROT_NONE` reservation commits its memory at once (512 MiB took about 19 s under
   QEMU on SDK 2.0, 53 s on 1.4; `mem-check.c` in kos-sdk-checks). *SDK (finding 8).*
-- **GC regions, as on Linux; gigabyte arrays hold up collections under QEMU.** The GC uses regions on KasperskyOS. On
-  segments (the port's choice on SDK 1.4, where regions measured slower under QEMU) each segment is its own `mmap`, and
-  SDK 2.0 places reservations terabytes apart, so the GC's bookkeeping tables spanned terabytes and growing them
-  stopped every thread for minutes under QEMU: a GC benchmark run took 838 s instead of 5-73 s, a Sockets run 888 s
-  instead of about 340-500 s, and one Cryptography run ran out of memory. With regions none of these was seen (the same
-  benchmark runs took 26-46 s). Threads
-  allocating arrays of a gigabyte or more still held up collections for minutes (56-224 s in Cryptography's suite);
-  the cause was not established. *SDK, Port.*
+- **GC regions, as on Linux; a huge allocation can hold up collections under QEMU.** The GC uses regions on
+  KasperskyOS. On segments (the port's choice on SDK 1.4, where regions measured slower under QEMU) each segment is its
+  own `mmap`, and SDK 2.0 places reservations terabytes apart, so the GC's bookkeeping tables spanned terabytes, and
+  growing them stopped every thread for minutes under QEMU (traced in Cryptography and Sockets runs; that Sockets run
+  took 888 s instead of about 340-500 s). Also on segments, not traced: two of four boots of a GC benchmark each had a
+  run of 838 s instead of 5-73 s, and one Cryptography run ran out of memory. With regions none of these was seen (the
+  benchmark's runs took 26-46 s). In two trial runs of Cryptography's suite on regions, collections still waited
+  56-224 s for threads in cooperative mode, one of them a thread allocating a 1.5 GiB array; what took the time was not
+  established. *SDK, Port.*
 - **`DOTNET_KOS_WATCHDOG=1` reports what holds up a collection.** A KasperskyOS program has no API to read the
   registers of its other threads (finding 11), so with this variable set the runtime writes to stderr: a thread
   suspension still waiting after 10 s (the threads it waits for, with stack return addresses; a count again at 70 s
@@ -241,8 +242,10 @@ The dotnet/runtime library test suites below, built as NativeAOT for KasperskyOS
 QEMU, with the CI's test filters. "Failed" counts are those of the run named; the causes are above.
 
 SDK 2.0.0.179, 2026-10-20, the samples' image as it was then (VfsRamFs limited to one thread,
-`vmm.overcommit=exception`), ICU linked. A suite marked *stalled* stopped printing before its end in some runs, and
-those runs have no result: GC pauses ([Runtime](#runtime)); the decommit's share of them is fixed.
+`vmm.overcommit=exception`), ICU linked, the GC on segments (the port's GC until 2026-11-01). The FileSystem, Sockets,
+Net.Security and Cryptography rows add later runs, with the GC decommit fix and on GC regions. A suite marked *stalled*
+stopped printing before its end in some runs, and those runs have no result: GC pauses ([Runtime](#runtime)), whose
+two traced causes the decommit fix and regions remove.
 
 | Suite | Result | Failures |
 | --- | --- | --- |
@@ -253,21 +256,22 @@ those runs have no result: GC pauses ([Runtime](#runtime)); the decommit's share
 | System.Globalization.Extensions.Tests, .Calendars.Tests | 689 and 1477 run, 0 failed | |
 | System.Threading.Channels.Tests | 1589 run, 0 failed, 14 skipped | |
 | System.Console.Tests | 4287 run, 0 failed, 22 skipped | |
-| System.IO.FileSystem.Tests | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed; with VfsRamFs's default threads, two full runs of 8596 passed and one stalled, and with the GC decommit fix three more passed |
+| System.IO.FileSystem.Tests | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed; with VfsRamFs's default threads, two full runs of 8596 passed and one stalled, and with the GC decommit fix three more passed; on GC regions one run, 8596 passed |
 | System.IO.FileSystem.DriveInfo.Tests | 6 run, 0 failed | |
-| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of three runs, slow in another; with the GC decommit fix three of three complete (338, 888 and 498 s, the slow one with a GC pause, [Runtime](#runtime)), failing up to 10 under load (mostly `SelectTest` "Too many open files in system", as on 1.4), and once `NetworkStreamTest.ReadWrite_Success` timing out (cause not established); with GC regions two of two complete (402 and 548 s), 1 and 0 failed |
+| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of three runs, slow in another; with the GC decommit fix three of three complete (338, 888 and 498 s, the slow one with a GC pause, [Runtime](#runtime)), failing up to 10 under load (mostly `SelectTest` "Too many open files in system", as on 1.4), and once `NetworkStreamTest.ReadWrite_Success` timing out (cause not established); with GC regions two of two complete (402 and 330 s), 1 and 0 failed |
 | System.Net.NetworkInformation.Functional.Tests | 248 run, 0 failed, 13 skipped | |
-| System.Net.Security.Tests | 5063 run, 1 failed, 25 skipped | `SslStream_RandomSizeWrites_OK`, which emulation makes too slow for its fixed 60 s, as on 1.4; *stalled* in one of two full runs before the GC decommit fix, two of two complete with it (350 and 354 s) |
-| System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs; with the GC decommit fix two of three complete, one ran out of memory (GC pauses, [Runtime](#runtime)); with GC regions three of three complete (1172, 1279 and 1684 s) |
+| System.Net.Security.Tests | 5063 run, 1 failed, 25 skipped | `SslStream_RandomSizeWrites_OK`, which emulation makes too slow for its fixed 60 s, as on 1.4; *stalled* in one of two full runs before the GC decommit fix, two of two complete with it (350 and 354 s); on GC regions one run, 2 failed (two cases of the same test) |
+| System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs; with the GC decommit fix three of four complete, one ran out of memory (GC pauses, [Runtime](#runtime)); with GC regions three of three complete (1172, 1279 and 1268 s) |
 | System.Diagnostics.Process.Tests | 454 run, 0 failed, 256 skipped | |
 | System.Runtime.InteropServices.Tests | 2461 run, 0 failed, 164 skipped | |
 | System.IO.Ports.Tests | 919 run, 0 failed, 797 skipped | no serial ports, as on Linux without them |
 | System.Text.RegularExpressions.Tests | 23404 run, 8 failed, 15 skipped | the same 8 fail as NativeAOT on linux-x64 |
 | System.Text.Json.Tests (`System.Text.Json.Tests` namespace, reflection on) | 17916 run, 71 failed | NativeAOT's: every failure also fails as NativeAOT on linux-x64 |
 
-The runs with the GC decommit fix used a runtime with a temporary diagnostic trace added; of the GC regions runs, the
-last of each suite (2026-11-01) did not. On SDK 1.4.0.102 the same
-suites ran without a stall (results on the branch `kos-sdk-1.4.0.102`).
+A temporary diagnostic trace was added to the runtime for the runs with the GC decommit fix, except its last Sockets
+and Cryptography runs, and for the first run of each suite on GC regions; the last regions runs of Sockets and
+Cryptography (2026-11-01) had none. On SDK 1.4.0.102 the same suites ran without a stall (results on the branch
+`kos-sdk-1.4.0.102`).
 
 Each KasperskyOS-specific skip carries its marker in its skip reason or beside its condition in the source.
 

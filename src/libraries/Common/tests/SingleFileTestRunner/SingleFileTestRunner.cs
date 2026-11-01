@@ -36,9 +36,9 @@ public class SingleFileTestRunner : XunitTestFramework
         report("Running assembly:" + asm.FullName);
 
         // Where the device has no copy of the test's content files (TestData and the like, beside the executable on
-        // other platforms), they come as a ustar archive, from a read-only file system or, named "tcp:<host>:<port>",
-        // read from a TCP connection to its end (a device whose programs see no file system the image can fill, as
-        // KasperskyOS CE 2.0's VfsRamFs): unpack it into the current directory first.
+        // other platforms), they come as a ustar archive, from a read-only file system or, named
+        // "tcp:<IPv4 address>:<port>", read from a TCP connection to its end (a device whose programs see no file
+        // system the image can fill, as KasperskyOS CE 2.0's VfsRamFs): unpack it into the current directory first.
         string contentArchive = Environment.GetEnvironmentVariable("DOTNET_TEST_CONTENT_TAR");
         if (!string.IsNullOrEmpty(contentArchive))
         {
@@ -254,9 +254,9 @@ public class SingleFileTestRunner : XunitTestFramework
         return failed ? 1 : 0;
     }
 
-    // "tcp:<host>:<port>": everything the server sends before it closes the connection. The connect is retried for two
-    // minutes: the device's network may come up after the program starts (KasperskyOS CE 2.0's sample image addresses
-    // its interface from another program, so a first connect can fail "Can't assign requested address").
+    // "tcp:<IPv4 address>:<port>": everything the server sends before it closes the connection. The connect is retried
+    // for two minutes: the device's network may come up after the program starts (KasperskyOS CE 2.0's sample image
+    // addresses its interface from another program, so a first connect can fail "Can't assign requested address").
     private static MemoryStream ReceiveArchive(string address)
     {
         string[] parts = address.Split(':');

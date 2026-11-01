@@ -6,8 +6,9 @@
 # Usage, as root: eng/kos/setup-host.sh --accept-eula [--source]
 #
 # The SDK is Kaspersky's, under its own licence agreement; the script downloads it only once you have accepted that
-# agreement: read KOS_EULA_URL below, then pass --accept-eula (or set ACCEPT_KASPERSKYOS_EULA=yes). A step whose
-# result is already there is skipped, so the script can be run again.
+# agreement: read KOS_EULA_URL below, then pass --accept-eula (or set ACCEPT_KASPERSKYOS_EULA=yes). Each step that
+# finished leaves a marker file and is skipped on the next run; an interrupted download resumes, and a download that
+# fails its checksum is deleted, so the script can be run again after a failure.
 
 set -euo pipefail
 
@@ -34,13 +35,28 @@ done
 
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
 grep -q '^VERSION_ID="24.04"' /etc/os-release || echo "warning: SDK 2.0 requires Ubuntu 24.04; this host is not" >&2
-if [ ! -d "$KOS_SDK" ] && [ "$accept" != yes ]; then
+sdk_installed() {
+    [ "$(dpkg-query -W -f='${Status}' kasperskyos-community-edition-qemu-arm64 2>/dev/null)" = "install ok installed" ]
+}
+if ! sdk_installed && [ "$accept" != yes ]; then
     echo "The KasperskyOS CE SDK is used under Kaspersky's licence agreement: $KOS_EULA_URL" >&2
     echo "Read it; if you accept it, run again with --accept-eula." >&2
     exit 1
 fi
 
 step() { echo "=== $*"; }
+
+# Downloads into the current directory, resuming a partial file; with a SHA-256, a file that fails it is deleted.
+fetch() {  # url [sha256]
+    local file
+    file=$(basename "$1")
+    wget -c "$1"
+    if [ -n "${2:-}" ] && ! echo "$2  $file" | sha256sum -c; then
+        rm -f "$file"
+        echo "$file failed its checksum and was deleted; run the script again" >&2
+        exit 1
+    fi
+}
 
 step "Step 2: packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -49,20 +65,22 @@ apt-get upgrade -y
 apt-get install -y --no-install-recommends build-essential clang llvm lld lldb python-is-python3 curl wget git unzip file ca-certificates libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev zlib1g-dev ninja-build cpio pigz
 
 step "Step 2: CMake 3.31.12 in /opt"
-if [ ! -x "/opt/$CMAKE_NAME/bin/cmake" ]; then
+if [ ! -f "/opt/$CMAKE_NAME/.kos-setup-done" ]; then
     cd /home
-    wget -nc "https://github.com/Kitware/CMake/releases/download/v3.31.12/$CMAKE_NAME.tar.gz"
+    fetch "https://github.com/Kitware/CMake/releases/download/v3.31.12/$CMAKE_NAME.tar.gz"
+    rm -rf "/opt/$CMAKE_NAME"
     tar -xzf "$CMAKE_NAME.tar.gz" -C /opt
+    touch "/opt/$CMAKE_NAME/.kos-setup-done"
 fi
 for t in cmake ctest cpack; do ln -sf "/opt/$CMAKE_NAME/bin/$t" "/usr/local/bin/$t"; done
 hash -r
 cmake --version
 
 step "Step 3: KasperskyOS CE SDK in $KOS_SDK"
-if [ ! -d "$KOS_SDK" ]; then
+# The package's own state, not the directory: an install that failed after unpacking leaves the directory behind.
+if ! sdk_installed; then
     cd /home
-    wget -nc "$KOS_SDK_URL"
-    echo "$KOS_SDK_SHA256  ${KOS_SDK_NAME}_en.deb" | sha256sum -c
+    fetch "$KOS_SDK_URL" "$KOS_SDK_SHA256"
     apt-get install -y "./${KOS_SDK_NAME}_en.deb"
 fi
 
@@ -79,8 +97,8 @@ if [ "$source_build" = 1 ]; then
     [ -f "$REPO/eng/kos/icu/kos-icu.patch" ] || { echo "--source needs the runtime-kos clone; $REPO is not one" >&2; exit 1; }
 
     step "Step 5: ICU in /opt/icu4c/kos"
-    if [ ! -f /opt/icu4c/kos/lib/libicuuc.a ]; then
-        rm -rf /home/dotnet-icu /home/icu4c-build-x64 /home/icu4c-build-kos
+    if [ ! -f /opt/icu4c/kos/.kos-setup-done ]; then
+        rm -rf /home/dotnet-icu /home/icu4c-build-x64 /home/icu4c-build-kos /opt/icu4c/kos
         cd /home
         git init -q dotnet-icu && cd dotnet-icu
         git fetch --depth 1 https://github.com/dotnet/icu.git "$ICU_COMMIT"
@@ -99,20 +117,21 @@ if [ "$source_build" = 1 ]; then
             make install
         )
         unset ICU_DATA_FILTER_FILE
+        touch /opt/icu4c/kos/.kos-setup-done
     fi
 
     step "Step 5: OpenSSL 3.5.7 headers in /opt/openssl-kos/include"
-    if [ ! -f /opt/openssl-kos/include/openssl/opensslv.h ]; then
+    if [ ! -f /opt/openssl-kos/.kos-setup-done ]; then
         cd /home
-        wget -nc "https://github.com/openssl/openssl/releases/download/$OPENSSL_NAME/$OPENSSL_NAME.tar.gz"
-        echo "$OPENSSL_SHA256  $OPENSSL_NAME.tar.gz" | sha256sum -c
-        rm -rf "/home/$OPENSSL_NAME"
+        fetch "https://github.com/openssl/openssl/releases/download/$OPENSSL_NAME/$OPENSSL_NAME.tar.gz" "$OPENSSL_SHA256"
+        rm -rf "/home/$OPENSSL_NAME" /opt/openssl-kos/include/openssl
         tar -xzf "$OPENSSL_NAME.tar.gz"
         cd "/home/$OPENSSL_NAME"
         ./Configure linux-aarch64 no-shared no-quic no-cmp
         make build_generated
         mkdir -p /opt/openssl-kos/include
         cp -a include/openssl /opt/openssl-kos/include/
+        touch /opt/openssl-kos/.kos-setup-done
     fi
 fi
 

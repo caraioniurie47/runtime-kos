@@ -494,9 +494,10 @@ static bool VirtualCommitInner(void* address, size_t size, uint16_t node, bool n
 {
 #if defined(__KOS__)
     // KOS-DOC(posix_ifaces_impl_features): MAP_FIXED not supported, so decommit is KnVmDecommit, undone by KnVmCommit
-    // A range VirtualDecommit freed with KnVmDecommit faults until KnVmCommit, whatever its protection. KnVmCommit takes
-    // no memory until pages are written, and accepts a range never committed or already committed, so every commit
-    // calls it (SDK 2.0.0.179).
+    // A range VirtualDecommit freed with KnVmDecommit faults until KnVmCommit, whatever its protection. KnVmCommit
+    // takes no memory until pages are written, and returned 0 on ranges never committed, decommitted, and committed
+    // but never written, so every commit calls it (SDK 2.0.0.179). TODO-KOS(8): not yet probed on a committed page
+    // holding data, which the GC recommits at the edges of a mark-array range (commit_mark_array_by_range).
     bool success = KnVmCommit(address, size) == 0 && mprotect(address, size, PROT_WRITE | PROT_READ) == 0;
 #else
     bool success = mprotect(address, size, PROT_WRITE | PROT_READ) == 0;
@@ -586,7 +587,7 @@ bool GCToOSInterface::VirtualDecommit(void* address, size_t size)
     // TODO-KOS(8): MADV_DONTNEED and MADV_FREE free nothing
     // KasperskyOS fails MAP_FIXED over an existing mapping with ENOSYS, and neither MADV_DONTNEED nor MADV_FREE
     // frees pages (SDK 1.4.0.102). Unmapping the range and mapping it again is not safe either: in between, another
-    // thread's mmap can take the range (KOS reuses the lowest free range), and the GC later wrote into memory that
+    // thread's mmap can take the range (SDK 1.4 reused the lowest free range), and the GC later wrote into memory that
     // was no longer its own (a heap write faulted). KnVmDecommit frees the pages and keeps the range reserved; the
     // range then faults until VirtualCommitInner's KnVmCommit, after which it reads as zeros, which the GC expects of
     // re-committed memory (SDK 2.0.0.179). Zeroing the range with memset instead faulted in every page never written:

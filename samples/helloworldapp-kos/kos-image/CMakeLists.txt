@@ -56,7 +56,7 @@ if (HOST_PORTS_FWD)
 endif ()
 
 # Kernel startup parameters (manual, "Kernel startup parameters"), passed with QEMU's -append.
-# KOS-DOC(kernel_command_line): vmm.overcommit=exception, so running out of memory ends the program instead of stalling it
+# KOS-DOC(kernel_command_line): vmm.overcommit=exception, so running out of memory ends the program, not stalls it
 # SDK 2.0's default makes a thread that writes memory the kernel cannot commit wait for free pages: a .NET program that
 # runs out of memory stops making progress, with no OutOfMemoryException and no end. With `exception` the kernel ends
 # the process at that write, as SDK 1.4 did, which a test runner or a watchdog can see. -D KOS_KERNEL_CMDLINE= (empty)
@@ -76,7 +76,7 @@ set (VFSNET_MAX_THREADS_PER_CLIENT "64" CACHE STRING "Threads VfsNet serves this
 # VfsRamFs threads per client and per process. Empty (the default): the SDK's. On SDK 1.4 VfsRamFs faulted (NULL
 # dereference) under concurrent file calls from one client (SDK finding 6f), and the KasperskyOS team's workaround
 # was 1; SDK 2.0.0.179 needs none: the C reproducer no longer faults, and full System.IO.FileSystem.Tests runs at the
-# default passed with no VfsRamFs fault.
+# default passed with no VfsRamFs fault. The option stays so a run can set the limit again, should 6f come back.
 set (VFSRAMFS_MAX_THREADS "" CACHE STRING "Threads VfsRamFs serves with, per client and per process; empty: default")
 set (VFSRAMFS_THREADS_ENV "")
 if (VFSRAMFS_MAX_THREADS)
@@ -125,9 +125,9 @@ add_kpa_component (NetInit.kpa
                    ENV               "VFS_NETWORK_BACKEND=client:task:kl.VfsNet:timeout_dcm_ms:600000"
                    NO_AUTO_VFS_CONNECTION)
 
+# TODO-KOS(6k): localhost resolves only from a hosts file for VfsNet, which the documentation does not say
 # VfsRamFs, VfsNet and the dnet driver VfsNet needs run from the product ROMFS. VfsNet resolves host names for its
-# clients from /etc/hosts or DNS; without a hosts file not even `localhost` resolves (TODO-KOS(6k): localhost needs
-# a hosts file for VfsNet, undocumented). As in the SDK's
+# clients from /etc/hosts or DNS; without a hosts file not even `localhost` resolves. As in the SDK's
 # examples/net_with_separate_vfs, VfsNet reads /etc/hosts from the root file system (MinimalKOS's kl.VfsEntity).
 set (EINIT_SRC ${CMAKE_SOURCE_DIR}/einit)
 set (ROOTFS_DIR ${CMAKE_BINARY_DIR}/rootfs_img)

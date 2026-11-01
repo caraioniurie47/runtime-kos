@@ -28,14 +28,15 @@
 
 #if defined(__KOS__)
 // TODO-KOS(11): no API to interrupt or inspect another thread, so an opt-in watchdog reports what holds up a GC
-// A GC waits until every thread reaches a safe point by itself, and nothing outside the program can see what a thread
-// is doing. With DOTNET_KOS_WATCHDOG=1 the runtime reports on stderr: from the suspending thread, a suspension still
-// waiting after 10 s (the threads not yet suspended; again at 70 s and 130 s); from a watchdog thread outside the
-// runtime, the thread store lock held for 120 s (a GC that long: the suspending thread's and the GC threads' stacks),
-// 120 s without an allocation by any thread (every thread's state), free memory crossing 512, 256, 128 and 64 MiB,
-// and at exit. A stack is the frame-record chains found in the top 128 KB of its memory; the lowest may be stale.
-// Every report gives the address of minipal_lowres_ticks, which places the binary for symbolizing. Unset, nothing
-// runs. Written for the SDK 2.0 GC stalls (2026-10-21), whose causes it found.
+// A GC waits until every thread reaches a safe point by itself, and a program has no API to read the registers of its
+// other threads. With DOTNET_KOS_WATCHDOG=1 the runtime reports on stderr: from the suspending thread, a suspension
+// still waiting after 10 s (the threads not yet suspended; a count again at 70 s and 130 s); from a watchdog thread
+// outside the runtime, the thread store lock found busy at every 15 s sample for 120 s (the suspending thread's and
+// the GC threads' stacks), 120 s without an allocation by any thread (every thread's state), free memory crossing
+// 512, 256, 128 and 64 MiB, and at exit. A stack is the frame-record chains found in the top 128 KB of its memory; the
+// lowest may be stale. Every report gives the address of minipal_lowres_ticks, which places the binary for
+// symbolizing. Unset, the runtime only tests a flag. Distilled from the trace that found the SDK 2.0 GC stalls' causes
+// (2026-10-21).
 #include <coresrv/stat/stat_api.h>
 #include <errno.h>
 #include <pthread.h>
@@ -44,7 +45,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static bool s_kosWatchdog = false; // set before the first thread attaches, never changed after
+static bool s_kosWatchdog = false; // set during the first thread's attach, never changed after
 static pthread_once_t s_kosWatchdogOnce = PTHREAD_ONCE_INIT;
 
 static void KosWatchdogWrite(const char* text)
@@ -266,7 +267,7 @@ void ThreadStore::AttachCurrentThread(bool fAcquireThreadStoreLock)
     Thread * pAttachingThread = RawGetCurrentThread();
 
 #if defined(__KOS__)
-    pthread_once(&s_kosWatchdogOnce, KosWatchdogStart); // TODO-KOS(11): see KosWatchdogStart
+    pthread_once(&s_kosWatchdogOnce, KosWatchdogStart); // TODO-KOS(11): starts the opt-in GC watchdog once
 #endif
 
     if (pAttachingThread->IsDetached())
@@ -395,10 +396,12 @@ void ThreadStore::UnlockThreadStore()
 
 #if defined(__KOS__)
 // The watchdog thread (TODO-KOS(11), see KosWatchdogStart): never attached to the runtime, so no GC stops it. Every
-// 15 s it samples free memory, then try-locks the thread store: if another thread has held it for 120 s, it reports that
-// thread and the GC threads (the list cannot change while the lock is held: threads attach and detach under it); if it
-// gets the lock, it fingerprints every thread's allocation context, and after 120 s without a change (and again at 300 s)
-// reports every thread, writing only after releasing the lock.
+// 15 s it samples free memory, then try-locks the thread store. Found busy at every sample for 120 s, it reports the
+// suspending thread and the GC threads without holding the lock: the holder can release it meanwhile, a thread can
+// then exit and free its Thread (thread-local) and stack, and GC threads attach while the GC holds the lock, so the
+// walk can read freed memory and a fault there ends the process (a risk taken only in a stall). If it gets the lock,
+// it fingerprints every thread's allocation context, and after 120 s without a change (and again at 300 s) reports
+// every thread, writing only after releasing the lock.
 void* ThreadStore::KosWatchdog(void* unused)
 {
     (void)unused;
@@ -593,7 +596,8 @@ void ThreadStore::SuspendAllThreads(bool waitForGCEvent)
     Thread * pThisThread = GetCurrentThreadIfAvailable();
 #if defined(__KOS__)
     // TODO-KOS(11): with DOTNET_KOS_WATCHDOG=1, a suspension that waits 10 s names the threads it waits for (from this,
-    // the suspending thread), again at 70 s and 130 s, and its length when it ends.
+    // the suspending thread), gives a count again at 70 s and 130 s, and its length when it ends. Each write is an IPC
+    // call to the VFS program serving stderr, so a report adds its own time to the suspension it reports.
     int64_t kosWatchdogStart = s_kosWatchdog ? minipal_lowres_ticks() : 0;
     int64_t kosWatchdogNext = kosWatchdogStart + 10000;
     int kosWatchdogReports = 0;

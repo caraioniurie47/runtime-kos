@@ -476,7 +476,8 @@ namespace System.Net.Sockets.Tests
             if (PlatformDetection.IsKasperskyOS)
             {
                 // KOS-NOT-LINUX: KasperskyOS (Linux to .NET) has BSD's option numbers and BSD's rule: binding a UDP
-                // unicast address twice needs SO_REUSEPORT (KOS-AS-DESIGNED(6t): honoured by the stack, missing from the headers).
+                // unicast address twice needs SO_REUSEPORT
+                // KOS-AS-DESIGNED(6t): the network stack honours SO_REUSEPORT, the headers lack it
                 SOL_SOCKET = 0xffff;
                 const int SO_REUSEPORT = 0x200;
                 option = SO_REUSEPORT;

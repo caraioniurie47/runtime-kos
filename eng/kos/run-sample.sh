@@ -4,8 +4,8 @@
 # and /home/ilc-tools-main, from a release's assets or HOWTO steps 6-7.
 #
 # Usage, as root: eng/kos/run-sample.sh <sample> [--icu] [--tcp-port N] [--http-port N] [--no-run]
-#   <sample>      helloworldapp-kos, showcase-kos or webserver-kos (from samples/), or a directory holding one
-#                 .csproj set up as samples/helloworldapp-kos is (HOWTO "Your own program")
+#   <sample>      helloworldapp-kos, showcase-kos or webserver-kos (from samples/), or a path with a / to a directory
+#                 holding one .csproj set up as samples/helloworldapp-kos is (HOWTO "Your own program")
 #   --icu         publish with InvariantGlobalization=false, linking ICU
 #   --tcp-port N  forward TCP port N from the host (the showcase waits for a client on it)
 #   --http-port N forward TCP port N from the host and serve HTTP on it (webserver-kos; it defaults to 8080)
@@ -41,12 +41,12 @@ done
 [ -d /home/kos-net-packages-main ] || { echo "/home/kos-net-packages-main is missing: unpack a release's packages or build them (HOWTO step 7)" >&2; exit 1; }
 [ -d /home/ilc-tools-main ] || { echo "/home/ilc-tools-main is missing: unpack a release's ilc-tools or build them (HOWTO step 6)" >&2; exit 1; }
 
-if [ -d "$sample" ]; then
-    src=$(cd "$sample" && pwd)
-else
-    src=$REPO/samples/$sample
-fi
-[ -d "$src" ] || { echo "no sample $sample in $REPO/samples, and no such directory" >&2; exit 1; }
+# A bare name is always the repository's sample: /home/<name>, an earlier run's copy, must not shadow it.
+case $sample in
+    */*) [ -d "$sample" ] || { echo "no directory $sample" >&2; exit 1; }; src=$(cd "$sample" && pwd) ;;
+    *) src=$REPO/samples/$sample ;;
+esac
+[ -d "$src" ] || { echo "no sample $sample in $REPO/samples (a directory of your own needs a / in its path)" >&2; exit 1; }
 projects=("$src"/*.csproj)
 [ ${#projects[@]} = 1 ] && [ -f "${projects[0]}" ] || { echo "$src must hold exactly one .csproj" >&2; exit 1; }
 name=$(basename "${projects[0]}" .csproj)
@@ -69,7 +69,7 @@ if [ "$icu" = 1 ]; then
 fi
 cd /home
 "$REPO/.dotnet/dotnet" publish "$name" -o "$name/dist" -c Release -r linux-arm64 --self-contained \
-    "${publish_args[@]}" --packages "$name-pkg-kos"
+    "${publish_args[@]}" --packages "${name%-kos}-pkg-kos"
 
 echo "=== Image /home/$name-image"
 # The ports are passed even when empty, so a port from an earlier configure does not stay in the CMake cache.

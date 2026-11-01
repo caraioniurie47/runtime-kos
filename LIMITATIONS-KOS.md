@@ -19,8 +19,9 @@ Each entry says where the difference comes from:
 In the sources, every KasperskyOS workaround, and every test skipped or failing for a KasperskyOS cause, carries a
 marker naming its cause:
 `KOS-DOC(<documentation page>)`, `TODO-KOS(<id>)` (an SDK finding; the ids are listed in
-[SDK differences the port absorbs](#sdk-differences-the-port-absorbs)), `KOS-NOT-LINUX`, `TODO-KOS-IMAGE` or
-`KOS-PERF`. `git grep -n -E "KOS-DOC|TODO-KOS|KOS-NOT-LINUX|KOS-PERF"` finds them all.
+[SDK differences the port absorbs](#sdk-differences-the-port-absorbs)), `KOS-AS-DESIGNED(<id>)` (an SDK finding the
+KasperskyOS team answered as expected), `KOS-NOT-LINUX`, `TODO-KOS-IMAGE` or `KOS-PERF`.
+`git grep -n -E "KOS-DOC|TODO-KOS|KOS-AS-DESIGNED|KOS-NOT-LINUX|KOS-PERF"` finds them all.
 
 ## Programs
 
@@ -36,7 +37,8 @@ marker naming its cause:
 - **No program path.** The executable is loaded from the image, and there is no procfs, so `AppContext.BaseDirectory` is
   empty (by the source, `Environment.ProcessPath` is null too). A file looked up "beside the app" resolves against the
   working directory, `/`. Write such files to `/tmp` at run time, or ship them in the image where a VFS program
-  serves them to the program (done on SDK 1.4 with VfsRamFs mounting the ROMFS; not tried on SDK 2.0). *KasperskyOS.*
+  serves them to the program (done on SDK 1.4 with VfsRamFs mounting the ROMFS; on SDK 2.0 the same mount in the
+  samples' image shows the kernel image's ROMFS, not the product ROMFS holding the files, so it failed). *KasperskyOS.*
 - **No child processes.** KasperskyOS has no `fork` or `exec` (`posix_uns_ifaces`): `Process.Start` throws
   `Win32Exception` ("Not supported"). *KasperskyOS.*
 - **Other processes cannot be inspected.** `Process.GetProcesses`, `GetProcessesByName`, and a process's modules,
@@ -63,19 +65,21 @@ marker naming its cause:
 - **The GC frees memory with the KasperskyOS VMM calls.** `madvise(MADV_DONTNEED)` frees nothing and `MAP_FIXED` over
   a mapping is not supported (`posix_ifaces_impl_features`), so the GC's decommit calls `KnVmDecommit`, which returns
   the pages to the system, and its commit calls `KnVmCommit`, after which the range reads as zeros. Reservations use
-  `MAP_NORESERVE`, because a plain `PROT_NONE` reservation commits its memory at once (512 MiB took tens of seconds;
-  `mem-check.c` in kos-sdk-checks). *SDK (finding 8).*
+  `MAP_NORESERVE`, because a plain `PROT_NONE` reservation commits its memory at once (512 MiB took about 19 s under
+  QEMU on SDK 2.0, 53 s on 1.4; `mem-check.c` in kos-sdk-checks). *SDK (finding 8).*
 - **GC pauses of minutes on SDK 2.0 under QEMU.** The GC runs on segments on KasperskyOS (regions measured slower under
   QEMU on SDK 1.4), each reserved by its own `mmap`, and SDK 2.0 places reservations terabytes apart, so the GC's
   bookkeeping tables span terabytes; growing them copies gigabytes with every thread stopped, for minutes under QEMU
-  (Cryptography's and Sockets' test suites). Allocating arrays of a gigabyte or more also holds up a collection
-  while the memory is first touched. *SDK, Port.*
-- **`DOTNET_KOS_WATCHDOG=1` reports what holds up a collection.** Nothing outside a KasperskyOS program can read
-  another thread's registers, so with this variable set the runtime writes to stderr: a thread suspension still
-  waiting after 10 s (the threads it waits for, with stack return addresses), a collection holding the runtime for
-  120 s, two minutes without an allocation by any thread (every thread's state), and free memory falling below 512,
+  (Cryptography's and Sockets' test suites). In a trial with GC regions, threads allocating arrays of a gigabyte or
+  more also held up collections for minutes; the cause was not established. *SDK, Port.*
+- **`DOTNET_KOS_WATCHDOG=1` reports what holds up a collection.** A KasperskyOS program has no API to read the
+  registers of its other threads (finding 11), so with this variable set the runtime writes to stderr: a thread
+  suspension still waiting after 10 s (the threads it waits for, with stack return addresses; a count again at 70 s
+  and 130 s), the thread store lock busy at every 15 s sample for 120 s (a collection that long, or many back to
+  back), two minutes without an allocation by any thread (every thread's state), and free memory falling below 512,
   256, 128 and 64 MiB and at exit. Each report gives the address of `minipal_lowres_ticks`, which places the binary
-  for a symbol lookup in its `.dbg` file. Unset, it costs nothing. *KasperskyOS (finding 11), Port.*
+  for a symbol lookup in its `.dbg` file. A suspension report is written by the suspending thread, so its write time
+  adds to the suspension it reports. Unset, the runtime only tests a flag. *KasperskyOS (finding 11), Port.*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
   free, so in the runs made no allocation failed for .NET to report as `OutOfMemoryException`. What happens at the
@@ -106,8 +110,8 @@ tried.
   program VfsRamFs could fault or hang, and every client then lost its file system; the KasperskyOS team's workaround
   was one server thread per client and per process (`VFS_SERVER_MAX_THREADS_PER_CLIENT` and `..._PER_PROCESS` 1 in
   its environment). On SDK 2.0 the C reproducer no longer faults, and full System.IO.FileSystem.Tests runs at the
-  default passed with no VfsRamFs fault, so the image sets no limit; an SDK 1.4 image sets 1
-  (`VFSRAMFS_MAX_THREADS` in `kos-image/CMakeLists.txt`). Report:
+  default passed with no VfsRamFs fault, so the image sets no limit; its `VFSRAMFS_MAX_THREADS` (in
+  `kos-image/CMakeLists.txt`) sets one again, and the image of the branch `kos-sdk-1.4.0.102` sets 1. Report:
   [forum topic 59792](https://forum.kaspersky.com/topic/vfsramfs-crashes-null-dereference-in-inode_destructor-under-concurrent-statreaddirunlink-kasperskyos-ce-140102-59792/),
   reproducer [kos-vfsramfs-repro](https://github.com/caraioniurie47/kos-vfsramfs-repro). *SDK (finding 6f).*
 - **`FileShare` is not enforced.** There is no `flock` (no `sys/file.h`), so opening a file another handle holds with
@@ -230,9 +234,9 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
 The dotnet/runtime library test suites below, built as NativeAOT for KasperskyOS and run in the samples' image under
 QEMU, with the CI's test filters. "Failed" counts are those of the run named; the causes are above.
 
-SDK 2.0.0.179, 2026-10-20, the samples' image at its defaults (VfsRamFs one thread, `vmm.overcommit=exception`), ICU
-linked. A suite marked *stalled* stopped printing before its end in some runs, and those runs have no result: GC
-pauses ([Runtime](#runtime)); the decommit's share of them is fixed.
+SDK 2.0.0.179, 2026-10-20, the samples' image as it was then (VfsRamFs limited to one thread,
+`vmm.overcommit=exception`), ICU linked. A suite marked *stalled* stopped printing before its end in some runs, and
+those runs have no result: GC pauses ([Runtime](#runtime)); the decommit's share of them is fixed.
 
 | Suite | Result | Failures |
 | --- | --- | --- |
@@ -245,7 +249,7 @@ pauses ([Runtime](#runtime)); the decommit's share of them is fixed.
 | System.Console.Tests | 4287 run, 0 failed, 22 skipped | |
 | System.IO.FileSystem.Tests | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed; with VfsRamFs's default threads, two full runs of 8596 passed and one stalled, and with the GC decommit fix three more passed |
 | System.IO.FileSystem.DriveInfo.Tests | 6 run, 0 failed | |
-| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of four runs, slow in another; with the GC decommit fix two of two complete (338 and 888 s, the slow one with a GC pause, [Runtime](#runtime)), failing up to 10 under load (`SelectTest` "Too many open files in system", as on 1.4) |
+| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of three runs, slow in another; with the GC decommit fix three of three complete (338, 888 and 498 s, the slow one with a GC pause, [Runtime](#runtime)), failing up to 10 under load (mostly `SelectTest` "Too many open files in system", as on 1.4), and once `NetworkStreamTest.ReadWrite_Success` timing out (cause not established) |
 | System.Net.NetworkInformation.Functional.Tests | 248 run, 0 failed, 13 skipped | |
 | System.Net.Security.Tests | 5063 run, 1 failed, 25 skipped | `SslStream_RandomSizeWrites_OK`, which emulation makes too slow for its fixed 60 s, as on 1.4; *stalled* in one of two full runs before the GC decommit fix, two of two complete with it (350 and 354 s) |
 | System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs; with the GC decommit fix two of three complete, one ran out of memory (GC pauses, [Runtime](#runtime)) |
@@ -263,7 +267,8 @@ Each KasperskyOS-specific skip carries its marker in its skip reason or beside i
 ## SDK differences the port absorbs
 
 These need nothing from a program; they are listed so that the markers in the sources can be looked up. The ids are
-those of `TODO-KOS(<id>)`; 8c is marked `KOS-DOC(posix_uns_ifaces)`, which documents the refusal but not its error.
+those of `TODO-KOS(<id>)` and `KOS-AS-DESIGNED(<id>)` (6t); 8c is marked `KOS-DOC(posix_uns_ifaces)`, which
+documents the refusal but not its error.
 Each was found on SDK 1.4.0.102 and is unchanged on 2.0.0.179 unless its row says otherwise.
 
 | Id | KasperskyOS CE | What the port does |
@@ -282,7 +287,7 @@ Each was found on SDK 1.4.0.102 and is unchanged on 2.0.0.179 unless its row say
 | 6t | the stack honours `SO_REUSEPORT`, the headers lack it | defines NetBSD's value |
 | 6u | `getsockopt()` rejects a NULL buffer of length 0 | passes a one-byte buffer |
 | 7 | `uname()` returns constants | reports the SDK's product and version |
-| 8 | `PROT_NONE` reservations commit memory; `MADV_DONTNEED` frees nothing | `MAP_NORESERVE`; decommit keeps pages ([Runtime](#runtime)) |
+| 8 | `PROT_NONE` reservations commit memory; `MADV_DONTNEED` frees nothing | `MAP_NORESERVE`; decommit with `KnVmDecommit`, commit with `KnVmCommit` ([Runtime](#runtime)) |
 | 8b | `sysconf(_SC_PHYS_PAGES)` fails | reads the kernel's memory statistic |
 | 8c | write+execute memory refused (`posix_uns_ifaces`), with `ENOMEM` rather than the documented `ENOTSUP` | delegate thunks are written read-write, then made read-execute (`Marshal.GetFunctionPointerForDelegate` works) |
 | 8d | a read-only image segment cannot be made writable | read-only GS cookie off, as on Apple platforms and OpenBSD |

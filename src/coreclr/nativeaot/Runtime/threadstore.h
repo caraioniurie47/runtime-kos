@@ -65,7 +65,7 @@ public:
 
     static bool IsTrapThreadsRequested();
 #if defined(__KOS__)
-    static void* KosWatchdog(void* unused); // see threadstore.cpp, TODO-KOS(11)
+    static void* KosWatchdog(void* unused); // TODO-KOS(11): opt-in GC watchdog thread; a member to read the thread list
 #endif
 };
 typedef DPTR(ThreadStore) PTR_ThreadStore;

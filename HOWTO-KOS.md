@@ -36,19 +36,20 @@ tar -C / -xzf kos-net-packages-main-sdk-2.0.tar.gz
 ```
 
 `--accept-eula` says you have read and accepted the KasperskyOS CE SDK's licence agreement, which `setup-host.sh`
-downloads the SDK under; without it the script prints the agreement's URL and stops. `setup-host.sh` runs steps 2-4
-below; `run-sample.sh` publishes a sample, builds its image and boots it (steps 8-11; `webserver-kos` and
-`helloworldapp-kos` likewise; a wrong argument prints its options). Drop `--icu` for the smaller build without ICU. QEMU keeps running after the program ends; stop it with Ctrl+C.
+downloads the SDK under; without it, and with no SDK installed yet, the script prints the agreement's URL and stops.
+`setup-host.sh` runs steps 2-4 below; `run-sample.sh` publishes a sample, builds its image and boots it (steps 8-11;
+`webserver-kos` and `helloworldapp-kos` likewise; a wrong argument prints its options). Drop `--icu` for the smaller
+build without ICU. QEMU keeps running after the program ends; stop it with Ctrl+C.
 
-To build everything from source instead, follow the steps below from the start; `setup-host.sh --accept-eula
---source` runs steps 2-5 except the clone.
+To build everything from source instead, follow the steps below from the start. Or clone first (the quick start's
+first three lines), then `setup-host.sh --accept-eula --source` runs steps 2-5, and go on from step 6.
 
 ## 1. Create the WSL distro (Windows)
 
 SDK 2.0 requires Ubuntu 24.04. Any directory works in place of `T:\KasperskyOS`. The builds were run with
 `memory=16GB` and `processors=12` in `%UserProfile%\.wslconfig`. On a host that already runs Ubuntu 24.04 x64,
-skip this step; the later steps assume nothing of WSL, but they were run only under WSL. A container works too: see
-"In a container" below.
+skip this step; the later steps need nothing of WSL but for the viewing instructions of steps 10 and 11, and they were
+run only under WSL. A container works too: see "In a container" below.
 
 ```powershell
 mkdir T:\KasperskyOS
@@ -383,7 +384,8 @@ a directory of your own. The `.csproj` carries what a KasperskyOS program needs:
 `IlcFramework*` paths), the compiler from `IlcToolsPath`, the SDK's clang as linker, and the VFS client
 `libvfs_remote.a` as a `LinkerArg`, without which files, stdout and sockets don't reach the image's VFS programs.
 Publish it with the properties of step 8 and image it with the HelloWorld image project (`HELLO_BINARY` names the
-published executable); `eng/kos/run-sample.sh <your directory>` does both, for a directory holding one `.csproj`.
+published executable); `eng/kos/run-sample.sh <your directory>` does both, for a directory holding one `.csproj`,
+given as a path with a `/` in it (`./myapp`, not `myapp`).
 
 ## In a container
 

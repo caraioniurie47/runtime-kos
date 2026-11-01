@@ -413,7 +413,7 @@ intptr_t SystemNative_OpenAt(intptr_t dirfd, const char* path, int32_t flags, in
 }
 
 #if defined(__KOS__) && !HAVE_EPOLL && !HAVE_KQUEUE
-void KosBeforeClose(int fd); // TODO-KOS(9): with the event port, below
+void KosBeforeClose(int fd); // TODO-KOS(9a): with the event port, below
 #endif
 
 int32_t SystemNative_Close(intptr_t fd)
@@ -2887,10 +2887,11 @@ static KosSocketEventPort* GetKosSocketEventPort(int32_t port)
     return result;
 }
 
-// TODO-KOS(9): on SDK 2.0 a poll() that meets a descriptor closed meanwhile ends the process
+// TODO-KOS(9a): on SDK 2.0 a poll() that meets a descriptor closed meanwhile ends the process
 // SDK 1.4 failed such a poll() with EBADF, EINVAL or EACCES, which KosPollRegistrations survives. On SDK 2.0.0.179 the
 // kernel reported "Access to invalid handle" from poll() in this port's wait and the program ended (exit code 1,
-// System.IO.FileSystem.Tests, 2026-10-20). So a descriptor is never closed while the waiting thread polls it:
+// System.IO.FileSystem.Tests, 2026-10-20): the kernel's invalid-handle detection, on by default; the kernel startup
+// parameter handle.disable_detect_invalid_access turns it off, which images cannot be expected to set. So a descriptor is never closed while the waiting thread polls it:
 // SystemNative_Close calls this first, which drops the descriptor's registrations and, if the poll in progress holds
 // it, waits for that poll to return (at most KOS_SOCKET_EVENT_WAIT_MS plus the call). A later snapshot no longer has it.
 void KosBeforeClose(int fd);

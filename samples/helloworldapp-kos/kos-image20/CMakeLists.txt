@@ -58,8 +58,13 @@ if (HOST_PORTS_FWD)
     set (HOST_PORTS_QEMU QEMU_USER_NETWORK_FLAGS "${HOST_PORTS_FWD}")
 endif ()
 
-# Kernel startup parameters, e.g. vmm.overcommit=exception (manual, "Kernel startup parameters"); empty by default.
-set (KOS_KERNEL_CMDLINE "" CACHE STRING "Kernel startup parameters passed with QEMU's -append")
+# Kernel startup parameters (manual, "Kernel startup parameters"), passed with QEMU's -append.
+# TODO-KOS(8a): vmm.overcommit=exception, so running out of memory ends the program instead of stalling it
+# SDK 2.0's default makes a thread that writes memory the kernel cannot commit wait for free pages: a .NET program that
+# runs out of memory stops making progress, with no OutOfMemoryException and no end. With `exception` the kernel ends
+# the process at that write, as SDK 1.4 did, which a test runner or a watchdog can see. -D KOS_KERNEL_CMDLINE= (empty)
+# boots with the SDK's defaults.
+set (KOS_KERNEL_CMDLINE "vmm.overcommit=exception" CACHE STRING "Kernel startup parameters passed with QEMU's -append")
 set (KERNEL_CMDLINE_QEMU "")
 if (KOS_KERNEL_CMDLINE)
     set (KERNEL_CMDLINE_QEMU KERNEL_CMDLINE ${KOS_KERNEL_CMDLINE})

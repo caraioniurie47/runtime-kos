@@ -144,7 +144,7 @@ namespace System.Net.Sockets.Tests
                 IPEndPoint shadowEndPoint = new IPEndPoint(address, port);
 
                 // Without the other address family (KasperskyOS has no IPv6) there is nothing to block.
-                if (shadowAddress.AddressFamily == AddressFamily.InterNetworkV6 ? !Socket.OSSupportsIPv6 : !Socket.OSSupportsIPv4)
+                if (address.AddressFamily == AddressFamily.InterNetworkV6 ? !Socket.OSSupportsIPv6 : !Socket.OSSupportsIPv4)
                 {
                     Port = port;
                     success = true;

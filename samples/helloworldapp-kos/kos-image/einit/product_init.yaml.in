@@ -1,6 +1,7 @@
 # Started by ProductEinit from the product ROMFS: the dnet driver, VfsNet, VfsRamFs. VfsNet as in the SDK's
 # examples/net_with_separate_vfs (with /etc/hosts from the root file system), plus the thread limit the 1.4 image set;
-# VfsRamFs with the SDK's default environment and arguments (precompiled_vfsConfig.cmake), plus its thread limit.
+# VfsRamFs with the SDK's default environment and arguments (precompiled_vfsConfig.cmake), plus a thread limit when
+# VFSRAMFS_MAX_THREADS is set (CMakeLists.txt; none by default).
 
 blob_container_romfs_prefix: "/romfs/product/"
 

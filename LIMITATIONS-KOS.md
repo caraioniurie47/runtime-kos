@@ -96,12 +96,12 @@ The samples' image gives the program one file system, the SDK's VfsRamFs (HOWTO 
 included, with devices at `/dev`. What follows was measured there; other VFS programs were not
 tried.
 
-- **VfsRamFs runs single-threaded in the samples' image.** On SDK 1.4, under concurrent file calls from one program
-  VfsRamFs could fault or hang, and every client then lost its file system. The KasperskyOS team's workaround was one
-  server thread per client and per process (`VFS_SERVER_MAX_THREADS_PER_CLIENT` and `..._PER_PROCESS` 1 in its
-  environment); the samples' image keeps both (`VFSRAMFS_MAX_THREADS` in `kos-image/CMakeLists.txt`). On SDK 2.0 the
-  C reproducer no longer faults and one full System.IO.FileSystem.Tests run without the limit passed, in about half
-  the time; the limit stays until more runs agree. Report:
+- **VfsRamFs runs at the SDK's thread count in the samples' image.** On SDK 1.4, under concurrent file calls from one
+  program VfsRamFs could fault or hang, and every client then lost its file system; the KasperskyOS team's workaround
+  was one server thread per client and per process (`VFS_SERVER_MAX_THREADS_PER_CLIENT` and `..._PER_PROCESS` 1 in
+  its environment). On SDK 2.0 the C reproducer no longer faults, and full System.IO.FileSystem.Tests runs at the
+  default passed with no VfsRamFs fault, so the image sets no limit; an SDK 1.4 image sets 1
+  (`VFSRAMFS_MAX_THREADS` in `kos-image/CMakeLists.txt`). Report:
   [forum topic 59792](https://forum.kaspersky.com/topic/vfsramfs-crashes-null-dereference-in-inode_destructor-under-concurrent-statreaddirunlink-kasperskyos-ce-140102-59792/),
   reproducer [kos-vfsramfs-repro](https://github.com/caraioniurie47/kos-vfsramfs-repro). *SDK (finding 6f).*
 - **`FileShare` is not enforced.** There is no `flock` (no `sys/file.h`), so opening a file another handle holds with

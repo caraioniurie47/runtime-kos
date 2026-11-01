@@ -73,11 +73,11 @@ endif ()
 # and the program stalls for good. VFS_SERVER_MAX_THREADS_PER_CLIENT raises the limit (product_init.yaml.in).
 set (VFSNET_MAX_THREADS_PER_CLIENT "64" CACHE STRING "Threads VfsNet serves this image's programs with, each")
 
-# TODO-KOS(6f): VfsRamFs faults (NULL dereference) under concurrent file calls from one client
-# The KasperskyOS team's workaround for SDK 1.4: VfsRamFs serves one call at a time, per client and per process.
-# Kept on SDK 2.0 until the .NET tests show it can go (the C reproducer no longer faults on 2.0.0.179); empty: the
-# SDK's default.
-set (VFSRAMFS_MAX_THREADS "1" CACHE STRING "Threads VfsRamFs serves with, per client and per process; empty: default")
+# VfsRamFs threads per client and per process. Empty (the default): the SDK's. On SDK 1.4 VfsRamFs faulted (NULL
+# dereference) under concurrent file calls from one client (SDK finding 6f), and the KasperskyOS team's workaround
+# was 1; SDK 2.0.0.179 needs none: the C reproducer no longer faults, and full System.IO.FileSystem.Tests runs at the
+# default passed with no VfsRamFs fault.
+set (VFSRAMFS_MAX_THREADS "" CACHE STRING "Threads VfsRamFs serves with, per client and per process; empty: default")
 set (VFSRAMFS_THREADS_ENV "")
 if (VFSRAMFS_MAX_THREADS)
     set (VFSRAMFS_THREADS_ENV "\n    VFS_SERVER_MAX_THREADS_PER_CLIENT: \"${VFSRAMFS_MAX_THREADS}\"\n    VFS_SERVER_MAX_THREADS_PER_PROCESS: \"${VFSRAMFS_MAX_THREADS}\"")

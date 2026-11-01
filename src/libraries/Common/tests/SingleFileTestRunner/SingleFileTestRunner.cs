@@ -35,6 +35,7 @@ public class SingleFileTestRunner : XunitTestFramework
 
         report("Running assembly:" + asm.FullName);
 
+        // TODO-KOS(21): a program served by SDK 2.0's VfsRamFs cannot read files shipped in the image
         // Where the device has no copy of the test's content files (TestData and the like, beside the executable on
         // other platforms), they come as a ustar archive, from a read-only file system or, named
         // "tcp:<IPv4 address>:<port>", read from a TCP connection to its end (a device whose programs see no file

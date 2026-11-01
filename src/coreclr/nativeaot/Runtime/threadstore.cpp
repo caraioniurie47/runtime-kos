@@ -418,6 +418,7 @@ void* ThreadStore::KosWatchdog(void* unused)
     int64_t unchangedSince = started;
     int64_t busySince = 0;
     int64_t busyReportedAt = 0;
+    unsigned busySinceGcCount = 0; // a count unchanged at the report: one GC held the lock throughout
     int busyReports = 0;
     int dumps = 0;
     int thresholdsCrossed = 0;
@@ -450,6 +451,7 @@ void* ThreadStore::KosWatchdog(void* unused)
             if (busySince == 0)
             {
                 busySince = now;
+                busySinceGcCount = (unsigned)GCHeapUtilities::GetGCHeap()->GetGcCount();
             }
             else if (now - busySince >= FirstReportMs && (busyReports == 0 || now - busyReportedAt >= FirstReportMs) &&
                      busyReports < 6)
@@ -457,13 +459,14 @@ void* ThreadStore::KosWatchdog(void* unused)
                 char line[300];
                 IGCHeap* heap = GCHeapUtilities::GetGCHeap();
                 snprintf(line, sizeof(line),
-                         "KOS-WATCHDOG: thread store lock held for %lld s; trap 0x%x, suspending thread %p; gc count %u, "
-                         "in progress %d, concurrent in progress %d; anchor %p\n",
+                         "KOS-WATCHDOG: thread store lock busy at every sample for %lld s; trap 0x%x, suspending thread "
+                         "%p; gc count %u (%u at the first busy sample), in progress %d, concurrent in progress %d; "
+                         "anchor %p\n",
                          (long long)((now - busySince) / 1000), (unsigned)RhpTrapThreads, (void*)RhpSuspendingThread,
-                         (unsigned)heap->GetGcCount(), GCHeapUtilities::IsGCInProgress() ? 1 : 0,
+                         (unsigned)heap->GetGcCount(), busySinceGcCount, GCHeapUtilities::IsGCInProgress() ? 1 : 0,
                          heap->IsConcurrentGCInProgress() ? 1 : 0, KosWatchdogAnchor());
                 KosWatchdogWrite(line);
-                KosWatchdogWriteMemory("lock held");
+                KosWatchdogWriteMemory("lock busy");
                 FOREACH_THREAD(pThread)
                 {
                     if (pThread == RhpSuspendingThread || pThread->IsGCSpecial())

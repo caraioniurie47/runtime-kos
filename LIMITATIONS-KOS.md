@@ -38,7 +38,8 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX`, `TODO-KOS-IMAGE` or `KO
   empty (by the source, `Environment.ProcessPath` is null too). A file looked up "beside the app" resolves against the
   working directory, `/`. Write such files to `/tmp` at run time, or ship them in the image where a VFS program
   serves them to the program (done on SDK 1.4 with VfsRamFs mounting the ROMFS; on SDK 2.0 the same mount in the
-  samples' image shows the kernel image's ROMFS, not the product ROMFS holding the files, so it failed). *KasperskyOS.*
+  samples' image shows the kernel image's ROMFS, not the product ROMFS holding the files, so it failed).
+  *KasperskyOS; on SDK 2.0: SDK (finding 21).*
 - **No child processes.** KasperskyOS has no `fork` or `exec` (`posix_uns_ifaces`): `Process.Start` throws
   `Win32Exception` ("Not supported"). *KasperskyOS.*
 - **Other processes cannot be inspected.** `Process.GetProcesses`, `GetProcessesByName`, and a process's modules,
@@ -303,7 +304,7 @@ Each was found on SDK 1.4.0.102 and is unchanged on 2.0.0.179 unless its row say
 | 15 | `aarch64-kos-clang` ignores `-static-pie` | links with `-static` |
 | 16 | (SDK 1.1.1.40) an interpreter entry in a static executable breaks thread-local storage | links with `--no-dynamic-linker` |
 
-The SDK findings 1, 3, 6b, 6d, 6e, 6f, 6g, 6i, 6k, 6l, 6m, 6o, 6q, 6s, 6v, 8a and 14 are described above. Linux
+The SDK findings 1, 3, 6b, 6d, 6e, 6f, 6g, 6i, 6k, 6l, 6m, 6o, 6q, 6s, 6v, 8a, 14 and 21 are described above. Linux
 interfaces KasperskyOS does not have, handled inside the port with no effect found on programs (`KOS-NOT-LINUX`): cgroups, NUMA,
 `/proc/meminfo`, `memfd_create`, `membarrier`, `mlock`, the futex system call, `malloc_usable_size`, `AF_PACKET`,
 `CLOCK_BOOTTIME`, `SO_DOMAIN`, `strcasecmp` in `<string.h>` (POSIX puts it in `<strings.h>` only), Linux's

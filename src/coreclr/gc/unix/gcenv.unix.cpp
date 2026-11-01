@@ -79,6 +79,11 @@
 
 #if defined(__KOS__)
 #include <coresrv/stat/stat_api.h>
+// From coresrv/vmm/vmm_api.h, which cannot be included here: its handle/handletype.h defines a HandleType, and so does
+// the GC's gcinterface.h. Declared as vmm_api.h declares them (Retcode is a 32-bit int, rcOk is 0, rtl_size_t is
+// size_t; SDK 2.0.0.179).
+extern "C" int32_t KnVmCommit(void* addr, size_t size);
+extern "C" int32_t KnVmDecommit(void* addr, size_t size);
 #endif
 
 #if HAVE_PTHREAD_NP_H
@@ -487,7 +492,15 @@ bool GCToOSInterface::VirtualRelease(void* address, size_t size)
 //  true if it has succeeded, false if it has failed
 static bool VirtualCommitInner(void* address, size_t size, uint16_t node, bool newMemory)
 {
+#if defined(__KOS__)
+    // KOS-DOC(posix_ifaces_impl_features): MAP_FIXED not supported, so decommit is KnVmDecommit, undone by KnVmCommit
+    // A range VirtualDecommit freed with KnVmDecommit faults until KnVmCommit, whatever its protection. KnVmCommit takes
+    // no memory until pages are written, and accepts a range never committed or already committed, so every commit
+    // calls it (SDK 2.0.0.179).
+    bool success = KnVmCommit(address, size) == 0 && mprotect(address, size, PROT_WRITE | PROT_READ) == 0;
+#else
     bool success = mprotect(address, size, PROT_WRITE | PROT_READ) == 0;
+#endif
 
 #if defined(MADV_DONTDUMP)
     if (success && !newMemory)
@@ -574,14 +587,11 @@ bool GCToOSInterface::VirtualDecommit(void* address, size_t size)
     // KasperskyOS fails MAP_FIXED over an existing mapping with ENOSYS, and neither MADV_DONTNEED nor MADV_FREE
     // frees pages (SDK 1.4.0.102). Unmapping the range and mapping it again is not safe either: in between, another
     // thread's mmap can take the range (KOS reuses the lowest free range), and the GC later wrote into memory that
-    // was no longer its own (a heap write faulted). So keep the mapping: zero the pages, which the GC expects of
-    // re-committed memory, and make them inaccessible. The pages are not returned to the system.
-    bool bRetVal = mprotect(address, size, PROT_READ | PROT_WRITE) == 0;
-    if (bRetVal)
-    {
-        memset(address, 0, size);
-        bRetVal = mprotect(address, size, PROT_NONE) == 0;
-    }
+    // was no longer its own (a heap write faulted). KnVmDecommit frees the pages and keeps the range reserved; the
+    // range then faults until VirtualCommitInner's KnVmCommit, after which it reads as zeros, which the GC expects of
+    // re-committed memory (SDK 2.0.0.179). Zeroing the range with memset instead faulted in every page never written:
+    // a 512 MiB decommit took 73 s under QEMU in the background GC's sweep, which holds up foreground GCs meanwhile.
+    bool bRetVal = KnVmDecommit(address, size) == 0;
 #else
     int mmapFlags = MAP_FIXED | MAP_ANON | MAP_PRIVATE;
     bool bRetVal = mmap(address, size, PROT_NONE, mmapFlags, -1, 0) != MAP_FAILED;

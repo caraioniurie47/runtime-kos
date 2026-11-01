@@ -175,11 +175,11 @@ namespace System.Security.Cryptography.Encryption.Aes.Tests
             if (PlatformDetection.IstvOS && invalidIvSize == 536870928)
                 throw new SkipTestException($"https://github.com/dotnet/runtime/issues/76728 This test case flakily crashes tvOS arm64");
 
-            // KasperskyOS: allocating the 512 MiB IV succeeds whatever memory is free. On SDK 1.4 copying it exhausted the
-            // guest's memory and the kernel ended the process ("Unhandled Overcommit"). On SDK 2.0 the case passed once
-            // and twice gave no result within 900 s; kept skipped until more runs settle it.
+            // KasperskyOS: allocating the 512 MiB IV succeeds whatever memory is free. On SDK 1.4 copying it
+            // exhausted the guest's memory and the kernel ended the process ("Unhandled Overcommit"). On SDK 2.0
+            // the case passed once and twice gave no result within 900 s, cause unknown; skipped until runs settle it.
             if (PlatformDetection.IsKasperskyOS && invalidIvSize == 536870928)
-                throw new SkipTestException("TODO-KOS(8a): KasperskyOS ends or stalls a process that runs out of memory");
+                throw new SkipTestException("TODO-KOS(8a): out of memory ends the process (SDK 1.4); unsettled on 2.0");
 
             using (Aes aes = AesFactory.Create())
             {

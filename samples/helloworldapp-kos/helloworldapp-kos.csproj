@@ -30,8 +30,8 @@
   <ItemGroup>
     <!-- The SDK's VFS client (libvfs_remote.a): with VFS_FILESYSTEM_BACKEND=client:<VFS program> files and stdout
          go to that program over IPC. Whole archive, as the SDK's vfs::client target links it: it registers itself.
-         Pair it with an image that has a VFS program, as kos-image/ does: without one, startup waited about 11 s on SDK 1.4
-         for a VFS server before falling back to the stub. -->
+         Pair it with an image that has a VFS program, as kos-image/ does: without one, startup waited about 11 s
+         on SDK 1.4 for a VFS server before falling back to the stub. -->
     <LinkerArg Include="-Wl,--whole-archive,-lvfs_remote,--no-whole-archive" />
   </ItemGroup>
 

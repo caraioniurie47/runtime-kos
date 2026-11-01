@@ -874,7 +874,7 @@ int32_t SystemNative_FChMod(intptr_t fd, int32_t mode)
 #if defined(__KOS__) // TODO-KOS(6c): pread/pwrite/ftruncate/fsync fail with ENOSYS on /dev/null and pipes
 // KasperskyOS (CE SDK 1.4.0.102) fails pread, pwrite, ftruncate and fsync with ENOSYS on /dev/null and on pipes
 // (SDK 2.0.0.179: pread and pwrite on /dev/null work, pread on a pipe fails with ESPIPE, ftruncate and fsync on
-// both still ENOSYS; pwrite on a pipe was not checked),
+// both still ENOSYS; pwrite on a pipe was not checked on either SDK),
 // where Linux gives the error callers expect of a file that cannot seek or be truncated or synced. Report a
 // non-regular file's ENOSYS as that error (ESPIPE for pread and pwrite, EINVAL for ftruncate and fsync).
 static void KosNonRegularFileError(int fileDescriptor, int error)
@@ -2805,11 +2805,11 @@ static int32_t WaitForHandleEventsInner(int32_t port, HandleEvent* buffer, int32
 // EINPROGRESS from connect), or by a zero-timeout poll that finds the socket no longer ready for it. The engine makes a
 // call before an operation waits, and retries on each event until a call would block, so every wait is preceded by a
 // re-arm. A bit that no call has re-armed (a descriptor used only by calls outside pal_networking.c) is reported
-// again while still ready after KOS_SOCKET_EVENT_REARM_MS. Bits that calls re-arm are never reported again by time: such
-// an event, sampled while data was there and handled after it was read, completed the next zero-byte receive, which
-// makes no call. There is no descriptor to wake a wait, so a registration or re-arm made meanwhile is polled after at
-// most KOS_SOCKET_EVENT_WAIT_MS. Closed descriptors are dropped, as epoll drops them; a descriptor registered again
-// replaces its entry.
+// again while still ready after KOS_SOCKET_EVENT_REARM_MS. Bits that calls re-arm are never reported again by time:
+// such an event, sampled while data was there and handled after it was read, completed the next zero-byte receive,
+// which makes no call. There is no descriptor to wake a wait, so a registration or re-arm made meanwhile is polled
+// after at most KOS_SOCKET_EVENT_WAIT_MS. Closed descriptors are dropped, as epoll drops them; a descriptor registered
+// again replaces its entry.
 //
 // TODO-KOS(9): poll() fails the whole call on a closed descriptor (beyond the documented case)
 // KasperskyOS's poll() (SDK 1.4.0.102) differs from POSIX: a closed descriptor fails the whole call with EBADF instead
@@ -2894,8 +2894,9 @@ static KosSocketEventPort* GetKosSocketEventPort(int32_t port)
 // kernel reported "Access to invalid handle" from poll() in this port's wait and the program ended (exit code 1,
 // System.IO.FileSystem.Tests, 2026-10-20): the kernel's invalid-handle detection, on by default; the kernel startup
 // parameter handle.disable_detect_invalid_access turns it off, which images cannot be expected to set. So a
-// descriptor is never closed while the waiting thread polls it: SystemNative_Close calls this first, which drops the descriptor's registrations and, if the poll in progress holds
-// it, waits for that poll to return (at most KOS_SOCKET_EVENT_WAIT_MS plus the call). A later snapshot no longer has it.
+// descriptor is never closed while the waiting thread polls it: SystemNative_Close calls this first, which drops the
+// descriptor's registrations and, if the poll in progress holds it, waits for that poll to return (at most
+// KOS_SOCKET_EVENT_WAIT_MS plus the call). A later snapshot no longer has it.
 void KosBeforeClose(int fd);
 void KosBeforeClose(int fd)
 {

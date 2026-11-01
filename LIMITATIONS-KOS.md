@@ -67,9 +67,10 @@ marker naming its cause:
   (finding 8).*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
-  free, so no allocation fails for .NET to report as `OutOfMemoryException`. What happens at the write is the kernel's overcommit mode. SDK
-  2.0's default makes the writing thread wait for free pages, so a program that exhausts memory on its own waits for
-  good (a program writing 64 MiB arrays stopped after 1152 MiB with `[OCMT] ... is waiting for free pages`). The
+  free, so in the runs made no allocation failed for .NET to report as `OutOfMemoryException`. What happens at the
+  write is the kernel's overcommit mode. SDK 2.0's default makes the writing thread wait for free pages, so a
+  program that exhausts memory on its own waits for good (a program writing 64 MiB arrays stopped after 1152 MiB with
+  `[OCMT] ... is waiting for free pages`). The
   samples' image boots with `vmm.overcommit=exception` instead (`KOS_KERNEL_CMDLINE`, HOWTO step 9): the kernel ends
   the process at that write (`Unhandled Overcommit` on the console; the same program ended after 1408 MiB).
   `vmm.overcommit=disabled` commits every reservation when it is made, which the GC's reservations do not fit. An
@@ -257,7 +258,7 @@ Each was found on SDK 1.4.0.102 and is unchanged on 2.0.0.179 unless its row say
 | 5 | `fallocate()` without `FALLOC_FL_*` flags | does not use it |
 | 6 | headers portable code probes are absent (`sys/statfs.h`, `mntent.h`, `cpu_set_t`, ...) | NetBSD equivalents |
 | 6a | `mkstemps()` fails with `EINVAL` | creates temporary files itself (`Path.GetTempFileName` works) |
-| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on `/dev/null` and pipes (2.0: `pread` and `pwrite` on `/dev/null` work, `pread` on a pipe fails with `ESPIPE`) | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
+| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on `/dev/null` and pipes (2.0: `pread` and `pwrite` on `/dev/null` work, `pread` on a pipe fails with `ESPIPE`; `pwrite` on a pipe not checked on either SDK) | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
 | 6h | `sendfile()` to a socket fails with `EINVAL` | read/write loop (`Socket.SendFile` works) |
 | 6j | an accepted socket inherits the listener's `O_NONBLOCK` | clears it |
 | 6t | the stack honours `SO_REUSEPORT`, the headers lack it | defines NetBSD's value |

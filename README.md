@@ -3,7 +3,7 @@
 > **Unofficial community port, not affiliated with or endorsed by Microsoft or Kaspersky.**
 
 A fork of [dotnet/runtime](https://github.com/dotnet/runtime) that runs C# programs compiled with
-NativeAOT on KasperskyOS Community Edition 1.4.0.102 (arm64, under QEMU). The default branch, `kos-main`,
+NativeAOT on KasperskyOS Community Edition 2.0.0.179 (arm64, under QEMU). The default branch, `kos-main`,
 carries the port on dotnet/runtime `main`.
 
 What works: a single statically linked executable per program, with files and stdout (a RAM file system at
@@ -11,15 +11,16 @@ What works: a single statically linked executable per program, with files and st
 The limits, and the test suites run, are in [LIMITATIONS-KOS.md](LIMITATIONS-KOS.md).
 
 - [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt packages and a quick start;
-  [`release_v03`](https://github.com/caraioniurie47/runtime-kos/releases/tag/release_v03) is built from
-  `kos-main`
+  [`release_v03`](https://github.com/caraioniurie47/runtime-kos/releases/tag/release_v03) is built for SDK
+  1.4.0.102
 - [HOWTO-KOS.md](HOWTO-KOS.md): build everything from source
 - Samples: [`samples/helloworldapp-kos`](samples/helloworldapp-kos), [`samples/showcase-kos`](samples/showcase-kos)
   and [`samples/webserver-kos`](samples/webserver-kos)
 - Other branches: the .NET 10 port on
-  [`kos_changes`](https://github.com/caraioniurie47/runtime-kos/tree/kos_changes) (`release_v02`), and
-  KasperskyOS CE SDK 1.1.1.40 (GCC) on the frozen
-  [`kos-sdk-1.1.1.40`](https://github.com/caraioniurie47/runtime-kos/tree/kos-sdk-1.1.1.40)
+  [`kos_changes`](https://github.com/caraioniurie47/runtime-kos/tree/kos_changes) (`release_v02`), and older
+  KasperskyOS CE SDKs on frozen branches: 1.4.0.102 on
+  [`kos-sdk-1.4.0.102`](https://github.com/caraioniurie47/runtime-kos/tree/kos-sdk-1.4.0.102) (`release_v03`),
+  1.1.1.40 (GCC) on [`kos-sdk-1.1.1.40`](https://github.com/caraioniurie47/runtime-kos/tree/kos-sdk-1.1.1.40)
 
 Questions and problems with this port belong in this repository's issues, not in dotnet/runtime. The rest of
 this file is the upstream dotnet/runtime README.

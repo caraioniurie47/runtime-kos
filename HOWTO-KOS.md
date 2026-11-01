@@ -1,15 +1,16 @@
 # .NET NativeAOT on KasperskyOS: build and run the samples
 
 This branch ports the NativeAOT runtime of dotnet/runtime `main` to KasperskyOS Community Edition
-1.4.0.102 on arm64, and boots three C# samples under QEMU: `samples/helloworldapp-kos`,
+2.0.0.179 on arm64, and boots three C# samples under QEMU: `samples/helloworldapp-kos`,
 `samples/showcase-kos` and `samples/webserver-kos`. The build produces packages versioned `12.0.0-dev`; the samples target
 `net11.0`. The .NET 10 port (based on `release/10.0`) is on the branch `kos_changes`.
 
 | KasperskyOS CE SDK | Host | KasperskyOS compiler | Image built by |
 | --- | --- | --- | --- |
-| 1.4.0.102 | Ubuntu 22.04 | clang 17.0.6 | the `kos-image/` CMake project |
+| 2.0.0.179 (QEMU, arm64) | Ubuntu 24.04 | clang 17.0.6 | the `kos-image/` CMake project (KPA packages on MinimalKOS) |
 
-SDK 1.1.1.40 (GCC) is supported on the frozen branch `kos-sdk-1.1.1.40`, whose `HOWTO-KOS.md` covers it.
+Older SDKs are supported on frozen branches whose `HOWTO-KOS.md` covers them: SDK 1.4.0.102 on `kos-sdk-1.4.0.102`,
+SDK 1.1.1.40 (GCC) on `kos-sdk-1.1.1.40`.
 
 Commands run as `root` inside the WSL distro: `wsl --import` creates no other user. The environment
 variables set along the way are used by later steps, so run everything in one shell, or set them again
@@ -17,14 +18,14 @@ in a new one.
 
 ## 1. Create the WSL distro (Windows)
 
-Any directory works in place of `T:\KasperskyOS`. The builds were run with `memory=16GB` and
-`processors=12` in `%UserProfile%\.wslconfig`.
+SDK 2.0 requires Ubuntu 24.04. Any directory works in place of `T:\KasperskyOS`. The builds were run with
+`memory=16GB` and `processors=12` in `%UserProfile%\.wslconfig`.
 
 ```powershell
 mkdir T:\KasperskyOS
-curl.exe -L -o T:\KasperskyOS\ubuntu-22.04.5-wsl-amd64.wsl https://releases.ubuntu.com/22.04/ubuntu-22.04.5-wsl-amd64.wsl
-wsl --import UbuntuKOS T:\KasperskyOS\wsl-ubuntu T:\KasperskyOS\ubuntu-22.04.5-wsl-amd64.wsl --version 2
-wsl -d UbuntuKOS -u root
+curl.exe -L -o T:\KasperskyOS\ubuntu-24.04.5-wsl-amd64.wsl https://releases.ubuntu.com/24.04/ubuntu-24.04.5-wsl-amd64.wsl
+wsl --import UbuntuKOS20 T:\KasperskyOS\wsl-ubuntu20 T:\KasperskyOS\ubuntu-24.04.5-wsl-amd64.wsl --version 2
+wsl -d UbuntuKOS20 -u root
 ```
 
 ## 2. Install prerequisites
@@ -33,13 +34,13 @@ wsl -d UbuntuKOS -u root
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
-apt-get install -y --no-install-recommends build-essential clang llvm lld lldb python-is-python3 curl wget git gdebi-core unzip file ca-certificates libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev zlib1g-dev ninja-build cpio pigz
+apt-get install -y --no-install-recommends build-essential clang llvm lld lldb python-is-python3 curl wget git unzip file ca-certificates libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev zlib1g-dev ninja-build cpio pigz
 ```
 
 ### CMake
 
-`main` needs CMake 3.26 or later; Ubuntu 22.04's `apt` has 3.22. Kitware's portable build goes to
-`/opt`, linked from `/usr/local/bin`, which comes before `/usr/bin` on `PATH`.
+`main` needs CMake 3.26 or later. The builds used Kitware's portable CMake 3.31.12 (apt's was not tried). It goes
+to `/opt`, linked from `/usr/local/bin`, which comes before `/usr/bin` on `PATH`.
 
 ```sh
 cd /home
@@ -52,10 +53,14 @@ cmake --version
 
 ## 3. Install the KasperskyOS CE SDK
 
+Download `KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb` from Kaspersky's KasperskyOS Community Edition
+download page into `/home`. The package used here has the SHA-256 below. Install it with `apt`, not `gdebi`: on
+Ubuntu 24.04 `gdebi` rejects its dependency `libasound2`, which `libasound2t64` provides.
+
 ```sh
 cd /home
-wget -nc https://products.s.kaspersky-labs.com/special/KasperskyOSCommunityEdition/1.4.0.102/multilanguage-INT-1.4.0.102/fdbf0e5762204c3180f0eabca0423c55/KasperskyOS-Community-Edition-Qemu-1.4.0.102_en.deb
-gdebi -n KasperskyOS-Community-Edition-Qemu-1.4.0.102_en.deb
+echo "78faab9ab8e06a4312386f6d9d23be0d98ceb376e07380f916784a6f42098434  KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb" | sha256sum -c
+apt-get install -y ./KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb
 ```
 
 ### Environment
@@ -65,7 +70,7 @@ and `clang-17` targeting KasperskyOS, and the .NET build takes the highest-versi
 finds on `PATH`, wherever that entry is.
 
 ```sh
-export KOS_SDK=/opt/KasperskyOS-Community-Edition-Qemu-1.4.0.102
+export KOS_SDK=/opt/KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179
 ```
 
 ## 4. Build environment
@@ -124,18 +129,18 @@ unset ICU_DATA_FILTER_FILE
 
 ### OpenSSL headers
 
-The SDK has OpenSSL 1.1.1t as static libraries (`sysroot-aarch64-kos/lib/libcrypto.a`, `libssl.a`) but no
-headers. `System.Security.Cryptography.Native` compiles against the headers of that release, configured with
-its defaults, which the SDK's libraries match; nothing of OpenSSL is compiled here.
+The SDK has OpenSSL 3.5.7 as static libraries (`sysroot-aarch64-kos/lib/libcrypto.a`, `libssl.a`) but no
+headers. `System.Security.Cryptography.Native` compiles against the headers of that release, configured without QUIC
+and CMP as the SDK's libraries are; nothing of OpenSSL is compiled here.
 
 ```sh
 cd /home
-wget -nc https://www.openssl.org/source/old/1.1.1/openssl-1.1.1t.tar.gz
-echo "8dee9b24bdb1dcbf0c3d1e9b02fb8f6bf22165e807f45adeb7c9677536859d3b  openssl-1.1.1t.tar.gz" | sha256sum -c
-tar -xzf openssl-1.1.1t.tar.gz
-cd /home/openssl-1.1.1t
-./Configure linux-aarch64 no-shared
-make include/openssl/opensslconf.h
+wget -nc https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz
+echo "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8  openssl-3.5.7.tar.gz" | sha256sum -c
+tar -xzf openssl-3.5.7.tar.gz
+cd /home/openssl-3.5.7
+./Configure linux-aarch64 no-shared no-quic no-cmp
+make build_generated
 mkdir -p /opt/openssl-kos/include
 cp -a include/openssl /opt/openssl-kos/include/
 ```
@@ -201,15 +206,19 @@ cd /home
 The image is a CMake project, built with the SDK's own CMake, which carries the `platform` modules.
 QEMU runs in the foreground and does not exit by itself; stop it with Ctrl+C.
 
-Besides the program, the image holds three programs from the SDK and one of its own. The SDK's prebuilt
-`VfsRamFs` serves files and stdout to the program over IPC: a RAM file system at `/tmp` and devices at
-`/dev`. The SDK's prebuilt `VfsNet` serves sockets, with the SDK's network driver program; both come with
-the SDK's entropy program. `NetInit`, built from `kos-image/src/netinit.c`, gives the network interface
-`en0` the address QEMU user networking expects (`10.0.2.15/24`, gateway `10.0.2.2`) and exits, as the
-SDK's network examples do in their own programs. `kos-image/src/init.yaml.in` sets `VFS_FILESYSTEM_BACKEND: client:kl.VfsRamFs`
-and `VFS_NETWORK_BACKEND: client:kl.VfsNet` for the program and connects it to both. The program has to link the client
-side, `libvfs_remote.a`, which each sample's `.csproj` adds as a `LinkerArg`. A program of your own needs
-both that item and this image project.
+SDK 2.0 boots its prebuilt MinimalKOS. The program is a KPA package, `Hello`, which MinimalKOS's ExecutionManager
+installs and starts; so is `NetInit`, built from `kos-image/src/netinit.c`, which gives the network interface `en0`
+the address QEMU user networking expects (`10.0.2.15/24`, gateway `10.0.2.2`) and exits. The SDK's prebuilt
+`VfsRamFs` serves files and stdout to the program over IPC: a RAM file system at `/tmp` and devices at `/dev`. The
+SDK's prebuilt `VfsNet` serves sockets, with the SDK's network driver program `dnet`. These three run from the
+image's product ROMFS, configured by `kos-image/einit/product_init.yaml.in`, as in the SDK's
+`examples/net_with_separate_vfs`. The `Hello` package's environment sets `VFS_FILESYSTEM_BACKEND` and
+`VFS_NETWORK_BACKEND` to the client side of both. The program has to link that client side, `libvfs_remote.a`, which
+each sample's `.csproj` adds as a `LinkerArg`. A program of your own needs both that item and this image project.
+
+The image boots the kernel with `vmm.overcommit=exception`: a program that runs out of memory is ended, where SDK
+2.0's default would leave it waiting for free pages for good (`-D KOS_KERNEL_CMDLINE=` boots with the SDK's
+defaults).
 
 ### Image
 
@@ -217,7 +226,7 @@ both that item and this image project.
 $KOS_SDK/toolchain/bin/cmake -S /home/helloworldapp-kos/kos-image -B /home/helloworldapp-kos-image \
     -D CMAKE_TOOLCHAIN_FILE=$KOS_SDK/toolchain/share/toolchain-aarch64-kos.cmake \
     -D HELLO_BINARY=/home/helloworldapp-kos/dist/helloworldapp-kos
-$KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target kos-qemu-image
+$KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target qemu
 ```
 
 ### Run HelloWorld
@@ -226,16 +235,17 @@ $KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target kos-
 $KOS_SDK/toolchain/bin/cmake --build /home/helloworldapp-kos-image --target sim
 ```
 
-After the KasperskyOS boot log, the program prints:
+After the KasperskyOS boot log, the program prints (timestamps shortened):
 
 ```text
-[hello.Hello][19:19][CRT0] Initing main app: statically-linked, PIE.
+[Info][Hello.1][137:137][CRT0] Initing main app: statically-linked, PIE.
 ...
-[hello.Hello][19:19][CRT0] VFS filesystem backend initialized with env(client:kl.VfsRamFs)
-[hello.Hello][19:19][CRT0] VFS network backend initialized with env(client:kl.VfsNet)
+[Info][Hello.1][137:137][CRT0] VFS filesystem backend initialized with env(client:task:kl.VfsRamFs:timeout_dcm_ms:600000)
+[Info][Hello.1][137:137][CRT0] VFS network backend initialized with env(client:task:kl.VfsNet:timeout_dcm_ms:600000)
+...
+Hello from .NET! Math.Min(4, 7)=4
 ...
 [NetInit] en0 is 10.0.2.15/255.255.255.0, gateway 10.0.2.2
-Hello from .NET! Math.Min(4, 7)=4
 ```
 
 ## 10. The showcase sample
@@ -258,8 +268,7 @@ signatures, ECDH and an NTLM negotiate message. The HTTPS section makes a test C
 `127.0.0.1` signed by it, serves one request with `SslStream`, and fetches it with `HttpClient` trusting only
 that CA; a second `HttpClient` with the default trust must refuse the same server.
 
-`InvariantGlobalization=false` links ICU, so the globalization section runs; the binary grows from
-about 31 MB to about 53 MB. Without it the section reports `SKIP`.
+`InvariantGlobalization=false` links ICU, so the globalization section runs. Without it the section reports `SKIP`.
 
 ### Publish the showcase
 
@@ -272,7 +281,7 @@ cd /home
 $KOS_SDK/toolchain/bin/cmake -S /home/runtime-kos/samples/helloworldapp-kos/kos-image -B /home/showcase-kos-image \
     -D CMAKE_TOOLCHAIN_FILE=$KOS_SDK/toolchain/share/toolchain-aarch64-kos.cmake \
     -D HELLO_BINARY=/home/showcase-kos/dist/showcase-kos
-$KOS_SDK/toolchain/bin/cmake --build /home/showcase-kos-image --target kos-qemu-image
+$KOS_SDK/toolchain/bin/cmake --build /home/showcase-kos-image --target qemu
 ```
 
 ### Run the showcase
@@ -288,7 +297,7 @@ command above, rebuild it, and once the showcase prints `listening on 0.0.0.0:50
 The last line it prints is the summary, for example:
 
 ```text
-SHOWCASE DONE: 15 passed, 0 skipped, 0 failed, 23826 ms
+SHOWCASE DONE: 15 passed, 0 skipped, 0 failed, 9396 ms
 ```
 
 ## 11. The web server sample
@@ -309,7 +318,7 @@ cd /home
 $KOS_SDK/toolchain/bin/cmake -S /home/runtime-kos/samples/helloworldapp-kos/kos-image -B /home/webserver-kos-image \
     -D CMAKE_TOOLCHAIN_FILE=$KOS_SDK/toolchain/share/toolchain-aarch64-kos.cmake \
     -D HELLO_BINARY=/home/webserver-kos/dist/webserver-kos -D HOST_HTTP_PORT=8080
-$KOS_SDK/toolchain/bin/cmake --build /home/webserver-kos-image --target kos-qemu-image
+$KOS_SDK/toolchain/bin/cmake --build /home/webserver-kos-image --target qemu
 ```
 
 ### Run the web server

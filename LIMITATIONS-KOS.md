@@ -1,12 +1,13 @@
 # .NET on KasperskyOS: limitations
 
 What .NET does not do, or does differently, when a program built with this port runs on KasperskyOS Community Edition.
-It covers the branch `kos-main`, KasperskyOS CE SDK **1.4.0.102**, arm64, under QEMU; nothing was run on hardware.
+It covers the branch `kos-main`, KasperskyOS CE SDK **2.0.0.179**, arm64, under QEMU; nothing was run on hardware.
+SDK 1.4.0.102 is covered by the frozen branch `kos-sdk-1.4.0.102`.
 [HOWTO-KOS.md](HOWTO-KOS.md) builds the port and the samples.
 
 Each entry says where the difference comes from:
 
-- **KasperskyOS**: documented in the [KasperskyOS CE 1.4 documentation](https://support.kaspersky.com/kos-community-edition/1.4/)
+- **KasperskyOS**: documented in the [KasperskyOS CE 2.0 documentation](https://support.kaspersky.com/kos-community-edition/2.0/)
   or a design choice of the system (a Linux interface it does not have). Expect it to stay.
 - **SDK**: undocumented, or unlike POSIX or the documentation; it may change with an SDK release, and the port keeps a
   list of these for the KasperskyOS team. The public repository [kos-sdk-checks](https://github.com/caraioniurie47/kos-sdk-checks) holds C programs
@@ -26,7 +27,7 @@ marker naming its cause:
 - **NativeAOT only: one statically linked executable per program.** There is no JIT and no `dotnet` host. Programs are
   published for `linux-arm64` with `TargetsKOS=true` (HOWTO step 8). To .NET the system is Linux:
   `OperatingSystem.IsLinux()` is true, and `RuntimeInformation.OSDescription` is built from the SDK's product name and
-  version (`KasperskyOS-Community-Edition-Qemu 1.4.0.102`), since KasperskyOS's `uname()` returns constants. *Port.*
+  version (`KasperskyOS-Community-Edition-Qemu-arm64 2.0.0.179`), since KasperskyOS's `uname()` returns constants. *Port.*
 - **`[DllImport]` needs a link-time binding.** The executable is static and nothing resolves a library name at run
   time, so a call into a library that was not bound when linking throws `EntryPointNotFoundException`, `"libc"`
   included. Bind each entry point with `<DirectPInvoke Include="libc!geteuid" />` (one item per function: binding all of
@@ -34,9 +35,8 @@ marker naming its cause:
   libraries are bound this way already. *Port.*
 - **No program path.** The executable is loaded from the image, and there is no procfs, so `AppContext.BaseDirectory` is
   empty (by the source, `Environment.ProcessPath` is null too). A file looked up "beside the app" resolves against the
-  working directory, `/`. Ship files in the image's ROMFS, which keeps file names only and which a program sees only
-  where a VFS program mounts it (`-l` followed by `romfs /romfs romfs ro` among VfsRamFs's `EXTRA_ARGS`), or write
-  them to `/tmp` at run time. *KasperskyOS.*
+  working directory, `/`. Write such files to `/tmp` at run time, or ship them in the image where a VFS program
+  serves them to the program (done on SDK 1.4 with VfsRamFs mounting the ROMFS; not tried on SDK 2.0). *KasperskyOS.*
 - **No child processes.** KasperskyOS has no `fork` or `exec` (`posix_uns_ifaces`): `Process.Start` throws
   `Win32Exception` ("Not supported"). *KasperskyOS.*
 - **Other processes cannot be inspected.** `Process.GetProcesses`, `GetProcessesByName`, and a process's modules,
@@ -65,11 +65,15 @@ marker naming its cause:
   inaccessible; they are not returned to the system. Reservations use `MAP_NORESERVE`, because a plain `PROT_NONE`
   reservation commits its memory at once (512 MiB took tens of seconds; `mem-check.c` in kos-sdk-checks). *SDK
   (finding 8).*
-- **Running out of memory ends the process.** The GC reserves with `MAP_NORESERVE` (above), and KasperskyOS takes
-  such memory only when it is first written: making it read-write succeeds even when too little is free, and the
-  kernel then ends the process during the write (`Unhandled Overcommit` on the console) instead of .NET
-  throwing `OutOfMemoryException`. Seen with a 512 MiB array; `oom-check.c` in kos-sdk-checks shows it without .NET.
-  *SDK (findings 8, 8a), Port.*
+- **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
+  KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
+  free, and .NET never throws `OutOfMemoryException`. What happens at the write is the kernel's overcommit mode. SDK
+  2.0's default makes the writing thread wait for free pages, so a program that exhausts memory on its own waits for
+  good (a program writing 64 MiB arrays stopped after 1152 MiB with `[OCMT] ... is waiting for free pages`). The
+  samples' image boots with `vmm.overcommit=exception` instead (`KOS_KERNEL_CMDLINE`, HOWTO step 9): the kernel ends
+  the process at that write (`Unhandled Overcommit` on the console; the same program ended after 1408 MiB).
+  `vmm.overcommit=disabled` commits every reservation when it is made, which the GC's reservations do not fit. An
+  image of your own chooses the mode. *KasperskyOS (documented), SDK (findings 8, 8a), Port.*
 - **Signals: registrations succeed and never fire.** The kernel delivers no signal but `SIGTERM`, the only one `kill()`
   can send (`posix_uns_ifaces`). The runtime therefore installs no signal handler: `Console.CancelKeyPress` and
   `PosixSignalRegistration.Create` succeed, for any signal (even `SIGKILL`, which Linux refuses), and their handlers
@@ -86,12 +90,12 @@ The samples' image gives the program one file system, the SDK's VfsRamFs (HOWTO 
 included, with devices at `/dev`. What follows was measured there; other VFS programs were not
 tried.
 
-- **VfsRamFs runs single-threaded in the samples' image.** Under concurrent file calls from one program VfsRamFs can
-  fault or hang, and every client then loses its file system. The KasperskyOS team's workaround, until an SDK release
-  fixes it, is one server thread per client and per process (`VFS_SERVER_MAX_THREADS_PER_CLIENT` and
-  `..._PER_PROCESS` 1 in its `EXTRA_ENV`); the samples' `kos-image/CMakeLists.txt` sets both
-  (`VFSRAMFS_MAX_THREADS`). File calls then wait for each other: System.IO.FileSystem.Tests took about 30% longer, with
-  the same results. An image of your own needs the same setting. Report:
+- **VfsRamFs runs single-threaded in the samples' image.** On SDK 1.4, under concurrent file calls from one program
+  VfsRamFs could fault or hang, and every client then lost its file system. The KasperskyOS team's workaround was one
+  server thread per client and per process (`VFS_SERVER_MAX_THREADS_PER_CLIENT` and `..._PER_PROCESS` 1 in its
+  environment); the samples' image keeps both (`VFSRAMFS_MAX_THREADS` in `kos-image/CMakeLists.txt`). On SDK 2.0 the
+  C reproducer no longer faults and one full System.IO.FileSystem.Tests run without the limit passed, in about half
+  the time; the limit stays until more runs agree. Report:
   [forum topic 59792](https://forum.kaspersky.com/topic/vfsramfs-crashes-null-dereference-in-inode_destructor-under-concurrent-statreaddirunlink-kasperskyos-ce-140102-59792/),
   reproducer [kos-vfsramfs-repro](https://github.com/caraioniurie47/kos-vfsramfs-repro). *SDK (finding 6f).*
 - **`FileShare` is not enforced.** There is no `flock` (no `sys/file.h`), so opening a file another handle holds with
@@ -104,8 +108,9 @@ tried.
 - **`File.Delete` on an empty directory deletes it**, where Linux throws. *SDK (finding 6e).*
 - **Setting the times of a read-only file throws `UnauthorizedAccessException`**, even for the process that created it. *SDK (finding 6e).*
 - **Moving to an over-long path throws `IOException` ("Invalid argument")**, not `PathTooLongException`. *SDK (finding 6e).*
-- **Preallocation beyond the free memory is not reported as .NET expects.** `posix_fallocate` returns -1 rather than
-  an error number, and the `WhenDiskIsFullTheErrorMessageContainsAllDetails` tests fail. *SDK (finding 6e).*
+- **`preallocationSize` is ignored.** `fallocate()` has no `FALLOC_FL_*` flags, so the port does not preallocate:
+  opening a file with a preallocation larger than the free space succeeds, and the
+  `WhenDiskIsFullTheErrorMessageContainsAllDetails` tests fail. *SDK (finding 5).*
 - **Enumerating a directory that is removed meanwhile throws**, where Linux ends the enumeration: `readdir` fails with
   `ENOENT`, which POSIX allows. *SDK (finding 6l).*
 - **`CreationTime` cannot be set.** KasperskyOS keeps a birth time, which setting the file's times does not change.
@@ -118,10 +123,10 @@ tried.
   unspecified). *SDK (finding 6s); `DriveType`: Image.*
 - **No procfs.** Anything that reads `/proc` fails; see [Programs](#programs) and [Networking](#networking).
   *KasperskyOS.*
-- **Without a VFS program, no files or stdout.** In an image without one, file calls and `Console.Out` throw
-  `IOException` and only stderr reaches the console; a program linked with the VFS client first waits about 11 s for a
-  server, then logs `Can't establish IPC connetion to VFS server` (the SDK's spelling). *KasperskyOS; the wait: SDK
-  (finding 14).*
+- **Files and stdout need a VFS program.** The program reaches them through the VFS client, configured by
+  `VFS_FILESYSTEM_BACKEND` (HOWTO step 9). Every SDK 2.0 image runs MinimalKOS's own VFS program, so an image without
+  one was not tried on 2.0; on SDK 1.4, file calls and `Console.Out` then threw `IOException` after an 11 s wait.
+  *KasperskyOS; the wait: SDK (finding 14).*
 
 ## Networking
 
@@ -136,11 +141,12 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
   `Accept`, a `Send` to a full socket) holds one of them until it returns; with all of them held, every other socket
   call of the program waits, and the program stalls for good. The documentation states the limit
   (`limitations_and_known_problems`); the samples' image raises it to 64 (`VFS_SERVER_MAX_THREADS_PER_CLIENT` in
-  VfsNet's `EXTRA_ENV`, from the cache variable `VFSNET_MAX_THREADS_PER_CLIENT`), and an image of your own needs the
-  same. *KasperskyOS.*
-- **Host names resolve through VfsNet**, from its own `/etc/hosts` or its DNS server (8.8.8.8 by default). Without a
-  hosts file not even `localhost` resolves, so the samples' image gives VfsNet one in its ROMFS
-  (`kos-image/resources/romfs/etc/hosts`); an `/etc/hosts` the program writes is not VfsNet's and changes nothing.
+  VfsNet's environment, `kos-image/einit/product_init.yaml.in`, from the cache variable
+  `VFSNET_MAX_THREADS_PER_CLIENT`), and an image of your own needs the same. *KasperskyOS.*
+- **Host names resolve through VfsNet**, from its own `/etc/hosts` or its DNS server (8.8.8.8 in the samples' image).
+  Without a hosts file not even `localhost` resolves, so the samples' image gives VfsNet one in the root file system,
+  as the SDK's `net_with_separate_vfs` example does (`kos-image/resources/romfs/etc/hosts`); an `/etc/hosts` the
+  program writes is not VfsNet's and changes nothing.
   *SDK (finding 6k).*
 - **Socket events are polled.** KasperskyOS has neither epoll nor kqueue, so the port's socket event loop polls with
   `poll()`: a socket registered while the loop waits is polled up to 10 ms later. Every socket call is an IPC call to
@@ -175,30 +181,26 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
 
 ## Security
 
-- **Cryptography is the SDK's OpenSSL 1.1.1t**, linked statically. OpenSSL 1.1.1 is past its upstream end of life
-  (2023-09-11). What .NET builds on OpenSSL 3 APIs throws `PlatformNotSupportedException`: ML-KEM, ML-DSA, SLH-DSA,
-  KMAC and reading SHAKE output incrementally; SHA-3, one-shot SHAKE and ChaCha20-Poly1305 work. The SDK ships no
-  OpenSSL headers; the port compiles against the 1.1.1t release's. *SDK (finding 1).*
+- **Cryptography is the SDK's OpenSSL 3.5.7**, linked statically (SDK 1.4 had 1.1.1t). The SDK ships no OpenSSL
+  headers; the port compiles against the 3.5.7 release's, configured without QUIC and CMP as the SDK's libraries are.
+  The showcase's TLS 1.3 handshake, AES-GCM, RSA, ECDH and HMAC work. *SDK (finding 1).*
 - **No CA certificates in the image.** The default trust refuses every server, public ones included, and the
   `LocalMachine` `Root` store is empty. Either trust CAs in code (`X509ChainPolicy.CustomTrustStore`, as the showcase
-  does), or set `SSL_CERT_FILE` in the program's environment (`init.yaml`) to a PEM bundle the program can read: a
-  probe that wrote a CA bundle to `/tmp` before its first request fetched `https://example.com/` with the default
-  trust. `SSL_CERT_DIR` was not tried. *Image.*
+  does), or set `SSL_CERT_FILE` in the program's environment (the image's `HELLO_ENV`) to a PEM bundle the program
+  can read: on SDK 1.4 a probe that wrote a CA bundle to `/tmp` before its first request fetched
+  `https://example.com/` with the default trust. `SSL_CERT_DIR` was not tried. *Image.*
 - **No Kerberos.** The SDK has no GSSAPI library, so there is no `System.Net.Security.Native`; NTLM and Negotiate use
   .NET's managed implementation, which does NTLM only. *SDK (finding 3).*
-- **`SslStream.NegotiateClientCertificateAsync` over TLS 1.3**, when the client offered no post-handshake
-  authentication, reports an internal error rather than the client's refusal: a .NET defect with OpenSSL 1.1.1
-  ([dotnet/runtime#134640](https://github.com/dotnet/runtime/issues/134640)), not KasperskyOS's. *.NET.*
 
 ## Globalization, time, console
 
 - **ICU adds about 22 MB.** ICU is linked unless the program sets `InvariantGlobalization=true`, as the HelloWorld and
-  web server samples do; the showcase grows from about 31 MB to about 53 MB with it (unstripped). Its data leaves out
+  web server samples do; the showcase grows from about 35 MB to about 57 MB with it (unstripped). Its data leaves out
   only ICU features .NET never calls (HOWTO step 5); System.Globalization's test suites give the same results with and
   without that filter. *Port.*
 - **No time zone database.** .NET reads tzdata files under `/usr/share/zoneinfo`, which the image lacks, so looking up
   a zone such as `Europe/London` fails. A program that needs zones ships the files and sets `TZDIR` to their directory
-  (`init.yaml`); not tried on KasperskyOS. *Image.*
+  (the image's `HELLO_ENV`); not tried on KasperskyOS. *Image.*
 - **No terminfo database in the image.** What .NET's console does without one was not examined on KasperskyOS.
   *Image.*
 - **Serial ports: no hardware flow control.** KasperskyOS's `termios.h` has no `CRTSCTS`, so configuring a port with
@@ -209,6 +211,10 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
 
 The dotnet/runtime library test suites below, built as NativeAOT for KasperskyOS and run in the samples' image under
 QEMU, with the CI's test filters. "Failed" counts are those of the run named; the causes are above.
+
+**The results below are SDK 1.4.0.102's (September 2026).** On SDK 2.0.0.179 so far, System.IO.FileSystem.Tests
+(8596 run, 0 failed, 261 skipped, VfsRamFs without the thread limit) and System.Net.Sockets.Tests (with skips undone
+on purpose) failed only tests that a KasperskyOS marker skips.
 
 | Suite | Date | Result | Failures |
 | --- | --- | --- | --- |
@@ -237,8 +243,9 @@ Each KasperskyOS-specific skip carries its marker in its skip reason or beside i
 
 These need nothing from a program; they are listed so that the markers in the sources can be looked up. The ids are
 those of `TODO-KOS(<id>)`; 8c is marked `KOS-DOC(posix_uns_ifaces)`, which documents the refusal but not its error.
+Each was found on SDK 1.4.0.102 and is unchanged on 2.0.0.179 unless its row says otherwise.
 
-| Id | KasperskyOS CE 1.4.0.102 | What the port does |
+| Id | KasperskyOS CE | What the port does |
 | --- | --- | --- |
 | 2 | `libcrypto.a` references a `getentropy()` no library defines | defines it on the kernel's random generator |
 | 4 | headers declare XSI and optional functions (`getgrent`, `shm_open`, robust mutexes) no library defines | stays off those paths; a user's groups are their primary group only |
@@ -248,7 +255,7 @@ those of `TODO-KOS(<id>)`; 8c is marked `KOS-DOC(posix_uns_ifaces)`, which docum
 | 5 | `fallocate()` without `FALLOC_FL_*` flags | does not use it |
 | 6 | headers portable code probes are absent (`sys/statfs.h`, `mntent.h`, `cpu_set_t`, ...) | NetBSD equivalents |
 | 6a | `mkstemps()` fails with `EINVAL` | creates temporary files itself (`Path.GetTempFileName` works) |
-| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on `/dev/null` and pipes | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
+| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on `/dev/null` and pipes (2.0: `pread` and `pwrite` on `/dev/null` work) | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
 | 6h | `sendfile()` to a socket fails with `EINVAL` | read/write loop (`Socket.SendFile` works) |
 | 6j | an accepted socket inherits the listener's `O_NONBLOCK` | clears it |
 | 6t | the stack honours `SO_REUSEPORT`, the headers lack it | defines NetBSD's value |
@@ -259,6 +266,7 @@ those of `TODO-KOS(<id>)`; 8c is marked `KOS-DOC(posix_uns_ifaces)`, which docum
 | 8c | write+execute memory refused (`posix_uns_ifaces`), with `ENOMEM` rather than the documented `ENOTSUP` | delegate thunks are written read-write, then made read-execute (`Marshal.GetFunctionPointerForDelegate` works) |
 | 8d | a read-only image segment cannot be made writable | read-only GS cookie off, as on Apple platforms and OpenBSD |
 | 9 | `poll()` fails the whole call on a closed descriptor | retries per descriptor; polls 512 at a time |
+| 9a | (2.0) a `close()` while another thread's `poll()` holds the descriptor ends the process: the kernel's invalid-handle detection, on by default | a close waits for the socket event loop's poll that holds the descriptor (at most one 10 ms round) |
 | 10, 10a | a read over 64 KiB once failed; `sendmsg()` over 64 KiB fails on TCP | reads at most 64 KiB at a time; retries such a `sendmsg()` with 64 KiB |
 | 10b | `setsockopt()` fails after the peer's reset | treats it as done, so the socket is closed |
 | 10c | `accept()` fails for an address buffer over 128 bytes | passes 128 |

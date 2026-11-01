@@ -186,6 +186,11 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
 - **Cryptography is the SDK's OpenSSL 3.5.7**, linked statically (SDK 1.4 had 1.1.1t). The SDK ships no OpenSSL
   headers; the port compiles against the 3.5.7 release's, configured without QUIC and CMP as the SDK's libraries are.
   The showcase's TLS 1.3 handshake, AES-GCM, RSA, ECDH and HMAC work. *SDK (finding 1).*
+- **No RC2.** The SDK's OpenSSL has no legacy provider (its `libcrypto.a` holds no RC2, RC4 or MD4 implementation,
+  and there are no provider modules to load), so `RC2` encryption and decryption throw `CryptographicException`
+  ("digital envelope routines::unsupported"), not `PlatformNotSupportedException`: .NET checks only that OpenSSL
+  names the cipher, which OpenSSL 3 does without the legacy provider on Linux too. SDK 1.4's 1.1.1t had RC2.
+  *SDK, .NET.*
 - **No CA certificates in the image.** The default trust refuses every server, public ones included, and the
   `LocalMachine` `Root` store is empty. Either trust CAs in code (`X509ChainPolicy.CustomTrustStore`, as the showcase
   does), or set `SSL_CERT_FILE` in the program's environment (the image's `HELLO_ENV`) to a PEM bundle the program
@@ -214,31 +219,32 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
 The dotnet/runtime library test suites below, built as NativeAOT for KasperskyOS and run in the samples' image under
 QEMU, with the CI's test filters. "Failed" counts are those of the run named; the causes are above.
 
-**The results below are SDK 1.4.0.102's (September 2026).** On SDK 2.0.0.179 so far, System.IO.FileSystem.Tests
-(8596 run, 0 failed, 261 skipped, VfsRamFs without the thread limit) failed nothing, and System.Net.Sockets.Tests,
-run with some skips undone on purpose and without 1.4's `-notrait IPv6=true`, failed only those undone skips and
-cases of the classes that filter leaves out (IPv6).
+SDK 2.0.0.179, 2026-10-20, the samples' image at its defaults (VfsRamFs one thread, `vmm.overcommit=exception`), ICU
+linked. A suite marked *stalled* stopped printing before its end in some runs, and those runs have no result; the
+cause is not known yet.
 
-| Suite | Date | Result | Failures |
-| --- | --- | --- | --- |
-| System.Runtime.Tests | 2026-09-26 | 76744 run, 0 failed, 187 skipped | |
-| System.Collections.Tests | 2026-09-24 | 33679 run, 0 failed, 134 skipped | |
-| System.Linq.Tests | 2026-09-24 | 52250 run, 0 failed, 24 skipped | |
-| System.Globalization.Tests (ICU) | 2026-09-26 | 61639 run, 0 failed, 11 skipped | |
-| System.Globalization.Extensions.Tests, .Calendars.Tests | 2026-09-26 | 689 and 1477 run, 0 failed | |
-| System.Threading.Channels.Tests | 2026-09-24 | 1589 run, 0 failed, 14 skipped | |
-| System.Console.Tests | 2026-09-25 | 4287 run, 0 failed, 22 skipped | |
-| System.IO.FileSystem.Tests | 2026-09-29 | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed |
-| System.IO.FileSystem.DriveInfo.Tests | 2026-09-26 | 6 run, 0 failed | |
-| System.Net.Sockets.Tests | 2026-09-29 | 2124 run, 1 failed, 378 skipped | `ConnectAsync_WithLargeBuffer_*`: its fixed 10 s is too short for emulated sockets under the suite's load; passes alone |
-| System.Net.NetworkInformation.Functional.Tests | 2026-09-26 | 245 run, 0 failed, 13 skipped | |
-| System.Net.Security.Tests | 2026-09-24 | 5010 run, 6 failed, 28 skipped | 4 `SslStream_RandomSizeWrites_OK`: emulation too slow for the fixed 60 s (pass with 10 min); CA certificates (skipped since); dotnet/runtime#134640 |
-| System.Security.Cryptography.Tests | 2026-09-24 | 19267 run, 1 failed, 789 skipped | CA certificates (skipped since) |
-| System.Diagnostics.Process.Tests | 2026-09-26 | 451 run, 0 failed, 255 skipped | |
-| System.Runtime.InteropServices.Tests | 2026-09-26 | 2461 run, 0 failed, 164 skipped | |
-| System.IO.Ports.Tests | 2026-09-25 | 919 run, 0 failed, 797 skipped | no serial ports, as on Linux without them |
-| System.Text.RegularExpressions.Tests | 2026-09-24 | 23404 run, 8 failed, 15 skipped | the same 8 fail as NativeAOT on linux-x64 |
-| System.Text.Json.Tests (`System.Text.Json.Tests` namespace, reflection on) | 2026-09-24, 2026-09-25 | 17916 run, 71 failed | NativeAOT's: every failure also fails as NativeAOT on linux-x64 |
+| Suite | Result | Failures |
+| --- | --- | --- |
+| System.Runtime.Tests | 77325 run, 0 failed, 193 skipped | |
+| System.Collections.Tests | 33679 run, 0 failed, 134 skipped | |
+| System.Linq.Tests | 52250 run, 0 failed, 24 skipped | |
+| System.Globalization.Tests (ICU) | 61639 run, 0 failed, 11 skipped | |
+| System.Globalization.Extensions.Tests, .Calendars.Tests | 689 and 1477 run, 0 failed | |
+| System.Threading.Channels.Tests | 1589 run, 0 failed, 14 skipped | |
+| System.Console.Tests | 4287 run, 0 failed, 22 skipped | |
+| System.IO.FileSystem.Tests | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed; with VfsRamFs's default threads, two full runs of 8596 passed and one stalled |
+| System.IO.FileSystem.DriveInfo.Tests | 6 run, 0 failed | |
+| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of four runs, slow in another |
+| System.Net.NetworkInformation.Functional.Tests | 248 run, 0 failed, 13 skipped | |
+| System.Net.Security.Tests | *stalled* | before the stall, only `SslStream_RandomSizeWrites_OK` (3), which emulation makes too slow for its fixed 60 s, as on 1.4 |
+| System.Security.Cryptography.Tests | *stalled* | before the stall, 184 failed, all from the missing RC2 ([Security](#security)): the tests' RC2 check expects `PlatformNotSupportedException` |
+| System.Diagnostics.Process.Tests | 454 run, 0 failed, 256 skipped | |
+| System.Runtime.InteropServices.Tests | 2461 run, 0 failed, 164 skipped | |
+| System.IO.Ports.Tests | 919 run, 0 failed, 797 skipped | no serial ports, as on Linux without them |
+| System.Text.RegularExpressions.Tests | 23404 run, 8 failed, 15 skipped | the same 8 fail as NativeAOT on linux-x64 |
+| System.Text.Json.Tests (`System.Text.Json.Tests` namespace, reflection on) | 17916 run, 71 failed | NativeAOT's: every failure also fails as NativeAOT on linux-x64 |
+
+On SDK 1.4.0.102 the same suites ran without a stall (results on the branch `kos-sdk-1.4.0.102`).
 
 Each KasperskyOS-specific skip carries its marker in its skip reason or beside its condition in the source.
 

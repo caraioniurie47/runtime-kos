@@ -60,10 +60,11 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX` or `TODO-KOS-IMAGE`.
   12). *KasperskyOS, SDK.*
 - **A garbage collection waits for GC polls.** Without signals the runtime cannot interrupt a thread running managed
   code, so a collection waits until each such thread checks for a pending suspension: at a GC poll or on return from a
-  P/Invoke. The KasperskyOS build puts a GC poll in every loop that has no call (`--codegenopt:JitGCPollLoops=1`): a
-  `GC.Collect` that took 19.5 s while another thread spun on a flag took 13 ms with the polls. Loops the compiler does
-  not poll still hold up a collection until they end: loops closed by a tail call or by exception-handling flow, and
-  methods compiled fully interruptible (debuggable code). *KasperskyOS, SDK (finding 11).*
+  P/Invoke. The KasperskyOS build puts a GC poll in every loop that has no call (`--codegenopt:JitGCPollLoops=1`): on
+  SDK 1.4, a `GC.Collect` that took 19.5 s while another thread spun on a flag took 13 ms with the polls; on SDK 2.0
+  the showcase's section for that case took 75-123 ms in eight of nine runs and 620 ms in one. Loops the compiler
+  does not poll still hold up a collection until they end: loops closed by a tail call or by exception-handling flow,
+  and methods compiled fully interruptible (debuggable code). *KasperskyOS, SDK (finding 11).*
 - **The GC frees memory with the KasperskyOS VMM calls.** `madvise(MADV_DONTNEED)` frees nothing and `MAP_FIXED` over
   a mapping is not supported (`posix_ifaces_impl_features`), so the GC's decommit calls `KnVmDecommit`, which returns
   the pages to the system, and its commit calls `KnVmCommit`, after which the range reads as zeros. Reservations use

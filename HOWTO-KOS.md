@@ -53,12 +53,14 @@ cmake --version
 
 ## 3. Install the KasperskyOS CE SDK
 
-Download `KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb` from Kaspersky's KasperskyOS Community Edition
-download page into `/home`. The package used here has the SHA-256 below. Install it with `apt`, not `gdebi`: on
-Ubuntu 24.04 `gdebi` rejects its dependency `libasound2`, which `libasound2t64` provides.
+Download `KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb` into `/home`; the link is the one on Kaspersky's
+[download page](https://os.kaspersky.com/download-community-edition/). The package used here has the SHA-256 below.
+Install it with `apt`, not `gdebi`: on Ubuntu 24.04 `gdebi` rejects its dependency `libasound2`, which
+`libasound2t64` provides.
 
 ```sh
 cd /home
+wget -nc https://products.s.kaspersky-labs.com/special/KasperskyOSCommunityEdition/2.0.0.179/multilanguage-INT-2.0.0.179/8c9dc725f0bb4efe9c4932f205e01374/KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb
 echo "78faab9ab8e06a4312386f6d9d23be0d98ceb376e07380f916784a6f42098434  KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb" | sha256sum -c
 apt-get install -y ./KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179_en.deb
 ```

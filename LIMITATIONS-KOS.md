@@ -69,8 +69,8 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX` or `TODO-KOS-IMAGE`.
   the pages to the system, and its commit calls `KnVmCommit`, after which the range reads as zeros. Reservations use
   `MAP_NORESERVE`, because a plain `PROT_NONE` reservation commits its memory at once (512 MiB took about 19 s under
   QEMU on SDK 2.0, 53 s on 1.4; `mem-check.c` in kos-sdk-checks). *SDK (finding 8).*
-- **GC regions, as on Linux; a huge allocation can hold up collections under QEMU.** The GC uses regions on
-  KasperskyOS. On segments (the port's choice on SDK 1.4, where regions measured slower under QEMU) each segment is its
+- **GC regions, as on Linux; collections can still wait minutes under QEMU.** The GC uses regions on KasperskyOS.
+  On segments (the port's choice on SDK 1.4, where regions measured slower under QEMU) each segment is its
   own `mmap`, and SDK 2.0 places reservations terabytes apart, so the GC's bookkeeping tables spanned terabytes, and
   growing them stopped every thread for minutes under QEMU (traced in Cryptography and Sockets runs; that Sockets run
   took 888 s instead of about 340-500 s). Also on segments, not traced: two of four boots of a GC benchmark each had a
@@ -244,8 +244,8 @@ QEMU, with the CI's test filters. "Failed" counts are those of the run named; th
 SDK 2.0.0.179, 2026-10-20, the samples' image as it was then (VfsRamFs limited to one thread,
 `vmm.overcommit=exception`), ICU linked, the GC on segments (the port's GC until 2026-11-01). The FileSystem, Sockets,
 Net.Security and Cryptography rows add later runs, with the GC decommit fix and on GC regions. A suite marked *stalled*
-stopped printing before its end in some runs, and those runs have no result: GC pauses ([Runtime](#runtime)), whose
-two traced causes the decommit fix and regions remove.
+stopped printing before its end in some runs, and those runs have no result; the stalls traced were GC stops
+([Runtime](#runtime)).
 
 | Suite | Result | Failures |
 | --- | --- | --- |
@@ -258,10 +258,10 @@ two traced causes the decommit fix and regions remove.
 | System.Console.Tests | 4287 run, 0 failed, 22 skipped | |
 | System.IO.FileSystem.Tests | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed; with VfsRamFs's default threads, two full runs of 8596 passed and one stalled, and with the GC decommit fix three more passed; on GC regions one run, 8596 passed |
 | System.IO.FileSystem.DriveInfo.Tests | 6 run, 0 failed | |
-| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of three runs, slow in another; with the GC decommit fix three of three complete (338, 888 and 498 s, the slow one with a GC pause, [Runtime](#runtime)), failing up to 10 under load (mostly `SelectTest` "Too many open files in system", as on 1.4), and once `NetworkStreamTest.ReadWrite_Success` timing out (cause not established); with GC regions two of two complete (402 and 330 s), 1 and 0 failed |
+| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of three runs, slow in another; with the GC decommit fix three of three complete (338, 888 and 498 s, the slow one with a GC stop for table growth, [Runtime](#runtime)), failing up to 10 under load (mostly `SelectTest` "Too many open files in system", as on 1.4), and once `NetworkStreamTest.ReadWrite_Success` timing out (cause not established); with GC regions two of two complete (402 and 330 s), 1 and 0 failed |
 | System.Net.NetworkInformation.Functional.Tests | 248 run, 0 failed, 13 skipped | |
 | System.Net.Security.Tests | 5063 run, 1 failed, 25 skipped | `SslStream_RandomSizeWrites_OK`, which emulation makes too slow for its fixed 60 s, as on 1.4; *stalled* in one of two full runs before the GC decommit fix, two of two complete with it (350 and 354 s); on GC regions one run, 2 failed (two cases of the same test) |
-| System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs; with the GC decommit fix three of four complete, one ran out of memory (GC pauses, [Runtime](#runtime)); with GC regions three of three complete (1172, 1279 and 1268 s) |
+| System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs; with the GC decommit fix three of four complete, one ran out of memory (cause not traced, [Runtime](#runtime)); with GC regions three of three complete (1172, 1279 and 1268 s) |
 | System.Diagnostics.Process.Tests | 454 run, 0 failed, 256 skipped | |
 | System.Runtime.InteropServices.Tests | 2461 run, 0 failed, 164 skipped | |
 | System.IO.Ports.Tests | 919 run, 0 failed, 797 skipped | no serial ports, as on Linux without them |
@@ -269,8 +269,8 @@ two traced causes the decommit fix and regions remove.
 | System.Text.Json.Tests (`System.Text.Json.Tests` namespace, reflection on) | 17916 run, 71 failed | NativeAOT's: every failure also fails as NativeAOT on linux-x64 |
 
 A temporary diagnostic trace was added to the runtime for the runs with the GC decommit fix, except its last Sockets
-and Cryptography runs, and for the first run of each suite on GC regions; the last regions runs of Sockets and
-Cryptography (2026-11-01) had none. On SDK 1.4.0.102 the same suites ran without a stall (results on the branch
+and Cryptography runs, and for the GC regions trials (2026-10-21); the regions runs of Sockets and Cryptography on
+2026-11-01 had none. On SDK 1.4.0.102 the same suites ran without a stall (results on the branch
 `kos-sdk-1.4.0.102`).
 
 Each KasperskyOS-specific skip carries its marker in its skip reason or beside its condition in the source.

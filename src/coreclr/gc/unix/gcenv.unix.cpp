@@ -497,7 +497,7 @@ static bool VirtualCommitInner(void* address, size_t size, uint16_t node, bool n
     // A range VirtualDecommit freed with KnVmDecommit faults until KnVmCommit, whatever its protection. KnVmCommit
     // takes no memory until pages are written, and returned 0 on ranges never committed, decommitted, and committed
     // but never written, so every commit calls it (SDK 2.0.0.179). On a committed page holding data it kept the data,
-    // so a commit overlapping committed memory is safe too (on segments, commit_mark_array_by_range's edge pages).
+    // as a commit overlapping committed memory needs (on segments, commit_mark_array_by_range's edge pages).
     bool success = KnVmCommit(address, size) == 0 && mprotect(address, size, PROT_WRITE | PROT_READ) == 0;
 #else
     bool success = mprotect(address, size, PROT_WRITE | PROT_READ) == 0;

@@ -11,8 +11,8 @@ What works: a single statically linked executable per program, with files and st
 The limits, and the test suites run, are in [LIMITATIONS-KOS.md](LIMITATIONS-KOS.md).
 
 - [Releases](https://github.com/caraioniurie47/runtime-kos/releases): prebuilt packages and a quick start;
-  [`release_v03`](https://github.com/caraioniurie47/runtime-kos/releases/tag/release_v03) is built for SDK
-  1.4.0.102
+  [`release_v04`](https://github.com/caraioniurie47/runtime-kos/releases/tag/release_v04) is built for SDK
+  2.0.0.179
 - [HOWTO-KOS.md](HOWTO-KOS.md): build everything from source
 - Samples: [`samples/helloworldapp-kos`](samples/helloworldapp-kos), [`samples/showcase-kos`](samples/showcase-kos)
   and [`samples/webserver-kos`](samples/webserver-kos)

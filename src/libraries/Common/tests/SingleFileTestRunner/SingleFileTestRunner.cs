@@ -36,12 +36,14 @@ public class SingleFileTestRunner : XunitTestFramework
         report("Running assembly:" + asm.FullName);
 
         // Where the device has no copy of the test's content files (TestData and the like, beside the executable on
-        // other platforms), they come as a ustar archive in a read-only file system: unpack it into the current
-        // directory first.
+        // other platforms), they come as a ustar archive, from a read-only file system or, named "tcp:<host>:<port>",
+        // read from a TCP connection to its end (a device whose programs see no file system the image can fill, as
+        // KasperskyOS CE 2.0's VfsRamFs): unpack it into the current directory first.
         string contentArchive = Environment.GetEnvironmentVariable("DOTNET_TEST_CONTENT_TAR");
         if (!string.IsNullOrEmpty(contentArchive))
         {
-            report($"Content: {UnpackTar(contentArchive, Environment.CurrentDirectory)} files from {contentArchive} into {Environment.CurrentDirectory} (base directory {AppContext.BaseDirectory})");
+            using Stream tar = contentArchive.StartsWith("tcp:", StringComparison.Ordinal) ? ReceiveArchive(contentArchive) : File.OpenRead(contentArchive);
+            report($"Content: {UnpackTar(tar, Environment.CurrentDirectory)} files from {contentArchive} ({tar.Length} bytes) into {Environment.CurrentDirectory} (base directory {AppContext.BaseDirectory})");
         }
 
         // The current RemoteExecutor implementation is not compatible with the SingleFileTestRunner.
@@ -252,12 +254,42 @@ public class SingleFileTestRunner : XunitTestFramework
         return failed ? 1 : 0;
     }
 
+    // "tcp:<host>:<port>": everything the server sends before it closes the connection. The connect is retried for two
+    // minutes: the device's network may come up after the program starts (KasperskyOS CE 2.0's sample image addresses
+    // its interface from another program, so a first connect can fail "Can't assign requested address").
+    private static MemoryStream ReceiveArchive(string address)
+    {
+        string[] parts = address.Split(':');
+        var endPoint = new System.Net.IPEndPoint(System.Net.IPAddress.Parse(parts[1]), int.Parse(parts[2]));
+        var socket = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        for (var waited = System.Diagnostics.Stopwatch.StartNew(); ; )
+        {
+            try
+            {
+                socket.Connect(endPoint);
+                break;
+            }
+            catch (System.Net.Sockets.SocketException) when (waited.Elapsed < TimeSpan.FromMinutes(2))
+            {
+                socket.Dispose();
+                System.Threading.Thread.Sleep(1000);
+                socket = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+            }
+        }
+        var archive = new MemoryStream();
+        using (var network = new System.Net.Sockets.NetworkStream(socket, ownsSocket: true))
+        {
+            network.CopyTo(archive);
+        }
+        archive.Position = 0;
+        return archive;
+    }
+
     // Regular files and directories of a ustar archive (tar --format=ustar), unpacked under a directory; returns the
     // number of files.
-    private static int UnpackTar(string archive, string destination)
+    private static int UnpackTar(Stream tar, string destination)
     {
         int files = 0;
-        using FileStream tar = File.OpenRead(archive);
         byte[] header = new byte[512];
         while (tar.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length && header[0] != 0)
         {

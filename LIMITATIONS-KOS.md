@@ -186,11 +186,11 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
 - **Cryptography is the SDK's OpenSSL 3.5.7**, linked statically (SDK 1.4 had 1.1.1t). The SDK ships no OpenSSL
   headers; the port compiles against the 3.5.7 release's, configured without QUIC and CMP as the SDK's libraries are.
   The showcase's TLS 1.3 handshake, AES-GCM, RSA, ECDH and HMAC work. *SDK (finding 1).*
-- **No RC2.** The SDK's OpenSSL has no legacy provider (its `libcrypto.a` holds no RC2, RC4 or MD4 implementation,
-  and there are no provider modules to load), so `RC2` encryption and decryption throw `CryptographicException`
-  ("digital envelope routines::unsupported"), not `PlatformNotSupportedException`: .NET checks only that OpenSSL
-  names the cipher, which OpenSSL 3 does without the legacy provider on Linux too. SDK 1.4's 1.1.1t had RC2.
-  *SDK, .NET.*
+- **No RC2, no single DES.** The SDK's OpenSSL has no legacy provider (its `libcrypto.a` holds no RC2, RC4 or MD4
+  implementation, and there are no provider modules to load), so `RC2` and `DES` encryption and decryption throw
+  `CryptographicException` ("digital envelope routines::unsupported"), not `PlatformNotSupportedException`: .NET
+  checks only that OpenSSL names the cipher, which OpenSSL 3 does without the legacy provider on Linux too. Keys and
+  PKCS#12 files encrypted with them fail to load the same way. SDK 1.4's 1.1.1t had both. *SDK, .NET.*
 - **No CA certificates in the image.** The default trust refuses every server, public ones included, and the
   `LocalMachine` `Root` store is empty. Either trust CAs in code (`X509ChainPolicy.CustomTrustStore`, as the showcase
   does), or set `SSL_CERT_FILE` in the program's environment (the image's `HELLO_ENV`) to a PEM bundle the program
@@ -236,8 +236,8 @@ cause is not known yet.
 | System.IO.FileSystem.DriveInfo.Tests | 6 run, 0 failed | |
 | System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of four runs, slow in another |
 | System.Net.NetworkInformation.Functional.Tests | 248 run, 0 failed, 13 skipped | |
-| System.Net.Security.Tests | *stalled* | before the stall, only `SslStream_RandomSizeWrites_OK` (3), which emulation makes too slow for its fixed 60 s, as on 1.4 |
-| System.Security.Cryptography.Tests | *stalled* | before the stall, 184 failed, all from the missing RC2 ([Security](#security)): the tests' RC2 check expects `PlatformNotSupportedException` |
+| System.Net.Security.Tests | 5063 run, 1 failed, 25 skipped | `SslStream_RandomSizeWrites_OK`, which emulation makes too slow for its fixed 60 s, as on 1.4; *stalled* in one of two full runs |
+| System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs |
 | System.Diagnostics.Process.Tests | 454 run, 0 failed, 256 skipped | |
 | System.Runtime.InteropServices.Tests | 2461 run, 0 failed, 164 skipped | |
 | System.IO.Ports.Tests | 919 run, 0 failed, 797 skipped | no serial ports, as on Linux without them |

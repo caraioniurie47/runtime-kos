@@ -80,8 +80,8 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX`, `TODO-KOS-IMAGE` or `KO
   back), two minutes without an allocation by any thread (every thread's state), and free memory falling below 512,
   256, 128 and 64 MiB and at exit. Each report gives the address of `minipal_lowres_ticks`, which places the binary
   for a symbol lookup in its `.dbg` file. A suspension report is written by the suspending thread, so its write time
-  adds to the suspension it reports. Unset, the runtime reads the variable once and then only tests a flag.
-  *KasperskyOS (finding 11), Port.*
+  adds to the suspension it reports. Unset, it costs a once-only check per thread attach and a flag test per
+  suspension. *KasperskyOS (finding 11), Port.*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
   free, so in the runs made no allocation failed for .NET to report as `OutOfMemoryException`. What happens at the

@@ -35,8 +35,9 @@
 // the GC threads' stacks), 120 s without an allocation by any thread (every thread's state), free memory crossing
 // 512, 256, 128 and 64 MiB, and at exit. A stack is the frame-record chains found in the top 128 KB of its memory; the
 // lowest may be stale. Every report gives the address of minipal_lowres_ticks, which places the binary for
-// symbolizing. Unset, it reads the variable once and then only tests a flag. Distilled from the trace that found the
-// SDK 2.0 GC stalls' causes (2026-10-21).
+// symbolizing. Unset, it costs a pthread_once check per thread attach (the first reads the
+// variable) and a flag test per suspension. Distilled from the trace that found the SDK 2.0 GC stalls' causes
+// (2026-10-21).
 #include <coresrv/stat/stat_api.h>
 #include <errno.h>
 #include <pthread.h>

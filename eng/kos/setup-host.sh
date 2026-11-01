@@ -8,12 +8,15 @@
 # The SDK is Kaspersky's, under its own licence agreement; the script downloads it only once you have accepted that
 # agreement: read KOS_EULA_URL below, then pass --accept-eula (or set ACCEPT_KASPERSKYOS_EULA=yes). The script can be
 # run again after a failure: an interrupted download resumes, one that fails its SHA-256 is deleted, and a step is
-# skipped when its result is complete (the SDK: dpkg's state of its package and version; CMake, ICU and OpenSSL: the
-# marker file each leaves when it finishes, or the files a complete install has, such as a release asset's ICU).
+# skipped only when it finished before (the SDK: dpkg's state of its package and version; CMake, ICU and OpenSSL: the
+# marker file each writes last). Otherwise the step runs again: ICU and the OpenSSL headers are written over what is
+# there (a release asset's ICU too), and CMake is unpacked beside its folder, then takes its place, so an interrupted
+# unpack never looks finished.
 
 set -euo pipefail
 
-KOS_SDK_NAME=KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179
+KOS_SDK_VERSION=2.0.0.179
+KOS_SDK_NAME=KasperskyOS-Community-Edition-Qemu-arm64-$KOS_SDK_VERSION
 KOS_SDK_URL=https://products.s.kaspersky-labs.com/special/KasperskyOSCommunityEdition/2.0.0.179/multilanguage-INT-2.0.0.179/8c9dc725f0bb4efe9c4932f205e01374/${KOS_SDK_NAME}_en.deb
 KOS_SDK_SHA256=78faab9ab8e06a4312386f6d9d23be0d98ceb376e07380f916784a6f42098434
 KOS_EULA_URL=https://products.s.kaspersky-labs.com/special/KasperskyOSCommunityEdition/2.0.0.179/multilanguage-INT-2.0.0.179/english-INT/8c26d1dfbb0c450ea9284875e2c87018/EULA.en.txt
@@ -39,7 +42,7 @@ done
 grep -q '^VERSION_ID="24.04"' /etc/os-release || echo "warning: SDK 2.0 requires Ubuntu 24.04; this host is not" >&2
 sdk_installed() {
     [ "$(dpkg-query -W -f='${Status} ${Version}' kasperskyos-community-edition-qemu-arm64 2>/dev/null)" = \
-      "install ok installed 2.0.0.179" ]
+      "install ok installed $KOS_SDK_VERSION" ]
 }
 if ! sdk_installed && [ "$accept" != yes ]; then
     echo "The KasperskyOS CE SDK is used under Kaspersky's licence agreement: $KOS_EULA_URL" >&2
@@ -68,13 +71,16 @@ apt-get upgrade -y
 apt-get install -y --no-install-recommends build-essential clang llvm lld lldb python-is-python3 curl wget git unzip file ca-certificates libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev zlib1g-dev ninja-build cpio pigz
 
 step "Step 2: CMake 3.31.12 in /opt"
-if [ ! -f "/opt/$CMAKE_NAME/.kos-setup-done" ] &&
-   ! { [ -x "/opt/$CMAKE_NAME/bin/cmake" ] && [ -d "/opt/$CMAKE_NAME/share/cmake-3.31/Modules" ]; }; then
+if [ ! -f "/opt/$CMAKE_NAME/.kos-setup-done" ]; then
     cd /home
     fetch "https://github.com/Kitware/CMake/releases/download/v3.31.12/$CMAKE_NAME.tar.gz" "$CMAKE_SHA256"
+    rm -rf "/opt/.kos-unpack"
+    mkdir -p "/opt/.kos-unpack"
+    tar -xzf "$CMAKE_NAME.tar.gz" -C /opt/.kos-unpack
+    touch "/opt/.kos-unpack/$CMAKE_NAME/.kos-setup-done"
     rm -rf "/opt/$CMAKE_NAME"
-    tar -xzf "$CMAKE_NAME.tar.gz" -C /opt
-    touch "/opt/$CMAKE_NAME/.kos-setup-done"
+    mv "/opt/.kos-unpack/$CMAKE_NAME" "/opt/$CMAKE_NAME"
+    rmdir /opt/.kos-unpack
 fi
 for t in cmake ctest cpack; do ln -sf "/opt/$CMAKE_NAME/bin/$t" "/usr/local/bin/$t"; done
 hash -r
@@ -101,12 +107,7 @@ if [ "$source_build" = 1 ]; then
     [ -f "$REPO/eng/kos/icu/kos-icu.patch" ] || { echo "--source needs the runtime-kos clone; $REPO is not one" >&2; exit 1; }
 
     step "Step 5: ICU in /opt/icu4c/kos"
-    # Complete: this step's marker, or the libraries and a header a whole install has (the release asset's ICU).
-    icu_complete=1
-    for f in lib/libicuuc.a lib/libicui18n.a lib/libicudata.a include/unicode/uversion.h; do
-        [ -f "/opt/icu4c/kos/$f" ] || icu_complete=0
-    done
-    if [ ! -f /opt/icu4c/kos/.kos-setup-done ] && [ "$icu_complete" = 0 ]; then
+    if [ ! -f /opt/icu4c/kos/.kos-setup-done ]; then
         rm -rf /home/dotnet-icu /home/icu4c-build-x64 /home/icu4c-build-kos
         cd /home
         git init -q dotnet-icu && cd dotnet-icu
@@ -130,9 +131,7 @@ if [ "$source_build" = 1 ]; then
     fi
 
     step "Step 5: OpenSSL 3.5.7 headers in /opt/openssl-kos/include"
-    # Complete: this step's marker, or the version header and the one build_generated makes.
-    if [ ! -f /opt/openssl-kos/.kos-setup-done ] &&
-       ! { [ -f /opt/openssl-kos/include/openssl/opensslv.h ] && [ -f /opt/openssl-kos/include/openssl/configuration.h ]; }; then
+    if [ ! -f /opt/openssl-kos/.kos-setup-done ]; then
         cd /home
         fetch "https://github.com/openssl/openssl/releases/download/$OPENSSL_NAME/$OPENSSL_NAME.tar.gz" "$OPENSSL_SHA256"
         rm -rf "/home/$OPENSSL_NAME"

@@ -138,7 +138,7 @@ namespace System.Net.Sockets.Tests
         [InlineData(false)]
         public async Task Disconnect_NotConnected_ThrowsSocketException(bool reuseSocket)
         {
-            if (PlatformDetection.IsKasperskyOS) throw new SkipTestException("TODO-KOS(6i): shutdown() on an unconnected TCP socket succeeds");
+            if (PlatformDetection.IsKasperskyOS) throw new SkipTestException("KOS-AS-DESIGNED(6i): shutdown() on an unconnected TCP socket succeeds, as on NetBSD");
             using (Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
             {
                 await Assert.ThrowsAsync<SocketException>(async () => await DisconnectAsync(s, reuseSocket));

@@ -76,7 +76,7 @@ static void KosRearmIfWouldBlock(int fd, short bits, int64_t callStart)
 #if defined(__APPLE__) && __APPLE__
 #include <sys/socketvar.h>
 #endif
-#if defined(__KOS__) && !defined(SO_REUSEPORT) // TODO-KOS(6t): the network stack honours SO_REUSEPORT, the headers lack it
+#if defined(__KOS__) && !defined(SO_REUSEPORT) // KOS-AS-DESIGNED(6t): the network stack honours SO_REUSEPORT, the headers lack it
 // The stack is NetBSD's, where binding a second UDP socket to a unicast address in use needs SO_REUSEPORT on both
 // (SO_REUSEADDR is not enough, as on macOS), and setsockopt() accepts NetBSD's value (tmp-probe/sockleft3.c).
 #define SO_REUSEPORT 0x0200

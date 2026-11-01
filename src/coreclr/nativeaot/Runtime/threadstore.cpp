@@ -35,9 +35,8 @@
 // the GC threads' stacks), 120 s without an allocation by any thread (every thread's state), free memory crossing
 // 512, 256, 128 and 64 MiB, and at exit. A stack is the frame-record chains found in the top 128 KB of its memory; the
 // lowest may be stale. Every report gives the address of minipal_lowres_ticks, which places the binary for
-// symbolizing. Unset, it costs a pthread_once check per thread attach (the first reads the
-// variable) and a flag test per suspension. Distilled from the trace that found the SDK 2.0 GC stalls' causes
-// (2026-10-21).
+// symbolizing. Unset, it costs a pthread_once check per thread attach (the first reads the variable) and a flag test
+// in each wait round of a suspension. Distilled from the trace that found the SDK 2.0 GC stalls' causes (2026-10-21).
 #include <coresrv/stat/stat_api.h>
 #include <errno.h>
 #include <pthread.h>
@@ -419,7 +418,7 @@ void* ThreadStore::KosWatchdog(void* unused)
     int64_t unchangedSince = started;
     int64_t busySince = 0;
     int64_t busyReportedAt = 0;
-    unsigned busySinceGcCount = 0; // a count unchanged at the report: one GC held the lock throughout
+    unsigned busySinceGcCount = 0; // the GC count when the lock was first found busy, beside the report's
     int busyReports = 0;
     int dumps = 0;
     int thresholdsCrossed = 0;

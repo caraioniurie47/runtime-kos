@@ -60,7 +60,8 @@ wsl -d UbuntuKOS20 -u root
 
 ## 2. Install prerequisites
 
-The quick start's `eng/kos/setup-host.sh` runs steps 2-4 as written here, and skips a step whose result is complete.
+The quick start's `eng/kos/setup-host.sh` runs steps 2-4 as written here, and skips a step that finished on an
+earlier run.
 
 ```sh
 export DEBIAN_FRONTEND=noninteractive

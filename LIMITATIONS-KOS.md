@@ -38,8 +38,9 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX`, `TODO-KOS-IMAGE` or `KO
   empty (by the source, `Environment.ProcessPath` is null too). A file looked up "beside the app" resolves against the
   working directory, `/`. Write such files to `/tmp` at run time, or ship them in the image where a VFS program
   serves them to the program (done on SDK 1.4 with VfsRamFs mounting the ROMFS; on SDK 2.0 the same mount in the
-  samples' image shows the kernel image's ROMFS, not the product ROMFS holding the files, so it failed).
-  *KasperskyOS; on SDK 2.0: SDK (finding 21).*
+  samples' image shows the kernel image's ROMFS, not the product ROMFS holding the files, so it failed; the SDK's
+  VfsRamFs has no relay to the program that holds them, and an image of your own could add a relay VFS program, not
+  tried). *KasperskyOS; on SDK 2.0: SDK (finding 21).*
 - **No child processes.** KasperskyOS has no `fork` or `exec` (`posix_uns_ifaces`): `Process.Start` throws
   `Win32Exception` ("Not supported"). *KasperskyOS.*
 - **Other processes cannot be inspected.** `Process.GetProcesses`, `GetProcessesByName`, and a process's modules,
@@ -80,8 +81,8 @@ KasperskyOS team answered as expected), `KOS-NOT-LINUX`, `TODO-KOS-IMAGE` or `KO
   back), two minutes without an allocation by any thread (every thread's state), and free memory falling below 512,
   256, 128 and 64 MiB and at exit. Each report gives the address of `minipal_lowres_ticks`, which places the binary
   for a symbol lookup in its `.dbg` file. A suspension report is written by the suspending thread, so its write time
-  adds to the suspension it reports. Unset, it costs a once-only check per thread attach and a flag test per
-  suspension. *KasperskyOS (finding 11), Port.*
+  adds to the suspension it reports. Unset, it costs a once-only check per thread attach and a flag test in each
+  wait round of a suspension. *KasperskyOS (finding 11), Port.*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
   free, so in the runs made no allocation failed for .NET to report as `OutOfMemoryException`. What happens at the

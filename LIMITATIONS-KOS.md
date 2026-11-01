@@ -60,11 +60,16 @@ marker naming its cause:
   `GC.Collect` that took 19.5 s while another thread spun on a flag took 13 ms with the polls. Loops the compiler does
   not poll still hold up a collection until they end: loops closed by a tail call or by exception-handling flow, and
   methods compiled fully interruptible (debuggable code). *KasperskyOS, SDK (finding 11).*
-- **Memory the GC gives back stays with the process.** `madvise(MADV_DONTNEED)` frees nothing and `MAP_FIXED` over a
-  mapping is not supported (`posix_ifaces_impl_features`), so the GC's decommit zeroes the pages and makes them
-  inaccessible; they are not returned to the system. Reservations use `MAP_NORESERVE`, because a plain `PROT_NONE`
-  reservation commits its memory at once (512 MiB took tens of seconds; `mem-check.c` in kos-sdk-checks). *SDK
-  (finding 8).*
+- **The GC frees memory with the KasperskyOS VMM calls.** `madvise(MADV_DONTNEED)` frees nothing and `MAP_FIXED` over
+  a mapping is not supported (`posix_ifaces_impl_features`), so the GC's decommit calls `KnVmDecommit`, which returns
+  the pages to the system, and its commit calls `KnVmCommit`, after which the range reads as zeros. Reservations use
+  `MAP_NORESERVE`, because a plain `PROT_NONE` reservation commits its memory at once (512 MiB took tens of seconds;
+  `mem-check.c` in kos-sdk-checks). *SDK (finding 8).*
+- **GC pauses of minutes on SDK 2.0 under QEMU.** The GC runs on segments on KasperskyOS (regions measured slower under
+  QEMU on SDK 1.4), each reserved by its own `mmap`, and SDK 2.0 places reservations terabytes apart, so the GC's
+  bookkeeping tables span terabytes; growing them copies gigabytes with every thread stopped, for minutes under QEMU
+  (Cryptography's and Sockets' test suites). Allocating arrays of a gigabyte or more also holds up a collection
+  while the memory is first touched. *SDK, Port.*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
   free, so in the runs made no allocation failed for .NET to report as `OutOfMemoryException`. What happens at the
@@ -220,8 +225,8 @@ The dotnet/runtime library test suites below, built as NativeAOT for KasperskyOS
 QEMU, with the CI's test filters. "Failed" counts are those of the run named; the causes are above.
 
 SDK 2.0.0.179, 2026-10-20, the samples' image at its defaults (VfsRamFs one thread, `vmm.overcommit=exception`), ICU
-linked. A suite marked *stalled* stopped printing before its end in some runs, and those runs have no result; the
-cause is not known yet.
+linked. A suite marked *stalled* stopped printing before its end in some runs, and those runs have no result: GC
+pauses ([Runtime](#runtime)); the decommit's share of them is fixed.
 
 | Suite | Result | Failures |
 | --- | --- | --- |
@@ -232,19 +237,20 @@ cause is not known yet.
 | System.Globalization.Extensions.Tests, .Calendars.Tests | 689 and 1477 run, 0 failed | |
 | System.Threading.Channels.Tests | 1589 run, 0 failed, 14 skipped | |
 | System.Console.Tests | 4287 run, 0 failed, 22 skipped | |
-| System.IO.FileSystem.Tests | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed; with VfsRamFs's default threads, two full runs of 8596 passed and one stalled |
+| System.IO.FileSystem.Tests | 8468 run, 0 failed, 261 skipped | named-pipe class run separately: 128 run, 0 failed; with VfsRamFs's default threads, two full runs of 8596 passed and one stalled, and with the GC decommit fix three more passed |
 | System.IO.FileSystem.DriveInfo.Tests | 6 run, 0 failed | |
-| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of four runs, slow in another |
+| System.Net.Sockets.Tests | 2124 run, 1 failed, 378 skipped | a timeout under the suite's load (`ReceiveAsync_ConcurrentDispose_*`), as on 1.4 (which failed `ConnectAsync_WithLargeBuffer_*` so); *stalled* in one of four runs, slow in another; with the GC decommit fix two of two complete (338 and 888 s, the slow one with a GC pause, [Runtime](#runtime)), failing up to 10 under load (`SelectTest` "Too many open files in system", as on 1.4) |
 | System.Net.NetworkInformation.Functional.Tests | 248 run, 0 failed, 13 skipped | |
-| System.Net.Security.Tests | 5063 run, 1 failed, 25 skipped | `SslStream_RandomSizeWrites_OK`, which emulation makes too slow for its fixed 60 s, as on 1.4; *stalled* in one of two full runs |
-| System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs |
+| System.Net.Security.Tests | 5063 run, 1 failed, 25 skipped | `SslStream_RandomSizeWrites_OK`, which emulation makes too slow for its fixed 60 s, as on 1.4; *stalled* in one of two full runs before the GC decommit fix, two of two complete with it (350 and 354 s) |
+| System.Security.Cryptography.Tests | 21079 run, 2193 failed, 438 skipped | all from the missing RC2 and DES ([Security](#security)), the tests' RC2 check (it expects `PlatformNotSupportedException`) included; *stalled* in one of two full runs; with the GC decommit fix two of three complete, one ran out of memory (GC pauses, [Runtime](#runtime)) |
 | System.Diagnostics.Process.Tests | 454 run, 0 failed, 256 skipped | |
 | System.Runtime.InteropServices.Tests | 2461 run, 0 failed, 164 skipped | |
 | System.IO.Ports.Tests | 919 run, 0 failed, 797 skipped | no serial ports, as on Linux without them |
 | System.Text.RegularExpressions.Tests | 23404 run, 8 failed, 15 skipped | the same 8 fail as NativeAOT on linux-x64 |
 | System.Text.Json.Tests (`System.Text.Json.Tests` namespace, reflection on) | 17916 run, 71 failed | NativeAOT's: every failure also fails as NativeAOT on linux-x64 |
 
-On SDK 1.4.0.102 the same suites ran without a stall (results on the branch `kos-sdk-1.4.0.102`).
+The runs with the GC decommit fix used a runtime with a temporary diagnostic trace added. On SDK 1.4.0.102 the same
+suites ran without a stall (results on the branch `kos-sdk-1.4.0.102`).
 
 Each KasperskyOS-specific skip carries its marker in its skip reason or beside its condition in the source.
 

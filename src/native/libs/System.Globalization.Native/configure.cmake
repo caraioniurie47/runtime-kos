@@ -13,8 +13,6 @@ else()
 
     if (CLR_CMAKE_TARGET_UNIX)
         set(CMAKE_REQUIRED_INCLUDES ${UCURR_H} ${ICU_HOMEBREW_INC_PATH})
-        # A static ICU (CMAKE_ICU_DIR, as on KasperskyOS) leaves UCURR_H unset, and CMakeLists.txt adds its include
-        # directory only after this file: without it the checks below cannot find the ICU headers and report 0.
         if (DEFINED CMAKE_ICU_DIR)
             list(APPEND CMAKE_REQUIRED_INCLUDES ${CMAKE_ICU_DIR}/include)
         endif()
@@ -25,11 +23,27 @@ else()
         " HAVE_UDAT_STANDALONE_SHORTER_WEEKDAYS)
 
         set(CMAKE_REQUIRED_LIBRARIES ${ICUUC} ${ICUI18N})
+        if (DEFINED CMAKE_ICU_DIR)
+            # With ICU symbol renaming disabled, ucol_clone is a function, so the check also links,
+            # but this path sets no ICU libraries: compile only.
+            if (DEFINED CMAKE_TRY_COMPILE_TARGET_TYPE)
+                set(SAVED_CMAKE_TRY_COMPILE_TARGET_TYPE "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
+            endif()
+            set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+        endif()
         check_symbol_exists(
             ucol_clone
             "unicode/ucol.h"
             HAVE_UCOL_CLONE)
 
+        if (DEFINED CMAKE_ICU_DIR)
+            if (DEFINED SAVED_CMAKE_TRY_COMPILE_TARGET_TYPE)
+                set(CMAKE_TRY_COMPILE_TARGET_TYPE "${SAVED_CMAKE_TRY_COMPILE_TARGET_TYPE}")
+                unset(SAVED_CMAKE_TRY_COMPILE_TARGET_TYPE)
+            else()
+                unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+            endif()
+        endif()
         unset(CMAKE_REQUIRED_LIBRARIES)
         unset(CMAKE_REQUIRED_INCLUDES)
     endif()

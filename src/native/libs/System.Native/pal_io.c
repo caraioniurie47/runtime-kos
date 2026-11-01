@@ -48,6 +48,11 @@
 #if HAVE_INOTIFY
 #include <sys/inotify.h>
 #endif
+#if HAVE_EPOLL
+#include <sys/epoll.h>
+#elif HAVE_KQUEUE
+#include <sys/event.h>
+#endif
 #if HAVE_STATFS_VFS // Linux
 #include <sys/vfs.h>
 #elif HAVE_STATFS_MOUNT // BSD
@@ -79,6 +84,10 @@ extern int     getpeereid(int, uid_t *__restrict__, gid_t *__restrict__);
 
 #if defined(TARGET_SUNOS)
 #include <procfs.h>
+#endif
+
+#if defined(TARGET_WASI)
+#include <sys/random.h> // getentropy
 #endif
 
 #ifdef __linux__
@@ -317,7 +326,7 @@ static int32_t ConvertOpenFlags(int32_t flags)
             return -1;
     }
 
-    if (flags & ~(PAL_O_ACCESS_MODE_MASK | PAL_O_CLOEXEC | PAL_O_CREAT | PAL_O_EXCL | PAL_O_TRUNC | PAL_O_SYNC | PAL_O_NOFOLLOW))
+    if (flags & ~(PAL_O_ACCESS_MODE_MASK | PAL_O_CLOEXEC | PAL_O_CREAT | PAL_O_EXCL | PAL_O_TRUNC | PAL_O_SYNC | PAL_O_NOFOLLOW | PAL_O_DIRECTORY))
     {
         assert_msg(false, "Unknown Open flag", (int)flags);
         return -1;
@@ -337,18 +346,15 @@ static int32_t ConvertOpenFlags(int32_t flags)
         ret |= O_SYNC;
     if (flags & PAL_O_NOFOLLOW)
         ret |= O_NOFOLLOW;
+    if (flags & PAL_O_DIRECTORY)
+        ret |= O_DIRECTORY;
 
     assert(ret != -1);
     return ret;
 }
 
-intptr_t SystemNative_Open(const char* path, int32_t flags, int32_t mode)
+static int32_t ConvertOpenFlagsAndAddDefaults(int32_t flags)
 {
-// these two ifdefs are for platforms where we dont have the open version of CLOEXEC and thus
-// must simulate it by doing a fcntl with the SETFFD version after the open instead
-#if !HAVE_O_CLOEXEC
-    int32_t old_flags = flags;
-#endif
     flags = ConvertOpenFlags(flags);
     if (flags == -1)
     {
@@ -362,15 +368,47 @@ intptr_t SystemNative_Open(const char* path, int32_t flags, int32_t mode)
 #ifndef TARGET_WASM
     flags |= O_NOCTTY;
 #endif
+    return flags;
+}
 
-    int result;
-    while ((result = open(path, flags, (mode_t)mode)) < 0 && errno == EINTR);
+static void SetCloseOnExecIfNeeded(int result, int32_t flags)
+{
 #if !HAVE_O_CLOEXEC
-    if (old_flags & PAL_O_CLOEXEC)
+    if (result >= 0 && (flags & PAL_O_CLOEXEC))
     {
         fcntl(result, F_SETFD, FD_CLOEXEC);
     }
+#else
+    (void)result;
+    (void)flags;
 #endif
+}
+
+intptr_t SystemNative_Open(const char* path, int32_t flags, int32_t mode)
+{
+    int32_t nativeFlags = ConvertOpenFlagsAndAddDefaults(flags);
+    if (nativeFlags == -1)
+    {
+        return -1;
+    }
+
+    int result;
+    while ((result = open(path, nativeFlags, (mode_t)mode)) < 0 && errno == EINTR);
+    SetCloseOnExecIfNeeded(result, flags);
+    return result;
+}
+
+intptr_t SystemNative_OpenAt(intptr_t dirfd, const char* path, int32_t flags, int32_t mode)
+{
+    int32_t nativeFlags = ConvertOpenFlagsAndAddDefaults(flags);
+    if (nativeFlags == -1)
+    {
+        return -1;
+    }
+
+    int result;
+    while ((result = openat(ToFileDescriptor(dirfd), path, nativeFlags, (mode_t)mode)) < 0 && errno == EINTR);
+    SetCloseOnExecIfNeeded(result, flags);
     return result;
 }
 
@@ -402,6 +440,27 @@ int32_t SystemNative_Unlink(const char* path)
 {
     int32_t result;
     while ((result = unlink(path)) < 0 && errno == EINTR);
+    return result;
+}
+
+int32_t SystemNative_UnlinkAt(intptr_t dirfd, const char* path, int32_t flags)
+{
+    int nativeFlags;
+    switch (flags)
+    {
+        case 0:
+            nativeFlags = 0;
+            break;
+        case PAL_AT_REMOVEDIR:
+            nativeFlags = AT_REMOVEDIR;
+            break;
+        default:
+            errno = EINVAL;
+            return -1;
+    }
+
+    int32_t result;
+    while ((result = unlinkat(ToFileDescriptor(dirfd), path, nativeFlags)) < 0 && errno == EINTR);
     return result;
 }
 
@@ -772,6 +831,13 @@ int32_t SystemNative_MkDir(const char* path, int32_t mode)
     return result;
 }
 
+int32_t SystemNative_MkDirAt(intptr_t dirfd, const char* path, int32_t mode)
+{
+    int32_t result;
+    while ((result = mkdirat(ToFileDescriptor(dirfd), path, (mode_t)mode)) < 0 && errno == EINTR);
+    return result;
+}
+
 int32_t SystemNative_ChMod(const char* path, int32_t mode)
 {
 #if HAVE_CHMOD
@@ -949,6 +1015,57 @@ int32_t SystemNative_MkFifo(const char* pathName, uint32_t mode)
 #endif /* TARGET_WASI */
 }
 
+#if defined(TARGET_WASI)
+// wasi-libc provides neither mkstemp(s) nor mkdtemp, so emulate them the way libc does:
+// replace the trailing XXXXXX with random characters and try to create the entry exclusively,
+// retrying on name collisions.
+#define TEMP_NAME_RANDOM_CHARS 6
+#define TEMP_NAME_MAX_ATTEMPTS 100
+
+// Validates the template and returns a pointer to the first of the six 'X' characters that
+// precede a suffix of suffixLength characters. Returns NULL and sets errno on failure.
+static char* GetTempNameRandomChars(char* pathTemplate, int32_t suffixLength)
+{
+    size_t pathTemplateLength = strlen(pathTemplate);
+    if (suffixLength < 0 || pathTemplateLength < TEMP_NAME_RANDOM_CHARS || (size_t)suffixLength > pathTemplateLength - TEMP_NAME_RANDOM_CHARS)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    char* randomChars = pathTemplate + pathTemplateLength - (size_t)suffixLength - TEMP_NAME_RANDOM_CHARS;
+    for (int32_t i = 0; i < TEMP_NAME_RANDOM_CHARS; i++)
+    {
+        if (randomChars[i] != 'X')
+        {
+            errno = EINVAL;
+            return NULL;
+        }
+    }
+
+    return randomChars;
+}
+
+// Replaces the six characters at randomChars with random [A-Za-z0-9] characters.
+// Returns 0 on success, or -1 with errno set on failure.
+static int32_t FillTempNameRandomChars(char* randomChars)
+{
+    static const char s_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    uint8_t randomBytes[TEMP_NAME_RANDOM_CHARS];
+    if (getentropy(randomBytes, sizeof(randomBytes)) != 0)
+    {
+        return -1;
+    }
+
+    for (int32_t i = 0; i < TEMP_NAME_RANDOM_CHARS; i++)
+    {
+        randomChars[i] = s_chars[randomBytes[i] % (sizeof(s_chars) - 1)];
+    }
+
+    return 0;
+}
+#endif /* TARGET_WASI */
+
 char* SystemNative_MkdTemp(char* pathTemplate)
 {
 #if !defined(TARGET_WASI)
@@ -956,6 +1073,33 @@ char* SystemNative_MkdTemp(char* pathTemplate)
     while ((result = mkdtemp(pathTemplate)) == NULL && errno == EINTR);
     return result;
 #else /* TARGET_WASI */
+    char* randomChars = GetTempNameRandomChars(pathTemplate, 0);
+    if (randomChars == NULL)
+    {
+        return NULL;
+    }
+
+    for (int32_t attempt = 0; attempt < TEMP_NAME_MAX_ATTEMPTS; attempt++)
+    {
+        if (FillTempNameRandomChars(randomChars) != 0)
+        {
+            return NULL;
+        }
+
+        int result;
+        while ((result = mkdir(pathTemplate, 0700)) < 0 && errno == EINTR);
+        if (result == 0)
+        {
+            return pathTemplate;
+        }
+
+        if (errno != EEXIST)
+        {
+            return NULL;
+        }
+    }
+
+    errno = EEXIST;
     return NULL;
 #endif /* TARGET_WASI */
 }
@@ -1053,8 +1197,28 @@ intptr_t SystemNative_MksTemps(char* pathTemplate, int32_t suffixLength)
     {
         pathTemplate[firstSuffixIndex] = firstSuffixChar;
     }
-#elif TARGET_WASI
-    assert_msg(false, "Not supported on WASI", 0);
+#elif defined(TARGET_WASI)
+    char* randomChars = GetTempNameRandomChars(pathTemplate, suffixLength);
+    if (randomChars == NULL)
+    {
+        return -1;
+    }
+
+    for (int32_t attempt = 0; attempt < TEMP_NAME_MAX_ATTEMPTS; attempt++)
+    {
+        if (FillTempNameRandomChars(randomChars) != 0)
+        {
+            return -1;
+        }
+
+        while ((result = open(pathTemplate, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600)) < 0 && errno == EINTR);
+        if (result >= 0 || errno != EEXIST)
+        {
+            return result;
+        }
+    }
+
+    errno = EEXIST;
     result = -1;
 #else
 #error "Cannot find mkstemps nor mkstemp on this platform"
@@ -1667,6 +1831,13 @@ int32_t SystemNative_CopyFile(intptr_t sourceFd, intptr_t destinationFd, int64_t
         while ((ret = futimes(outFd, origTimes)) < 0 && errno == EINTR);
 #endif
     }
+#if defined(TARGET_WASI)
+    // WASI hosts are not required to support setting file times, so copying them is best effort.
+    if (ret != 0 && (errno == ENOSYS || errno == ENOTSUP))
+    {
+        ret = 0;
+    }
+#endif /* TARGET_WASI */
     // If we copied to a filesystem (eg EXFAT) that does not preserve POSIX ownership, all files appear
     // to be owned by root. If we aren't running as root, then we won't be an owner of our new file, and
     // attempting to copy metadata to it will fail with EPERM. We have copied successfully, we just can't
@@ -1676,8 +1847,8 @@ int32_t SystemNative_CopyFile(intptr_t sourceFd, intptr_t destinationFd, int64_t
         return -1;
     }
 
-#if HAVE_FCHMOD
-    // Copy permissions.
+#if HAVE_FCHMOD && !defined(TARGET_WASI)
+    // Copy permissions. WASI has no permission bits and wasi-libc's fchmod always fails with ENOSYS.
     // Even though managed code created the file with permissions matching those of the source file,
     // we need to copy permissions because the open permissions may be filtered by 'umask'.
     while ((ret = fchmod(outFd, sourceStat.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO))) < 0 && errno == EINTR);
@@ -1685,7 +1856,7 @@ int32_t SystemNative_CopyFile(intptr_t sourceFd, intptr_t destinationFd, int64_t
     {
         return -1;
     }
-#endif /* HAVE_FCHMOD */
+#endif /* HAVE_FCHMOD && !defined(TARGET_WASI) */
 
     return 0;
 #endif // HAVE_FCOPYFILE
@@ -2292,4 +2463,974 @@ int64_t SystemNative_PWriteV(intptr_t fd, IOVector* vectors, int32_t vectorCount
 
     assert(count >= -1);
     return count;
+}
+
+#if HAVE_KQUEUE
+#if KEVENT_HAS_VOID_UDATA
+static void* GetKeventUdata(uintptr_t udata)
+{
+    return (void*)udata;
+}
+static uintptr_t GetHandleEventData(void* udata)
+{
+    return (uintptr_t)udata;
+}
+#else
+static intptr_t GetKeventUdata(uintptr_t udata)
+{
+    return (intptr_t)udata;
+}
+static uintptr_t GetHandleEventData(intptr_t udata)
+{
+    return (uintptr_t)udata;
+}
+#endif
+#if KEVENT_REQUIRES_INT_PARAMS
+static int GetKeventNchanges(int nchanges)
+{
+    return nchanges;
+}
+static int16_t GetKeventFilter(int16_t filter)
+{
+    return filter;
+}
+static uint16_t GetKeventFlags(uint16_t flags)
+{
+    return flags;
+}
+#else
+static size_t GetKeventNchanges(int nchanges)
+{
+    return (size_t)nchanges;
+}
+static int16_t GetKeventFilter(uint32_t filter)
+{
+    return (int16_t)filter;
+}
+static uint16_t GetKeventFlags(uint32_t flags)
+{
+    return (uint16_t)flags;
+}
+#endif
+#endif
+
+#if HAVE_EPOLL
+
+static const size_t HandleEventBufferElementSize = sizeof(struct epoll_event) > sizeof(HandleEvent) ? sizeof(struct epoll_event) : sizeof(HandleEvent);
+
+static int GetHandleEvents(uint32_t events)
+{
+    int asyncEvents = (((events & EPOLLIN) != 0) ? HandleEvents_READ : 0) | (((events & EPOLLOUT) != 0) ? HandleEvents_WRITE : 0) |
+                      (((events & EPOLLRDHUP) != 0) ? HandleEvents_READCLOSE : 0) |
+                      (((events & EPOLLHUP) != 0) ? HandleEvents_CLOSE : 0) | (((events & EPOLLERR) != 0) ? HandleEvents_ERROR : 0);
+
+    return asyncEvents;
+}
+
+static uint32_t GetEPollEvents(HandleEvents events)
+{
+    return (((events & HandleEvents_READ) != 0) ? EPOLLIN : 0) | (((events & HandleEvents_WRITE) != 0) ? EPOLLOUT : 0) |
+           (((events & HandleEvents_READCLOSE) != 0) ? EPOLLRDHUP : 0) | (((events & HandleEvents_CLOSE) != 0) ? EPOLLHUP : 0) |
+           (((events & HandleEvents_ERROR) != 0) ? EPOLLERR : 0);
+}
+
+static int32_t CreateHandleEventPortInner(int32_t* port)
+{
+    assert(port != NULL);
+
+    int epollFd = epoll_create1(EPOLL_CLOEXEC);
+    if (epollFd == -1)
+    {
+        *port = -1;
+        return SystemNative_ConvertErrorPlatformToPal(errno);
+    }
+
+    *port = epollFd;
+    return Error_SUCCESS;
+}
+
+static int32_t CloseHandleEventPortInner(int32_t port)
+{
+    int err = close(port);
+    return err == 0 || (err < 0 && errno == EINTR) ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
+}
+
+static int32_t TryChangeHandleEventRegistrationInner(
+    int32_t port, int32_t socket, HandleEvents currentEvents, HandleEvents newEvents, uintptr_t data)
+{
+    assert(currentEvents != newEvents);
+
+    int op = EPOLL_CTL_MOD;
+    if (currentEvents == HandleEvents_NONE)
+    {
+        op = EPOLL_CTL_ADD;
+    }
+    else if (newEvents == HandleEvents_NONE)
+    {
+        op = EPOLL_CTL_DEL;
+    }
+
+    struct epoll_event evt;
+    memset(&evt, 0, sizeof(struct epoll_event));
+    evt.events = GetEPollEvents(newEvents) | (unsigned int)EPOLLET;
+    evt.data.ptr = (void*)data;
+    int err = epoll_ctl(port, op, socket, &evt);
+    return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
+}
+
+static void ConvertEventEPollToHandleEvent(HandleEvent* sae, struct epoll_event* epoll)
+{
+    assert(sae != NULL);
+    assert(epoll != NULL);
+
+    // epoll does not play well with disconnected connection-oriented sockets, frequently
+    // reporting spurious EPOLLHUP events. Fortunately, EPOLLHUP may be handled as an
+    // EPOLLIN | EPOLLOUT event: the usual processing for these events will recognize and
+    // handle the HUP condition.
+    uint32_t events = epoll->events;
+    if ((events & EPOLLHUP) != 0)
+    {
+        events = (events & ((uint32_t)~EPOLLHUP)) | EPOLLIN | EPOLLOUT;
+    }
+
+    memset(sae, 0, sizeof(HandleEvent));
+    sae->Data = (uintptr_t)epoll->data.ptr;
+    sae->Events = GetHandleEvents(events);
+}
+
+static int32_t WaitForHandleEventsInner(int32_t port, HandleEvent* buffer, int32_t* count)
+{
+    assert(buffer != NULL);
+    assert(count != NULL);
+    assert(*count >= 0);
+
+    struct epoll_event* events = (struct epoll_event*)buffer;
+    int numEvents;
+    while ((numEvents = epoll_wait(port, events, *count, -1)) < 0 && errno == EINTR);
+    if (numEvents == -1)
+    {
+        *count = 0;
+        return SystemNative_ConvertErrorPlatformToPal(errno);
+    }
+
+    // We should never see 0 events. Given an infinite timeout, epoll_wait will never return
+    // 0 events even if there are no file descriptors registered with the epoll fd. In
+    // that case, the wait will block until a file descriptor is added and an event occurs
+    // on the added file descriptor.
+    assert(numEvents != 0);
+    assert(numEvents <= *count);
+
+    if (sizeof(struct epoll_event) < sizeof(HandleEvent))
+    {
+        // Copy backwards to avoid overwriting earlier data.
+        for (int i = numEvents - 1; i >= 0; i--)
+        {
+            // This copy is made deliberately to avoid overwriting data.
+            struct epoll_event evt = events[i];
+            ConvertEventEPollToHandleEvent(&buffer[i], &evt);
+        }
+    }
+    else
+    {
+        // Copy forwards for better cache behavior
+        for (int i = 0; i < numEvents; i++)
+        {
+            // This copy is made deliberately to avoid overwriting data.
+            struct epoll_event evt = events[i];
+            ConvertEventEPollToHandleEvent(&buffer[i], &evt);
+        }
+    }
+
+    *count = numEvents;
+    return Error_SUCCESS;
+}
+
+#elif HAVE_KQUEUE
+
+c_static_assert(sizeof(HandleEvent) <= sizeof(struct kevent));
+static const size_t HandleEventBufferElementSize = sizeof(struct kevent);
+
+static HandleEvents GetHandleEvents(int16_t filter, uint16_t flags)
+{
+    int32_t events;
+    switch (filter)
+    {
+        case EVFILT_READ:
+            events = HandleEvents_READ;
+            if ((flags & EV_EOF) != 0)
+            {
+                events |= HandleEvents_READCLOSE;
+            }
+            break;
+
+        case EVFILT_WRITE:
+            events = HandleEvents_WRITE;
+
+            // kqueue does not play well with disconnected connection-oriented sockets, frequently
+            // reporting spurious EOF events. Fortunately, EOF may be handled as an EVFILT_READ |
+            // EVFILT_WRITE event: the usual processing for these events will recognize and
+            // handle the EOF condition.
+            if ((flags & EV_EOF) != 0)
+            {
+                events |= HandleEvents_READ;
+            }
+            break;
+
+        default:
+            assert_msg(0, "unexpected kqueue filter type", (int)filter);
+            return HandleEvents_NONE;
+    }
+
+    if ((flags & EV_ERROR) != 0)
+    {
+        events |= HandleEvents_ERROR;
+    }
+
+    return (HandleEvents)events;
+}
+
+static int32_t CreateHandleEventPortInner(int32_t* port)
+{
+    assert(port != NULL);
+
+    int kqueueFd = kqueue();
+    if (kqueueFd == -1)
+    {
+        *port = -1;
+        return SystemNative_ConvertErrorPlatformToPal(errno);
+    }
+
+    *port = kqueueFd;
+    return Error_SUCCESS;
+}
+
+static int32_t CloseHandleEventPortInner(int32_t port)
+{
+    int err = close(port);
+    return err == 0 || (err < 0 && errno == EINTR) ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
+}
+
+static int32_t TryChangeHandleEventRegistrationInner(
+    int32_t port, int32_t socket, HandleEvents currentEvents, HandleEvents newEvents, uintptr_t data)
+{
+    const uint16_t AddFlags = EV_ADD | EV_CLEAR;
+    const uint16_t RemoveFlags = EV_DELETE;
+
+    assert(currentEvents != newEvents);
+
+    int32_t changes = currentEvents ^ newEvents;
+    int8_t readChanged = (changes & HandleEvents_READ) != 0;
+    int8_t writeChanged = (changes & HandleEvents_WRITE) != 0;
+
+    struct kevent events[2];
+    int err;
+
+    int i = 0;
+    if (readChanged)
+    {
+        EV_SET(&events[i++],
+               (uint64_t)socket,
+               EVFILT_READ,
+               (newEvents & HandleEvents_READ) == 0 ? RemoveFlags : AddFlags,
+               0,
+               0,
+               GetKeventUdata(data));
+    }
+
+    if (writeChanged)
+    {
+        EV_SET(&events[i++],
+               (uint64_t)socket,
+               EVFILT_WRITE,
+               (newEvents & HandleEvents_WRITE) == 0 ? RemoveFlags : AddFlags,
+               0,
+               0,
+               GetKeventUdata(data));
+    }
+
+    while ((err = kevent(port, events, GetKeventNchanges(i), NULL, 0, NULL)) < 0 && errno == EINTR);
+    return err == 0 ? Error_SUCCESS : SystemNative_ConvertErrorPlatformToPal(errno);
+}
+
+static int32_t WaitForHandleEventsInner(int32_t port, HandleEvent* buffer, int32_t* count)
+{
+    assert(buffer != NULL);
+    assert(count != NULL);
+    assert(*count >= 0);
+
+    struct kevent* events = (struct kevent*)buffer;
+    int numEvents;
+    while ((numEvents = kevent(port, NULL, 0, events, GetKeventNchanges(*count), NULL)) < 0 && errno == EINTR);
+    if (numEvents == -1)
+    {
+        *count = -1;
+        return SystemNative_ConvertErrorPlatformToPal(errno);
+    }
+
+    // We should never see 0 events. Given an infinite timeout, kevent will never return
+    // 0 events even if there are no file descriptors registered with the kqueue fd. In
+    // that case, the wait will block until a file descriptor is added and an event occurs
+    // on the added file descriptor.
+    assert(numEvents != 0);
+    assert(numEvents <= *count);
+
+    for (int i = 0; i < numEvents; i++)
+    {
+        // This copy is made deliberately to avoid overwriting data.
+        struct kevent evt = events[i];
+        memset(&buffer[i], 0, sizeof(HandleEvent));
+        buffer[i].Data = GetHandleEventData(evt.udata);
+        buffer[i].Events = GetHandleEvents(GetKeventFilter(evt.filter), GetKeventFlags(evt.flags));
+    }
+
+    *count = numEvents;
+    return Error_SUCCESS;
+}
+
+#elif defined(__KOS__) // KOS-NOT-LINUX: no epoll or kqueue; a port built on poll()
+
+// KasperskyOS has neither epoll nor kqueue, only poll(). A port is a table of registered sockets that the waiting
+// thread polls. The engine expects edge-triggered events (EPOLLET, EV_CLEAR), while poll() is level-triggered and
+// would report a readable or writable socket again at once. So once a bit is reported it is left out of the wait
+// until it is re-armed: by a socket call in this file that finds the direction would block (EAGAIN, or EINPROGRESS
+// from connect), or by a zero-timeout poll that finds the socket no longer ready for it. The engine makes a call
+// before an operation waits, and retries on each event until a call would block, so every wait is preceded by a
+// re-arm. A bit that no call has re-armed (a descriptor used only by calls outside this file) is reported again
+// while still ready after KOS_SOCKET_EVENT_REARM_MS. Bits that calls re-arm are never reported again by time: such
+// an event, sampled while data was there and handled after it was read, completed the next zero-byte receive, which
+// makes no call. There is no descriptor to wake a wait, so a registration or re-arm made meanwhile is polled after at
+// most KOS_SOCKET_EVENT_WAIT_MS. Closed descriptors are dropped, as epoll drops them; a descriptor registered again
+// replaces its entry.
+//
+// TODO-KOS(9): poll() fails the whole call on a closed descriptor (beyond the documented case)
+// KasperskyOS's poll() (SDK 1.4.0.102) differs from POSIX: a closed descriptor fails the whole call with EBADF instead
+// of reporting POLLNVAL; while another thread closes a polled descriptor the call can also fail with EINVAL or
+// EACCES; and more than KOS_POLL_MAX_NFDS entries fail with EINVAL, even when every descriptor is -1.
+//
+// KOS-DOC(limitations_and_known_problems): a VFS server serves 5 threads per client
+// poll() is a call to VfsNet like any other socket call, and VfsNet serves each client with at most
+// _VFS_SERVER_MAX_THREADS_PER_CLIENT threads (5 in SDK 1.4.0.102). While that many threads of the program are blocked
+// in socket calls, this wait's poll() cannot run either; the image raises the limit (samples' kos-image).
+
+#include <poll.h>
+#include <pthread.h>
+#include <time.h>
+
+// The same clock as pal_networking.c's KosMonotonicMicroseconds, which gives KosRearmSocketEvents its callStart.
+static int64_t KosMonotonicMicroseconds(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000;
+}
+
+static const size_t HandleEventBufferElementSize = sizeof(HandleEvent);
+
+enum
+{
+    KOS_SOCKET_EVENT_MAX_PORTS = 16,
+    KOS_SOCKET_EVENT_WAIT_MS = 10,
+    KOS_SOCKET_EVENT_REARM_MS = 50,
+    KOS_POLL_MAX_NFDS = 512,
+};
+
+typedef struct
+{
+    int fd;
+    uintptr_t data;
+    uint64_t generation; // distinguishes a registration from a later one of the same descriptor
+    short interest;     // POLLIN and POLLOUT
+    short reported;     // bits reported and not re-armed since
+    short rearm;        // bits a call found would block since the last copy (in entries only)
+    short hooked;       // bits a call has found would block: re-armed by calls, never reported again by time
+    int64_t rearmAt;    // microseconds: the start of the latest call that set rearm (in entries only)
+    int64_t sampledAt;  // microseconds: when the poll that last reported new bits returned
+    int64_t reportedAt; // milliseconds, CLOCK_MONOTONIC
+    int closed;         // POLLNVAL seen (in snapshots only)
+} KosSocketRegistration;
+
+typedef struct
+{
+    pthread_mutex_t lock;
+    KosSocketRegistration* entries; // guarded by lock
+    int count;
+    int capacity;
+    KosSocketRegistration* snapshot; // the waiting thread's copy
+    struct pollfd* pollFds;
+    int scratchCapacity;
+    uint64_t nextGeneration; // guarded by lock
+} KosSocketEventPort;
+
+static pthread_mutex_t g_kosSocketEventPortsLock = PTHREAD_MUTEX_INITIALIZER;
+static KosSocketEventPort* g_kosSocketEventPorts[KOS_SOCKET_EVENT_MAX_PORTS];
+
+static KosSocketEventPort* GetKosSocketEventPort(int32_t port)
+{
+    if (port < 0 || port >= KOS_SOCKET_EVENT_MAX_PORTS)
+    {
+        return NULL;
+    }
+
+    pthread_mutex_lock(&g_kosSocketEventPortsLock);
+    KosSocketEventPort* result = g_kosSocketEventPorts[port];
+    pthread_mutex_unlock(&g_kosSocketEventPortsLock);
+    return result;
+}
+
+// Called by pal_networking.c's socket calls (KosRearmIfWouldBlock).
+void KosRearmSocketEvents(int fd, short bits, int64_t callStart);
+void KosRearmSocketEvents(int fd, short bits, int64_t callStart)
+{
+    for (int port = 0; port < KOS_SOCKET_EVENT_MAX_PORTS; port++)
+    {
+        KosSocketEventPort* p = GetKosSocketEventPort(port);
+        if (p == NULL)
+        {
+            continue;
+        }
+
+        pthread_mutex_lock(&p->lock);
+        for (int i = 0; i < p->count; i++)
+        {
+            if (p->entries[i].fd == fd)
+            {
+                p->entries[i].rearm = (short)(p->entries[i].rearm | bits);
+                p->entries[i].hooked = (short)(p->entries[i].hooked | bits);
+                if (callStart > p->entries[i].rearmAt)
+                {
+                    p->entries[i].rearmAt = callStart;
+                }
+                break;
+            }
+        }
+        pthread_mutex_unlock(&p->lock);
+    }
+}
+
+static int64_t KosMonotonicMilliseconds(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static short GetKosPollEvents(HandleEvents events)
+{
+    return (short)((((events & HandleEvents_READ) != 0) ? POLLIN : 0) | (((events & HandleEvents_WRITE) != 0) ? POLLOUT : 0));
+}
+
+// The requested bits that revents makes ready; hang-up and error make every requested bit ready, as the
+// operations then find the condition (the epoll port turns EPOLLHUP into EPOLLIN | EPOLLOUT likewise).
+static short GetKosReadyBits(short requested, short revents)
+{
+    if ((revents & (POLLHUP | POLLERR)) != 0)
+    {
+        return requested;
+    }
+
+    return (short)(requested & revents);
+}
+
+static void SetKosSocketEvent(HandleEvent* sae, uintptr_t data, short readyBits)
+{
+    memset(sae, 0, sizeof(HandleEvent));
+    sae->Data = data;
+    sae->Events = (((readyBits & POLLIN) != 0) ? HandleEvents_READ : 0) | (((readyBits & POLLOUT) != 0) ? HandleEvents_WRITE : 0);
+}
+
+static void KosSleepMilliseconds(int milliseconds)
+{
+    struct timespec pause = { milliseconds / 1000, (long)(milliseconds % 1000) * 1000000L };
+    while (nanosleep(&pause, &pause) < 0 && errno == EINTR);
+}
+
+// poll() in calls of at most KOS_POLL_MAX_NFDS entries. Above that the chunks are polled without waiting, and the
+// wait is a sleep when none is ready.
+static int KosPollChunks(struct pollfd* pollFds, int n, int timeout)
+{
+    int ready;
+    if (n <= KOS_POLL_MAX_NFDS)
+    {
+        while ((ready = poll(pollFds, (nfds_t)n, timeout)) < 0 && errno == EINTR);
+        return ready;
+    }
+
+    for (int attempt = 0;; attempt++)
+    {
+        ready = 0;
+        for (int start = 0; start < n; start += KOS_POLL_MAX_NFDS)
+        {
+            int chunk = n - start < KOS_POLL_MAX_NFDS ? n - start : KOS_POLL_MAX_NFDS;
+            int result;
+            while ((result = poll(pollFds + start, (nfds_t)chunk, 0)) < 0 && errno == EINTR);
+            if (result < 0)
+            {
+                return -1;
+            }
+            ready += result;
+        }
+        if (ready > 0 || timeout == 0 || attempt == 1)
+        {
+            return ready;
+        }
+        KosSleepMilliseconds(timeout);
+    }
+}
+
+// poll() over the entries whose pollFds[i].fd is not -1; never fails. When poll() fails, a descriptor was closed, or
+// is being closed by another thread: poll each one alone, mark closed and leave out those reporting EBADF or POLLNVAL,
+// leave out of this call those failing otherwise (the next wait polls them again), and poll the rest. If that fails
+// too, report nothing ready after sleeping for the timeout.
+static int KosPollRegistrations(KosSocketRegistration* snapshot, struct pollfd* pollFds, int n, int timeout)
+{
+    int ready = KosPollChunks(pollFds, n, timeout);
+    if (ready >= 0)
+    {
+        return ready;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        if (pollFds[i].fd == -1)
+        {
+            continue;
+        }
+        struct pollfd single = { pollFds[i].fd, pollFds[i].events, 0 };
+        int result;
+        while ((result = poll(&single, 1, 0)) < 0 && errno == EINTR);
+        if ((result < 0 && errno == EBADF) || (result > 0 && (single.revents & POLLNVAL) != 0))
+        {
+            snapshot[i].closed = 1;
+            pollFds[i].fd = -1;
+        }
+        else if (result < 0)
+        {
+            pollFds[i].fd = -1;
+        }
+    }
+
+    ready = KosPollChunks(pollFds, n, timeout);
+    if (ready >= 0)
+    {
+        return ready;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        pollFds[i].revents = 0;
+    }
+    if (timeout > 0)
+    {
+        KosSleepMilliseconds(timeout);
+    }
+    return 0;
+}
+
+static int32_t CreateHandleEventPortInner(int32_t* port)
+{
+    assert(port != NULL);
+    *port = -1;
+
+    KosSocketEventPort* p = (KosSocketEventPort*)calloc(1, sizeof(KosSocketEventPort));
+    if (p == NULL)
+    {
+        return Error_ENOMEM;
+    }
+
+    int error = pthread_mutex_init(&p->lock, NULL);
+    if (error != 0)
+    {
+        free(p);
+        return SystemNative_ConvertErrorPlatformToPal(error);
+    }
+
+    pthread_mutex_lock(&g_kosSocketEventPortsLock);
+    for (int i = 0; i < KOS_SOCKET_EVENT_MAX_PORTS; i++)
+    {
+        if (g_kosSocketEventPorts[i] == NULL)
+        {
+            g_kosSocketEventPorts[i] = p;
+            *port = i;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_kosSocketEventPortsLock);
+
+    if (*port == -1)
+    {
+        pthread_mutex_destroy(&p->lock);
+        free(p);
+        return Error_EMFILE;
+    }
+
+    return Error_SUCCESS;
+}
+
+static int32_t CloseHandleEventPortInner(int32_t port)
+{
+    if (port < 0 || port >= KOS_SOCKET_EVENT_MAX_PORTS)
+    {
+        return Error_EBADF;
+    }
+
+    pthread_mutex_lock(&g_kosSocketEventPortsLock);
+    KosSocketEventPort* p = g_kosSocketEventPorts[port];
+    g_kosSocketEventPorts[port] = NULL;
+    pthread_mutex_unlock(&g_kosSocketEventPortsLock);
+
+    if (p == NULL)
+    {
+        return Error_EBADF;
+    }
+
+    pthread_mutex_destroy(&p->lock);
+    free(p->entries);
+    free(p->snapshot);
+    free(p->pollFds);
+    free(p);
+    return Error_SUCCESS;
+}
+
+static int32_t TryChangeHandleEventRegistrationInner(
+    int32_t port, int32_t socket, HandleEvents currentEvents, HandleEvents newEvents, uintptr_t data)
+{
+    assert(currentEvents != newEvents);
+    (void)currentEvents;
+
+    KosSocketEventPort* p = GetKosSocketEventPort(port);
+    if (p == NULL)
+    {
+        return Error_EBADF;
+    }
+
+    int32_t result = Error_SUCCESS;
+    pthread_mutex_lock(&p->lock);
+
+    int index = -1;
+    for (int i = 0; i < p->count; i++)
+    {
+        if (p->entries[i].fd == socket)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if (newEvents == HandleEvents_NONE)
+    {
+        if (index != -1)
+        {
+            p->entries[index] = p->entries[--p->count];
+        }
+    }
+    else
+    {
+        if (index == -1)
+        {
+            if (p->count == p->capacity)
+            {
+                int capacity = p->capacity == 0 ? 16 : p->capacity * 2;
+                KosSocketRegistration* entries = (KosSocketRegistration*)realloc(p->entries, (size_t)capacity * sizeof(KosSocketRegistration));
+                if (entries == NULL)
+                {
+                    result = Error_ENOMEM;
+                    goto done;
+                }
+                p->entries = entries;
+                p->capacity = capacity;
+            }
+            index = p->count++;
+        }
+
+        KosSocketRegistration* entry = &p->entries[index];
+        memset(entry, 0, sizeof(KosSocketRegistration));
+        entry->fd = socket;
+        entry->data = data;
+        entry->generation = ++p->nextGeneration;
+        entry->interest = GetKosPollEvents(newEvents);
+    }
+
+done:
+    pthread_mutex_unlock(&p->lock);
+    return result;
+}
+
+static int32_t WaitForHandleEventsInner(int32_t port, HandleEvent* buffer, int32_t* count)
+{
+    assert(buffer != NULL);
+    assert(count != NULL);
+    assert(*count >= 0);
+
+    KosSocketEventPort* p = GetKosSocketEventPort(port);
+    if (p == NULL)
+    {
+        *count = 0;
+        return Error_EBADF;
+    }
+
+    while (true)
+    {
+        // Copy the registrations; other threads register sockets while this one waits.
+        pthread_mutex_lock(&p->lock);
+        int n = p->count;
+        if (n > p->scratchCapacity)
+        {
+            KosSocketRegistration* snapshot = (KosSocketRegistration*)realloc(p->snapshot, (size_t)n * sizeof(KosSocketRegistration));
+            if (snapshot != NULL)
+            {
+                p->snapshot = snapshot;
+            }
+            struct pollfd* pollFds = (struct pollfd*)realloc(p->pollFds, (size_t)n * sizeof(struct pollfd));
+            if (pollFds != NULL)
+            {
+                p->pollFds = pollFds;
+            }
+            if (snapshot == NULL || pollFds == NULL)
+            {
+                pthread_mutex_unlock(&p->lock);
+                *count = 0;
+                return Error_ENOMEM;
+            }
+            p->scratchCapacity = n;
+        }
+        if (n > 0)
+        {
+            memcpy(p->snapshot, p->entries, (size_t)n * sizeof(KosSocketRegistration));
+        }
+        // Bits a call found would block are re-armed: the next readiness is a new edge. Only when the call started after
+        // the poll that reported them returned: a call that started before it may have found the socket empty before
+        // the data the poll reported arrived, and clearing that report would report the same data again, possibly
+        // after it was read (a zero-byte receive would then complete on it). Keeping a report is safe: the
+        // zero-timeout poll below re-arms a bit once the socket is no longer ready for it.
+        for (int i = 0; i < n; i++)
+        {
+            if (p->entries[i].rearmAt > p->entries[i].sampledAt)
+            {
+                p->snapshot[i].reported = (short)(p->snapshot[i].reported & ~p->entries[i].rearm);
+            }
+            p->entries[i].rearm = 0;
+        }
+        pthread_mutex_unlock(&p->lock);
+
+        KosSocketRegistration* snapshot = p->snapshot;
+        struct pollfd* pollFds = p->pollFds;
+        int64_t now = KosMonotonicMilliseconds();
+        int numEvents = 0;
+
+        // Reported bits: re-arm those no longer ready, report again those ready for KOS_SOCKET_EVENT_REARM_MS.
+        int polled = 0;
+        for (int i = 0; i < n; i++)
+        {
+            pollFds[i].fd = snapshot[i].reported != 0 ? snapshot[i].fd : -1;
+            pollFds[i].events = snapshot[i].reported;
+            pollFds[i].revents = 0;
+            polled += snapshot[i].reported != 0 ? 1 : 0;
+        }
+        if (polled > 0 && KosPollRegistrations(snapshot, pollFds, n, 0) >= 0)
+        {
+            // With no descriptor ready every revents is 0, and every reported bit is re-armed.
+            for (int i = 0; i < n; i++)
+            {
+                KosSocketRegistration* entry = &snapshot[i];
+                if ((pollFds[i].revents & POLLNVAL) != 0)
+                {
+                    entry->closed = 1;
+                    continue;
+                }
+                if (pollFds[i].fd == -1)
+                {
+                    continue;
+                }
+
+                short stillReady = GetKosReadyBits(entry->reported, pollFds[i].revents);
+                entry->reported = stillReady;
+                short again = (short)(stillReady & ~entry->hooked);
+                if (again != 0 && now - entry->reportedAt >= KOS_SOCKET_EVENT_REARM_MS && numEvents < *count)
+                {
+                    SetKosSocketEvent(&buffer[numEvents++], entry->data, again);
+                    entry->reportedAt = now;
+                }
+            }
+        }
+
+        // The bits not reported: wait for them, briefly, or not at all when there is already something to return.
+        polled = 0;
+        for (int i = 0; i < n; i++)
+        {
+            short events = snapshot[i].closed ? 0 : (short)(snapshot[i].interest & ~snapshot[i].reported);
+            pollFds[i].fd = events != 0 ? snapshot[i].fd : -1;
+            pollFds[i].events = events;
+            pollFds[i].revents = 0;
+            polled += events != 0 ? 1 : 0;
+        }
+        int timeout = numEvents > 0 ? 0 : KOS_SOCKET_EVENT_WAIT_MS;
+        int ready = 0;
+        if (polled > 0)
+        {
+            ready = KosPollRegistrations(snapshot, pollFds, n, timeout);
+        }
+        else if (timeout > 0)
+        {
+            KosSleepMilliseconds(timeout);
+        }
+
+        if (ready > 0)
+        {
+            now = KosMonotonicMilliseconds();
+            int64_t sampledAt = KosMonotonicMicroseconds();
+            for (int i = 0; i < n && numEvents < *count; i++)
+            {
+                KosSocketRegistration* entry = &snapshot[i];
+                if ((pollFds[i].revents & POLLNVAL) != 0)
+                {
+                    entry->closed = 1;
+                    continue;
+                }
+                if (pollFds[i].fd == -1)
+                {
+                    continue;
+                }
+
+                short readyBits = GetKosReadyBits(pollFds[i].events, pollFds[i].revents);
+                if (readyBits != 0)
+                {
+                    SetKosSocketEvent(&buffer[numEvents++], entry->data, readyBits);
+                    entry->reported = (short)(entry->reported | readyBits);
+                    entry->reportedAt = now;
+                    entry->sampledAt = sampledAt;
+                }
+            }
+        }
+
+        // Store the new state in the registrations that are still the ones copied.
+        pthread_mutex_lock(&p->lock);
+        for (int i = 0; i < n; i++)
+        {
+            KosSocketRegistration* copy = &snapshot[i];
+            for (int j = 0; j < p->count; j++)
+            {
+                KosSocketRegistration* entry = &p->entries[j];
+                if (entry->generation == copy->generation)
+                {
+                    if (copy->closed)
+                    {
+                        p->entries[j] = p->entries[--p->count];
+                    }
+                    else
+                    {
+                        entry->reported = copy->reported;
+                        entry->reportedAt = copy->reportedAt;
+                        entry->sampledAt = copy->sampledAt;
+                    }
+                    break;
+                }
+            }
+        }
+        pthread_mutex_unlock(&p->lock);
+
+        if (numEvents > 0)
+        {
+            *count = numEvents;
+            return Error_SUCCESS;
+        }
+    }
+}
+
+#else // !HAVE_KQUEUE !HAVE_EPOLL !__KOS__
+
+static const size_t HandleEventBufferElementSize = 0;
+
+static int32_t CloseHandleEventPortInner(int32_t port)
+{
+    return Error_ENOSYS;
+}
+static int32_t CreateHandleEventPortInner(int32_t* port)
+{
+    return Error_ENOSYS;
+}
+static int32_t TryChangeHandleEventRegistrationInner(
+    int32_t port, int32_t socket, HandleEvents currentEvents, HandleEvents newEvents,
+uintptr_t data)
+{
+    return Error_ENOSYS;
+}
+static int32_t WaitForHandleEventsInner(int32_t port, HandleEvent* buffer, int32_t* count)
+{
+    return Error_ENOSYS;
+}
+#endif  // !HAVE_KQUEUE !HAVE_EPOLL !__KOS__
+
+int32_t SystemNative_CreateHandleEventPort(intptr_t* port)
+{
+    if (port == NULL)
+    {
+        return Error_EFAULT;
+    }
+
+    int fd;
+    int32_t error = CreateHandleEventPortInner(&fd);
+    *port = fd;
+    return error;
+}
+
+int32_t SystemNative_CloseHandleEventPort(intptr_t port)
+{
+    return CloseHandleEventPortInner(ToFileDescriptor(port));
+}
+
+int32_t SystemNative_CreateHandleEventBuffer(int32_t count, HandleEvent** buffer)
+{
+    if (buffer == NULL || count < 0)
+    {
+        return Error_EFAULT;
+    }
+
+    size_t bufferSize;
+    if (!multiply_s(HandleEventBufferElementSize, (size_t)count, &bufferSize) ||
+        (*buffer = (HandleEvent*)malloc(bufferSize)) == NULL)
+    {
+        return Error_ENOMEM;
+    }
+
+    return Error_SUCCESS;
+}
+
+int32_t SystemNative_FreeHandleEventBuffer(HandleEvent* buffer)
+{
+    free(buffer);
+    return Error_SUCCESS;
+}
+
+int32_t
+SystemNative_TryChangeHandleEventRegistration(intptr_t port, intptr_t socket, int32_t currentEvents, int32_t newEvents, uintptr_t data)
+{
+    int portFd = ToFileDescriptor(port);
+    int socketFd = ToFileDescriptor(socket);
+
+    const int32_t SupportedEvents = HandleEvents_READ | HandleEvents_WRITE | HandleEvents_READCLOSE | HandleEvents_CLOSE | HandleEvents_ERROR;
+
+    if ((currentEvents & ~SupportedEvents) != 0 || (newEvents & ~SupportedEvents) != 0)
+    {
+        return Error_EINVAL;
+    }
+
+    if (currentEvents == newEvents)
+    {
+        return Error_SUCCESS;
+    }
+
+    return TryChangeHandleEventRegistrationInner(
+        portFd, socketFd, (HandleEvents)currentEvents, (HandleEvents)newEvents, data);
+}
+
+int32_t SystemNative_WaitForHandleEvents(intptr_t port, HandleEvent* buffer, int32_t* count)
+{
+    if (buffer == NULL || count == NULL || *count < 0)
+    {
+        return Error_EFAULT;
+    }
+
+    int fd = ToFileDescriptor(port);
+
+    return WaitForHandleEventsInner(fd, buffer, count);
 }

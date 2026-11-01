@@ -17,6 +17,7 @@
 #ifdef __APPLE__
 #include <stdlib.h>
 #include <mach/thread_state.h>
+#include <minipal/cpufeatures.h>
 
 #define CHECK_MACH(_msg, machret) do {                                      \
         if (machret != KERN_SUCCESS)                                        \
@@ -38,6 +39,11 @@
 #define HAVE_SYS_MEMBARRIER_H 1
 #elif HAVE_SYS_MEMBARRIER_H
 #include <sys/membarrier.h>
+#endif
+
+// Mutex to serialize implementations that require it
+#ifndef __KOS__ // KOS: unused, flushing is a no-op (minipal_initialize_memory_barrier_process_wide)
+static pthread_mutex_t g_flushProcessWriteBuffersMutex;
 #endif
 
 #if HAVE_SYS_MEMBARRIER_H
@@ -75,15 +81,14 @@ static bool CanFlushUsingMembarrier(void)
 static bool s_flushUsingMemBarrier = false;
 #endif // HAVE_SYS_MEMBARRIER_H
 
-#if !defined(HOST_APPLE) && !defined(__KOS__)
+#ifdef HOST_APPLE
+static bool s_serializeAppleMemoryBarrier = false;
+#elif !defined(__KOS__)
 // Helper memory page used by the fallback path
 static uint8_t* g_helperPage = NULL;
 
-// Mutex to make the fallback path thread safe
-static pthread_mutex_t g_flushProcessWriteBuffersMutex;
-
 static size_t s_pageSize = 0;
-#endif // !HOST_APPLE && !__KOS__
+#endif // HOST_APPLE, !__KOS__
 #endif // !HOST_WASM
 
 static bool s_initializedMemoryBarrierSuccessfullyInitialized = false;
@@ -99,6 +104,16 @@ bool minipal_initialize_memory_barrier_process_wide(void)
     // browser/wasm is currently single threaded
 #elif defined(HOST_APPLE)
     // Apple platforms do not support membarrier, so we use a different mechanism
+    if (minipal_detect_rosetta())
+    {
+        int status = pthread_mutex_init(&g_flushProcessWriteBuffersMutex, NULL);
+        if (status != 0)
+        {
+            return false;
+        }
+
+        s_serializeAppleMemoryBarrier = true;
+    }
 #elif defined(__KOS__)
     // KOS-NOT-LINUX: no membarrier, and no mlock (ENOSYS; the SDK's _POSIX_MEMLOCK_RANGE is -1)
     // KOS: no membarrier, and the fallback's mlock of the helper page fails, which would fail
@@ -159,6 +174,14 @@ void minipal_memory_barrier_process_wide(void)
 #ifdef HOST_WASM
     // browser/wasm is currently single threaded
 #elif defined(HOST_APPLE)
+    int status;
+    if (s_serializeAppleMemoryBarrier)
+    {
+        status = pthread_mutex_lock(&g_flushProcessWriteBuffersMutex);
+        (void)status; // unused in release config
+        assert(status == 0 && "Failed to lock the flushProcessWriteBuffersMutex lock");
+    }
+
     mach_msg_type_number_t cThreads;
     thread_act_t *pThreads;
     kern_return_t machret = task_threads(mach_task_self(), &pThreads, &cThreads);
@@ -185,6 +208,13 @@ void minipal_memory_barrier_process_wide(void)
     // Deallocate the thread list now we're done with it.
     machret = vm_deallocate(mach_task_self(), (vm_address_t)pThreads, cThreads * sizeof(thread_act_t));
     CHECK_MACH("vm_deallocate()", machret);
+
+    if (s_serializeAppleMemoryBarrier)
+    {
+        status = pthread_mutex_unlock(&g_flushProcessWriteBuffersMutex);
+        (void)status; // unused in release config
+        assert(status == 0 && "Failed to unlock the flushProcessWriteBuffersMutex lock");
+    }
 #elif defined(__KOS__)
     // See minipal_initialize_memory_barrier_process_wide.
 #else // !HOST_APPLE && !HOST_WASM && !__KOS__

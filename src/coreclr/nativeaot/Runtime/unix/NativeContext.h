@@ -4,6 +4,8 @@
 #ifndef __NATIVE_CONTEXT_H__
 #define __NATIVE_CONTEXT_H__
 
+#ifndef HOST_WASM
+
 // KOS: <signal.h> has no ucontext_t, and most includers (via thread.h) never see config.h.
 #if HAVE_UCONTEXT_H || defined(__KOS__)
 #include <ucontext.h>
@@ -278,4 +280,5 @@ struct NATIVE_CONTEXT
 #endif // TARGET_ARM
 };
 
+#endif // !HOST_WASM
 #endif // __NATIVE_CONTEXT_H__

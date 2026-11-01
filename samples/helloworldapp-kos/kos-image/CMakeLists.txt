@@ -126,7 +126,8 @@ add_kpa_component (NetInit.kpa
                    NO_AUTO_VFS_CONNECTION)
 
 # VfsRamFs, VfsNet and the dnet driver VfsNet needs run from the product ROMFS. VfsNet resolves host names for its
-# clients from /etc/hosts or DNS; without a hosts file not even `localhost` resolves. As in the SDK's
+# clients from /etc/hosts or DNS; without a hosts file not even `localhost` resolves (TODO-KOS(6k): localhost needs
+# a hosts file for VfsNet, undocumented). As in the SDK's
 # examples/net_with_separate_vfs, VfsNet reads /etc/hosts from the root file system (MinimalKOS's kl.VfsEntity).
 set (EINIT_SRC ${CMAKE_SOURCE_DIR}/einit)
 set (ROOTFS_DIR ${CMAKE_BINARY_DIR}/rootfs_img)

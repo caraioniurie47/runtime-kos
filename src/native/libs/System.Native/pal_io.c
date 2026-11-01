@@ -412,8 +412,15 @@ intptr_t SystemNative_OpenAt(intptr_t dirfd, const char* path, int32_t flags, in
     return result;
 }
 
+#if defined(__KOS__) && !HAVE_EPOLL && !HAVE_KQUEUE
+void KosBeforeClose(int fd); // TODO-KOS(9): with the event port, below
+#endif
+
 int32_t SystemNative_Close(intptr_t fd)
 {
+#if defined(__KOS__) && !HAVE_EPOLL && !HAVE_KQUEUE
+    KosBeforeClose(ToFileDescriptor(fd));
+#endif
     int result = close(ToFileDescriptor(fd));
     if (result < 0 && errno == EINTR) result = 0; // on all supported platforms, close(2) returning EINTR still means it was released
     return result;
@@ -2859,6 +2866,9 @@ typedef struct
     struct pollfd* pollFds;
     int scratchCapacity;
     uint64_t nextGeneration; // guarded by lock
+    int polling;             // guarded by lock: the waiting thread polls the snapshot's first polledCount descriptors
+    int polledCount;         // guarded by lock
+    pthread_cond_t pollDone; // signalled when polling goes back to 0
 } KosSocketEventPort;
 
 static pthread_mutex_t g_kosSocketEventPortsLock = PTHREAD_MUTEX_INITIALIZER;
@@ -2875,6 +2885,56 @@ static KosSocketEventPort* GetKosSocketEventPort(int32_t port)
     KosSocketEventPort* result = g_kosSocketEventPorts[port];
     pthread_mutex_unlock(&g_kosSocketEventPortsLock);
     return result;
+}
+
+// TODO-KOS(9): on SDK 2.0 a poll() that meets a descriptor closed meanwhile ends the process
+// SDK 1.4 failed such a poll() with EBADF, EINVAL or EACCES, which KosPollRegistrations survives. On SDK 2.0.0.179 the
+// kernel reported "Access to invalid handle" from poll() in this port's wait and the program ended (exit code 1,
+// System.IO.FileSystem.Tests, 2026-10-20). So a descriptor is never closed while the waiting thread polls it:
+// SystemNative_Close calls this first, which drops the descriptor's registrations and, if the poll in progress holds
+// it, waits for that poll to return (at most KOS_SOCKET_EVENT_WAIT_MS plus the call). A later snapshot no longer has it.
+void KosBeforeClose(int fd);
+void KosBeforeClose(int fd)
+{
+    for (int port = 0; port < KOS_SOCKET_EVENT_MAX_PORTS; port++)
+    {
+        KosSocketEventPort* p = GetKosSocketEventPort(port);
+        if (p == NULL)
+        {
+            continue;
+        }
+
+        pthread_mutex_lock(&p->lock);
+        for (int i = 0; i < p->count;)
+        {
+            if (p->entries[i].fd == fd)
+            {
+                p->entries[i] = p->entries[--p->count];
+            }
+            else
+            {
+                i++;
+            }
+        }
+        while (p->polling)
+        {
+            bool held = false;
+            for (int i = 0; i < p->polledCount; i++)
+            {
+                if (p->snapshot[i].fd == fd)
+                {
+                    held = true;
+                    break;
+                }
+            }
+            if (!held)
+            {
+                break;
+            }
+            pthread_cond_wait(&p->pollDone, &p->lock);
+        }
+        pthread_mutex_unlock(&p->lock);
+    }
 }
 
 // Called by pal_networking.c's socket calls (KosRearmIfWouldBlock).
@@ -3043,6 +3103,13 @@ static int32_t CreateHandleEventPortInner(int32_t* port)
         free(p);
         return SystemNative_ConvertErrorPlatformToPal(error);
     }
+    error = pthread_cond_init(&p->pollDone, NULL);
+    if (error != 0)
+    {
+        pthread_mutex_destroy(&p->lock);
+        free(p);
+        return SystemNative_ConvertErrorPlatformToPal(error);
+    }
 
     pthread_mutex_lock(&g_kosSocketEventPortsLock);
     for (int i = 0; i < KOS_SOCKET_EVENT_MAX_PORTS; i++)
@@ -3058,6 +3125,7 @@ static int32_t CreateHandleEventPortInner(int32_t* port)
 
     if (*port == -1)
     {
+        pthread_cond_destroy(&p->pollDone);
         pthread_mutex_destroy(&p->lock);
         free(p);
         return Error_EMFILE;
@@ -3083,6 +3151,7 @@ static int32_t CloseHandleEventPortInner(int32_t port)
         return Error_EBADF;
     }
 
+    pthread_cond_destroy(&p->pollDone);
     pthread_mutex_destroy(&p->lock);
     free(p->entries);
     free(p->snapshot);
@@ -3210,6 +3279,9 @@ static int32_t WaitForHandleEventsInner(int32_t port, HandleEvent* buffer, int32
             }
             p->entries[i].rearm = 0;
         }
+        // Until the store below, KosBeforeClose waits before closing any descriptor of this snapshot.
+        p->polling = 1;
+        p->polledCount = n;
         pthread_mutex_unlock(&p->lock);
 
         KosSocketRegistration* snapshot = p->snapshot;
@@ -3326,6 +3398,8 @@ static int32_t WaitForHandleEventsInner(int32_t port, HandleEvent* buffer, int32
                 }
             }
         }
+        p->polling = 0;
+        pthread_cond_broadcast(&p->pollDone);
         pthread_mutex_unlock(&p->lock);
 
         if (numEvents > 0)

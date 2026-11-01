@@ -244,8 +244,7 @@ QEMU, with the CI's test filters. "Failed" counts are those of the run named; th
 SDK 2.0.0.179, 2026-10-20, the samples' image as it was then (VfsRamFs limited to one thread,
 `vmm.overcommit=exception`), ICU linked, the GC on segments (the port's GC until 2026-11-01). The FileSystem, Sockets,
 Net.Security and Cryptography rows add later runs, with the GC decommit fix and on GC regions. A suite marked *stalled*
-stopped printing before its end in some runs, and those runs have no result; the stalls traced were GC stops
-([Runtime](#runtime)).
+stopped printing before its end in some runs, and those runs have no result.
 
 | Suite | Result | Failures |
 | --- | --- | --- |

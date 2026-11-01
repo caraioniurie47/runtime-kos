@@ -12,14 +12,43 @@ This branch ports the NativeAOT runtime of dotnet/runtime `main` to KasperskyOS 
 Older SDKs are supported on frozen branches whose `HOWTO-KOS.md` covers them: SDK 1.4.0.102 on `kos-sdk-1.4.0.102`,
 SDK 1.1.1.40 (GCC) on `kos-sdk-1.1.1.40`.
 
-Commands run as `root` inside the WSL distro: `wsl --import` creates no other user. The environment
-variables set along the way are used by later steps, so run everything in one shell, or set them again
-in a new one.
+Commands run as `root` inside the WSL distro: `wsl --import` creates no other user. Steps 3 and 4 write their
+environment variables to `/etc/profile.d/kos-net.sh`; in a new shell, run `. /etc/profile.d/kos-net.sh` (and, from
+step 7 on, step 7's `PATH` line) before going on.
+
+## Quick start with the release assets
+
+A release's assets hold the runtime packages and the compiler, so the samples can run without building the runtime.
+After step 1, as `root`:
+
+```sh
+apt-get update && apt-get install -y git
+cd /home
+git clone --depth 1 --branch release_v04 https://github.com/caraioniurie47/runtime-kos.git
+/home/runtime-kos/eng/kos/setup-host.sh --accept-eula
+for f in ilc-tools-main-linux-x64.tar.gz kos-net-packages-main-sdk-2.0.tar.gz SHA256SUMS; do
+    wget -nc https://github.com/caraioniurie47/runtime-kos/releases/download/release_v04/$f
+done
+grep -e ilc-tools -e kos-net-packages SHA256SUMS | sha256sum -c
+tar -C / -xzf ilc-tools-main-linux-x64.tar.gz
+tar -C / -xzf kos-net-packages-main-sdk-2.0.tar.gz
+/home/runtime-kos/eng/kos/run-sample.sh showcase-kos --icu
+```
+
+`--accept-eula` says you have read and accepted the KasperskyOS CE SDK's licence agreement, which `setup-host.sh`
+downloads the SDK under; without it the script prints the agreement's URL and stops. `setup-host.sh` runs steps 2-4
+below; `run-sample.sh` publishes a sample, builds its image and boots it (steps 8-11; `webserver-kos` and
+`helloworldapp-kos` likewise; a wrong argument prints its options). Drop `--icu` for the smaller build without ICU. QEMU keeps running after the program ends; stop it with Ctrl+C.
+
+To build everything from source instead, follow the steps below from the start; `setup-host.sh --accept-eula
+--source` runs steps 2-5 except the clone.
 
 ## 1. Create the WSL distro (Windows)
 
 SDK 2.0 requires Ubuntu 24.04. Any directory works in place of `T:\KasperskyOS`. The builds were run with
-`memory=16GB` and `processors=12` in `%UserProfile%\.wslconfig`.
+`memory=16GB` and `processors=12` in `%UserProfile%\.wslconfig`. On a host that already runs Ubuntu 24.04 x64,
+skip this step; the later steps assume nothing of WSL, but they were run only under WSL. A container works too: see
+"In a container" below.
 
 ```powershell
 mkdir T:\KasperskyOS
@@ -29,6 +58,8 @@ wsl -d UbuntuKOS20 -u root
 ```
 
 ## 2. Install prerequisites
+
+The quick start's `eng/kos/setup-host.sh` runs steps 2-4 as written here, skipping what is already installed.
 
 ```sh
 export DEBIAN_FRONTEND=noninteractive
@@ -73,6 +104,7 @@ finds on `PATH`, wherever that entry is.
 
 ```sh
 export KOS_SDK=/opt/KasperskyOS-Community-Edition-Qemu-arm64-2.0.0.179
+echo "export KOS_SDK=$KOS_SDK" > /etc/profile.d/kos-net.sh
 ```
 
 ## 4. Build environment
@@ -84,6 +116,7 @@ kept the setting and were not tried without it.
 ```sh
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export NuGetAudit=false
+printf 'export DOTNET_CLI_TELEMETRY_OPTOUT=1\nexport NuGetAudit=false\n' >> /etc/profile.d/kos-net.sh
 ```
 
 ## 5. Get the sources and ICU
@@ -190,6 +223,9 @@ cp -a /home/runtime-kos/artifacts/packages/Release/Shipping/. /home/kos-net-pack
 ```
 
 ## 8. Publish HelloWorld
+
+`eng/kos/run-sample.sh helloworldapp-kos` runs steps 8 and 9; `showcase-kos [--icu] [--tcp-port 5047]` runs step 10,
+`webserver-kos` step 11.
 
 The sample links with `aarch64-kos-clang++` from the SDK next to `SysRoot`. Besides the local feed and
 nuget.org, its `nuget.config` lists the `dotnet11` feed: the repo's SDK restores runtime and
@@ -338,6 +374,32 @@ webserver-kos: ready, open http://localhost:8080/ on the host
 open `http://localhost:8080/` in a browser on Windows: WSL forwards the port to Windows' `localhost`. From a
 second WSL terminal, `curl http://localhost:8080/api/status` prints the JSON. Each request is logged on the
 KasperskyOS console.
+
+## 12. Your own program
+
+Start from `samples/helloworldapp-kos`: copy its `.csproj` (renamed for your program), `nuget.config` and source into
+a directory of your own. The `.csproj` carries what a KasperskyOS program needs: the local runtime packages
+(`KosNetVersion`, the ILCompiler package references, the `_KosDownloadLocalNativeAotRuntimePack` target and the
+`IlcFramework*` paths), the compiler from `IlcToolsPath`, the SDK's clang as linker, and the VFS client
+`libvfs_remote.a` as a `LinkerArg`, without which files, stdout and sockets don't reach the image's VFS programs.
+Publish it with the properties of step 8 and image it with the HelloWorld image project (`HELLO_BINARY` names the
+published executable); `eng/kos/run-sample.sh <your directory>` does both, for a directory holding one `.csproj`.
+
+## In a container
+
+`eng/kos/Dockerfile` makes a container in place of the WSL distro, on any x64 host with Docker. It runs
+`setup-host.sh`, so building it states the same licence acceptance as `--accept-eula`. From the directory holding a
+clone of this repository:
+
+```sh
+docker build --build-arg ACCEPT_KASPERSKYOS_EULA=yes -t kos-net-host runtime-kos/eng/kos
+docker run -it -v kos-net-home:/home -p 8080:8080 kos-net-host
+```
+
+Inside it, follow the quick start from `git clone` on (the clone, packages and builds stay in the `kos-net-home`
+volume), or the steps from step 5. `-p 8080:8080` lets the host's browser reach `webserver-kos`; add `-p 5047:5047`
+for the showcase's host client. The image holds the SDK, which its licence agreement lets you use but not give to
+others: build the image yourself, and don't push it to a registry.
 
 ## Limitations
 

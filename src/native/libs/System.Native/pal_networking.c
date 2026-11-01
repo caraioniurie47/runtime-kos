@@ -55,8 +55,8 @@ static int64_t KosMonotonicMicroseconds(void)
     clock_gettime(CLOCK_MONOTONIC, &now);
     return (int64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000;
 }
-// A socket call that would block re-arms the event port's edge for its direction (see the port, below); callStart is
-// KosMonotonicMicroseconds() taken before the call.
+// A socket call that would block re-arms the event port's edge for its direction (see the port in pal_io.c);
+// callStart is KosMonotonicMicroseconds() taken before the call.
 static void KosRearmIfWouldBlock(int fd, short bits, int64_t callStart)
 {
     int savedErrno = errno;

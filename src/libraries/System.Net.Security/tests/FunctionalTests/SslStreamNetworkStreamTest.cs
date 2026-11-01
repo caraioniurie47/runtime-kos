@@ -192,8 +192,6 @@ namespace System.Net.Security.Tests
 
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.SupportsTls13))]
         [PlatformSpecific(TestPlatforms.Linux)]
-        // Fails with OpenSSL 1.1.1, which is what the KasperskyOS SDK ships.
-        [ActiveIssue("https://github.com/dotnet/runtime/issues/134640", typeof(PlatformDetection), nameof(PlatformDetection.IsKasperskyOS))]
         public async Task SslStream_NegotiateClientCertificateAsync_Tls13PhaNotOffered()
         {
             using CancellationTokenSource cts = new CancellationTokenSource();

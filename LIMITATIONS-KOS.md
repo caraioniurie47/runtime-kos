@@ -67,7 +67,7 @@ marker naming its cause:
   (finding 8).*
 - **Running out of memory ends the process in the samples' image.** The GC reserves with `MAP_NORESERVE` (above), and
   KasperskyOS takes such memory only when it is first written: making it read-write succeeds even when too little is
-  free, and .NET never throws `OutOfMemoryException`. What happens at the write is the kernel's overcommit mode. SDK
+  free, so no allocation fails for .NET to report as `OutOfMemoryException`. What happens at the write is the kernel's overcommit mode. SDK
   2.0's default makes the writing thread wait for free pages, so a program that exhausts memory on its own waits for
   good (a program writing 64 MiB arrays stopped after 1152 MiB with `[OCMT] ... is waiting for free pages`). The
   samples' image boots with `vmm.overcommit=exception` instead (`KOS_KERNEL_CMDLINE`, HOWTO step 9): the kernel ends
@@ -144,8 +144,9 @@ named pipes (Unix domain sockets) work; see [What was tested](#what-was-tested).
   VfsNet's environment, `kos-image/einit/product_init.yaml.in`, from the cache variable
   `VFSNET_MAX_THREADS_PER_CLIENT`), and an image of your own needs the same. *KasperskyOS.*
 - **Host names resolve through VfsNet**, from its own `/etc/hosts` or its DNS server (8.8.8.8 in the samples' image).
-  Without a hosts file not even `localhost` resolves, so the samples' image gives VfsNet one in the root file system,
-  as the SDK's `net_with_separate_vfs` example does (`kos-image/resources/romfs/etc/hosts`); an `/etc/hosts` the
+  Without a hosts file not even `localhost` resolves, so the samples' image copies one
+  (`kos-image/resources/romfs/etc/hosts`) to `/etc/hosts` in the root file system, where VfsNet reads it, as the SDK's
+  `net_with_separate_vfs` example does; an `/etc/hosts` the
   program writes is not VfsNet's and changes nothing.
   *SDK (finding 6k).*
 - **Socket events are polled.** KasperskyOS has neither epoll nor kqueue, so the port's socket event loop polls with
@@ -213,8 +214,9 @@ The dotnet/runtime library test suites below, built as NativeAOT for KasperskyOS
 QEMU, with the CI's test filters. "Failed" counts are those of the run named; the causes are above.
 
 **The results below are SDK 1.4.0.102's (September 2026).** On SDK 2.0.0.179 so far, System.IO.FileSystem.Tests
-(8596 run, 0 failed, 261 skipped, VfsRamFs without the thread limit) and System.Net.Sockets.Tests (with skips undone
-on purpose) failed only tests that a KasperskyOS marker skips.
+(8596 run, 0 failed, 261 skipped, VfsRamFs without the thread limit) failed nothing, and System.Net.Sockets.Tests,
+run with some skips undone on purpose and without 1.4's `-notrait IPv6=true`, failed only those undone skips and
+cases of the classes that filter leaves out (IPv6).
 
 | Suite | Date | Result | Failures |
 | --- | --- | --- | --- |
@@ -255,7 +257,7 @@ Each was found on SDK 1.4.0.102 and is unchanged on 2.0.0.179 unless its row say
 | 5 | `fallocate()` without `FALLOC_FL_*` flags | does not use it |
 | 6 | headers portable code probes are absent (`sys/statfs.h`, `mntent.h`, `cpu_set_t`, ...) | NetBSD equivalents |
 | 6a | `mkstemps()` fails with `EINVAL` | creates temporary files itself (`Path.GetTempFileName` works) |
-| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on `/dev/null` and pipes (2.0: `pread` and `pwrite` on `/dev/null` work) | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
+| 6c | `pread`, `pwrite`, `ftruncate`, `fsync` fail with `ENOSYS` on `/dev/null` and pipes (2.0: `pread` and `pwrite` on `/dev/null` work, `pread` on a pipe fails with `ESPIPE`) | maps to the errors .NET handles (`/dev/null` and pipe I/O work) |
 | 6h | `sendfile()` to a socket fails with `EINVAL` | read/write loop (`Socket.SendFile` works) |
 | 6j | an accepted socket inherits the listener's `O_NONBLOCK` | clears it |
 | 6t | the stack honours `SO_REUSEPORT`, the headers lack it | defines NetBSD's value |
@@ -266,7 +268,7 @@ Each was found on SDK 1.4.0.102 and is unchanged on 2.0.0.179 unless its row say
 | 8c | write+execute memory refused (`posix_uns_ifaces`), with `ENOMEM` rather than the documented `ENOTSUP` | delegate thunks are written read-write, then made read-execute (`Marshal.GetFunctionPointerForDelegate` works) |
 | 8d | a read-only image segment cannot be made writable | read-only GS cookie off, as on Apple platforms and OpenBSD |
 | 9 | `poll()` fails the whole call on a closed descriptor | retries per descriptor; polls 512 at a time |
-| 9a | (2.0) a `close()` while another thread's `poll()` holds the descriptor ends the process: the kernel's invalid-handle detection, on by default | a close waits for the socket event loop's poll that holds the descriptor (at most one 10 ms round) |
+| 9a | (2.0) a `close()` while another thread's `poll()` holds the descriptor ends the process: the kernel's invalid-handle detection, on by default | a close waits for the socket event loop's poll that holds the descriptor (at most one 10 ms round plus the poll call) |
 | 10, 10a | a read over 64 KiB once failed; `sendmsg()` over 64 KiB fails on TCP | reads at most 64 KiB at a time; retries such a `sendmsg()` with 64 KiB |
 | 10b | `setsockopt()` fails after the peer's reset | treats it as done, so the socket is closed |
 | 10c | `accept()` fails for an address buffer over 128 bytes | passes 128 |

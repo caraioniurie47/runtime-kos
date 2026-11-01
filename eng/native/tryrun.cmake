@@ -95,7 +95,7 @@ elseif(KOS)
     set_cache_value(MMAP_ANON_IGNORES_PROTECTION 0)
     set_cache_value(ONE_SHARED_MAPPING_PER_FILEREGION_PER_PROCESS 1)
     set_cache_value(REALPATH_SUPPORTS_NONEXISTENT_FILES 0)
-    # Read by the GC and System.Native (KOS CE SDK 1.4.0.102; the same in 2.0.0.179's sysroot).
+    # Read by the GC and System.Native (KOS CE SDK 1.4.0.102; the three sysroot answers checked again on 2.0.0.179).
     set_cache_value(HAVE_CLOCK_REALTIME 1) # CLOCK_REALTIME in time.h
     set_cache_value(HAVE_PROCFS_STATM 0) # no /proc
     set_cache_value(HAVE_SCHED_GETCPU 0) # neither declared nor in libc

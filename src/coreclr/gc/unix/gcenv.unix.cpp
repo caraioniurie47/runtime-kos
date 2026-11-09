@@ -421,7 +421,8 @@ static void* VirtualReserveInner(size_t size, size_t alignment, uint32_t flags, 
 #if defined(__KOS__)
     // TODO-KOS(8): mmap(PROT_NONE) commits physical memory; MAP_NORESERVE does not
     // KasperskyOS backs a plain anonymous mapping with physical memory at once, even with PROT_NONE (SDK 1.4.0.102:
-    // 512 MiB took 28 s under QEMU and 513 MiB of free memory); MAP_NORESERVE maps pages on first write.
+    // 512 MiB took 28 s and 53 s in two runs under QEMU, and 513 MiB of free memory); MAP_NORESERVE maps pages on
+    // first write.
     mmapFlags |= MAP_NORESERVE;
 #endif
     void * pRetVal = mmap(nullptr, alignedSize, PROT_NONE, mmapFlags, -1, 0);

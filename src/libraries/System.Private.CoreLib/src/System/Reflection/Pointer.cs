@@ -53,12 +53,15 @@ namespace System.Reflection
 
         public override int GetHashCode() => ((nuint)_ptr).GetHashCode();
 
+        /// <summary>Gets the type of the pointer stored in this instance.</summary>
+        /// <returns>A pointer type, for example <c>int*</c>.</returns>
+        public Type GetPointerType() => _ptrType;
+
         void ISerializable.GetObjectData(SerializationInfo info, StreamingContext context)
         {
             throw new PlatformNotSupportedException();
         }
 
-        internal RuntimeType GetPointerType() => _ptrType;
         internal IntPtr GetPointerValue() => (IntPtr)_ptr;
     }
 }

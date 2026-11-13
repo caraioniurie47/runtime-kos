@@ -33,6 +33,13 @@ namespace System.Reflection.Tests
         public static void MethodWithVoidPointer(void* vp) { }
     }
 
+    public unsafe class PointerTypeHolder
+    {
+        public static long* StaticField;
+        public int* Field;
+        public ref int* RefReturningProperty => ref Field;
+    }
+
     unsafe delegate void MethodDelegate(byte* ptr, int expected);
     unsafe delegate void MethodDelegateWithSystemPointer(Pointer ptr, int expected);
 
@@ -95,6 +102,68 @@ namespace System.Reflection.Tests
                 new object[] { int.MaxValue },
                 new object[] { int.MinValue },
             };
+
+        public static IEnumerable<object[]> PointerTypes =>
+            new[]
+            {
+                new object[] { typeof(void*) },
+                new object[] { typeof(int*) },
+                new object[] { typeof(long*) },
+                new object[] { typeof(int**) },
+                new object[] { typeof(Guid*) },
+            };
+
+        [Theory]
+        [MemberData(nameof(PointerTypes))]
+        public void GetPointerType_ReturnsBoxedType(Type type)
+        {
+            Pointer pointer = (Pointer)Pointer.Box((void*)1, type);
+            Assert.Equal(type, pointer.GetPointerType());
+        }
+
+        [Fact]
+        public void GetPointerType_FieldGetValue()
+        {
+            var obj = new PointerHolder();
+            FieldInfo field = typeof(PointerHolder).GetField(nameof(PointerHolder.field));
+            Pointer pointer = Assert.IsType<Pointer>(field.GetValue(obj));
+            Assert.Equal(typeof(int*), pointer.GetPointerType());
+        }
+
+        [Fact]
+        public void GetPointerType_StaticFieldGetValue()
+        {
+            FieldInfo field = typeof(PointerTypeHolder).GetField(nameof(PointerTypeHolder.StaticField));
+            Pointer pointer = Assert.IsType<Pointer>(field.GetValue(null));
+            Assert.Equal(typeof(long*), pointer.GetPointerType());
+        }
+
+        [Fact]
+        public void GetPointerType_FieldGetValueDirect()
+        {
+            var obj = new PointerTypeHolder();
+            FieldInfo field = typeof(PointerTypeHolder).GetField(nameof(PointerTypeHolder.Field));
+            Pointer pointer = Assert.IsType<Pointer>(field.GetValueDirect(__makeref(obj)));
+            Assert.Equal(typeof(int*), pointer.GetPointerType());
+        }
+
+        [Fact]
+        public void GetPointerType_MethodReturn()
+        {
+            var obj = new PointerHolder();
+            MethodInfo method = typeof(PointerHolder).GetMethod(nameof(PointerHolder.Return));
+            Pointer pointer = Assert.IsType<Pointer>(method.Invoke(obj, new object[] { 1 }));
+            Assert.Equal(typeof(bool*), pointer.GetPointerType());
+        }
+
+        [Fact]
+        public void GetPointerType_RefReturn()
+        {
+            var obj = new PointerTypeHolder();
+            PropertyInfo property = typeof(PointerTypeHolder).GetProperty(nameof(PointerTypeHolder.RefReturningProperty));
+            Pointer pointer = Assert.IsType<Pointer>(property.GetValue(obj));
+            Assert.Equal(typeof(int*), pointer.GetPointerType());
+        }
 
         [Theory]
         [MemberData(nameof(Pointers))]
@@ -191,7 +260,8 @@ namespace System.Reflection.Tests
             obj.Property = unchecked((char*)value);
             PropertyInfo property = typeof(PointerHolder).GetProperty("Property");
             object actualValue = property.GetValue(obj);
-            Assert.IsType<Pointer>(actualValue);
+            Pointer pointer = Assert.IsType<Pointer>(actualValue);
+            Assert.Equal(typeof(char*), pointer.GetPointerType());
             void* actualPointer = Pointer.Unbox(actualValue);
             Assert.Equal(value, unchecked((int)actualPointer));
         }
@@ -360,7 +430,8 @@ namespace System.Reflection.Tests
             var obj = new PointerHolder();
             ReturnDelegate d = obj.Return;
             object actualValue = d.DynamicInvoke(value);
-            Assert.IsType<Pointer>(actualValue);
+            Pointer pointer = Assert.IsType<Pointer>(actualValue);
+            Assert.Equal(typeof(bool*), pointer.GetPointerType());
             void* actualPointer = Pointer.Unbox(actualValue);
             Assert.Equal(value, unchecked((int)actualPointer));
         }
@@ -372,7 +443,8 @@ namespace System.Reflection.Tests
             var obj = new PointerHolder();
             ReturnDelegateWithSystemPointer d = obj.ReturnWithSystemPointer;
             object actualValue = d.DynamicInvoke(value);
-            Assert.IsType<Pointer>(actualValue);
+            Pointer pointer = Assert.IsType<Pointer>(actualValue);
+            Assert.Equal(typeof(byte*), pointer.GetPointerType());
             void* actualPointer = Pointer.Unbox(actualValue);
             Assert.Equal(value, unchecked((int)actualPointer));
         }

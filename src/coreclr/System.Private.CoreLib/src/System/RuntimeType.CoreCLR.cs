@@ -3746,7 +3746,7 @@ namespace System
         private CheckValueStatus TryChangeTypeSpecial(ref object value)
         {
             Pointer? pointer = value as Pointer;
-            RuntimeType srcType = pointer != null ? pointer.GetPointerType() : (RuntimeType)value.GetType();
+            RuntimeType srcType = pointer != null ? (RuntimeType)pointer.GetPointerType() : (RuntimeType)value.GetType();
             if (!CanValueSpecialCast(srcType, this))
             {
                 return CheckValueStatus.ArgumentException;
